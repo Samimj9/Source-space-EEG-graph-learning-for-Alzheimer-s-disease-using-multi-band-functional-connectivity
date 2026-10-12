@@ -6,6 +6,8 @@ pandas>=2.0
 pyyaml>=6.0
 openpyxl>=3.1
 scikit-learn>=1.4
+matplotlib>=3.8
+# umap-learn      # optional: UMAP projections in dataset-shift figures
 torch>=2.2        # preinstalled in Colab; not reinstalled there
 pytest>=8.0
 edfio>=0.4    # only used by tests (writing synthetic EDF)

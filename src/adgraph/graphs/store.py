@@ -12,7 +12,8 @@ A run directory contains
                                            influence; never used as an adjacency)
                      psd_abs/psd_log/psd_rel            (n_windows, n_bands, n_rois) float32
                      sensor_psd_abs/_log/_rel           (n_windows, n_bands, n_channels) float32
-                   and constants: bands, band_edges, roi_names, channels, W
+                   and constants: bands, band_edges, roi_names, channels, W,
+                   roi_coords (n_rois, 3) MNI mm label centroids (optional; visualization only)
     windows.csv    one row per window: identifiers + QC (see WINDOW_COLUMNS)
     subjects.csv   one row per subject: metadata + QC
     manifest.json  provenance (config, hash, commit, versions, operator check)
@@ -64,6 +65,7 @@ class GraphStore:
     subjects: pd.DataFrame = field(default_factory=pd.DataFrame)
     manifest: dict = field(default_factory=dict)
     root: Path | None = None
+    roi_coords: np.ndarray | None = None
 
     def __post_init__(self):
         self.validate()
@@ -92,6 +94,8 @@ class GraphStore:
             a = self.arrays["ciplv_signed"]
             if not np.allclose(a, -np.swapaxes(a, -1, -2), atol=1e-5) or np.abs(a).max() > 1 + 1e-5:
                 raise ValueError("ciplv_signed must be antisymmetric with values in [-1, 1]")
+        if self.roi_coords is not None and np.asarray(self.roi_coords).shape != (r, 3):
+            raise ValueError(f"roi_coords shape {np.asarray(self.roi_coords).shape} != ({r}, 3)")
         if self.band_edges.shape != (k, 2):
             raise ValueError(f"band_edges shape {self.band_edges.shape} != ({k}, 2)")
 
@@ -105,7 +109,7 @@ class GraphStore:
         idx = np.asarray(idx)
         return GraphStore({k: v[idx] for k, v in self.arrays.items()}, self.windows.iloc[idx].reset_index(drop=True),
                           self.bands, self.band_edges, self.roi_names, self.channels, self.subjects, self.manifest,
-                          self.root)
+                          self.root, self.roi_coords)
 
     def roi_timeseries(self, i: int) -> np.ndarray:
         """ROI time series of window ``i`` (requires a run saved with ``save_roi_timeseries``)."""
@@ -121,6 +125,7 @@ class GraphStore:
         out_dir.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(out_dir / "graphs.npz", **self.arrays, bands=np.array(self.bands),
                             band_edges=self.band_edges, roi_names=np.array(self.roi_names),
+                            **({"roi_coords": np.asarray(self.roi_coords)} if self.roi_coords is not None else {}),
                             channels=np.array(self.channels))
         self.windows.to_csv(out_dir / "windows.csv", index=False)
         self.subjects.to_csv(out_dir / "subjects.csv", index=False)
@@ -144,4 +149,5 @@ class GraphStore:
             subjects=pd.read_csv(subjects_path) if subjects_path.exists() else pd.DataFrame(),
             manifest=json.loads(manifest_path.read_text()) if manifest_path.exists() else {},
             root=run_dir,
+            roi_coords=npz["roi_coords"] if "roi_coords" in npz.files else None,
         )

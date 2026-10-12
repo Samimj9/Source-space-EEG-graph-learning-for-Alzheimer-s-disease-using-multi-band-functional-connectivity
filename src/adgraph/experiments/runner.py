@@ -13,7 +13,9 @@ Outputs per (variant, setting) directory:
     predictions_subjects.csv  repeat, key, dataset, y, score, n_windows
     metrics_repeats.csv       subject-level metrics per repeat (+ per dataset in pooled runs)
     folds.csv                 subject -> (repeat, fold, side)
-    hparams.csv               selected hyperparameters per split + inner-CV scores
+    hparams.csv               selected hyperparameters per split + inner-CV scores, n_parameters, fit_seconds
+    embeddings.npz            optional (evaluation.save_embeddings): fused graph embeddings of the train and
+                              test windows of every split, each from that split's single fitted model
     summary.json              mean/SD/percentiles, bootstrap CI, window-level metrics, permutation test
     manifest.json             resolved variant config, graph run provenance, git commit, versions
 """
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -99,7 +102,8 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
 
 
 def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None = None,
-                   collect_band_weights: bool = True) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+                   collect_band_weights: bool = True,
+                   embeddings_out: list | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Outer loop for one setting. Returns window predictions, fold table, hparam table."""
     ev = v["evaluation"]
     sub = setting_subset(data.meta, setting)
@@ -113,7 +117,9 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
         tr_g, te_g = sub[tr], sub[te]
         seed = int(ev["seed"] + 1000 * sp.repeat + sp.fold)
         params, scores = select_hparams(data, tr_g, v, setting, seed)
+        t0 = time.perf_counter()
         model = make_model(apply_hparams(v, params), seed).fit(data.view(tr_g, "train"))
+        fit_seconds = time.perf_counter() - t0
         test = data.view(te_g, "test")      # created only after fitting
         out = test.meta[["window_id", "key", "dataset", "subject_id"]].copy()
         out["y"] = test.y
@@ -128,7 +134,15 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
         preds.append(out)
         folds += [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "train"} for k in sp.train_keys]
         folds += [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "test"} for k in sp.test_keys]
-        hps.append({"repeat": sp.repeat, "fold": sp.fold, "selected": json.dumps(params), "scores": json.dumps(scores)})
+        hps.append({"repeat": sp.repeat, "fold": sp.fold, "selected": json.dumps(params), "scores": json.dumps(scores),
+                    "n_parameters": model.n_parameters(), "fit_seconds": fit_seconds})
+        if embeddings_out is not None and hasattr(model, "embed"):
+            for side, idx in (("train", tr_g), ("test", te_g)):
+                view = data.view(idx, "test")          # read-only use of an already fitted model
+                embeddings_out.append({"emb": model.embed(view), "window_id": view.meta["window_id"].to_numpy(),
+                                       "key": view.meta["key"].to_numpy(), "side": side,
+                                       "y": view.y, "dataset": view.meta["dataset"].to_numpy(),
+                                       "repeat": sp.repeat, "fold": sp.fold})
     return pd.concat(preds, ignore_index=True), pd.DataFrame(folds), pd.DataFrame(hps)
 
 
@@ -187,7 +201,18 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
     out = Path(out_dir) / v["experiment"] / v["variant"] / setting
     out.mkdir(parents=True, exist_ok=False)
 
-    pred, folds, hps = cross_validate(data, v, setting)
+    emb = [] if (ev.get("save_embeddings", False) and v["input"] == "graph") else None
+    pred, folds, hps = cross_validate(data, v, setting, embeddings_out=emb)
+    if emb:
+        n = [len(e["window_id"]) for e in emb]
+        np.savez_compressed(out / "embeddings.npz", emb=np.concatenate([e["emb"] for e in emb]).astype(np.float32),
+                            window_id=np.concatenate([e["window_id"] for e in emb]),
+                            key=np.concatenate([e["key"] for e in emb]),
+                            y=np.concatenate([e["y"] for e in emb]),
+                            dataset=np.concatenate([e["dataset"] for e in emb]),
+                            side=np.repeat([e["side"] for e in emb], n),
+                            repeat=np.repeat([e["repeat"] for e in emb], n),
+                            fold=np.repeat([e["fold"] for e in emb], n))
     thr = score_threshold(v)
     subj, per_repeat, summary = evaluate(pred, thr, ev["n_bootstrap"], ev["seed"])
     summary["score"] = {"type": model_score_type(v), "threshold": thr,

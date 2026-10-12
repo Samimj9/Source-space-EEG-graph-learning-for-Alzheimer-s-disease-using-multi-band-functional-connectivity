@@ -160,6 +160,18 @@ class ClassicalModel:
             self.clf.fit(Z, y, sample_weight=w)
         return self
 
+    def n_parameters(self) -> int:
+        """Fitted parameter count of the classifier (feature transforms excluded).
+
+        LR / linear SVM: coefficients + intercept; non-linear SVM: support-vector entries +
+        dual coefficients + intercept; grouped Platt adds its 2 sigmoid parameters."""
+        clf = self.clf.svc_ if isinstance(self.clf, GroupedPlattSVC) else self.clf
+        if isinstance(clf, SVC) and clf.kernel != "linear":
+            n = clf.support_vectors_.size + clf.dual_coef_.size + clf.intercept_.size
+        else:
+            n = clf.coef_.size + np.size(clf.intercept_)
+        return int(n + (2 if isinstance(self.clf, GroupedPlattSVC) else 0))
+
     def predict_score(self, view: DataView) -> np.ndarray:
         if self.clf is None:
             raise RuntimeError("model not fitted")

@@ -15,10 +15,12 @@ dependencies = [
     "openpyxl",
     "mne>=1.6",
     "scikit-learn>=1.4",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
 gnn = ["torch>=2.2"]   # preinstalled in Colab
+umap = ["umap-learn"]
 test = ["pytest", "edfio"]
 
 [tool.setuptools.packages.find]

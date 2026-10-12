@@ -49,6 +49,13 @@ synthetic data.
 15. [SVM scores and optional grouped Platt calibration](#15-svm-scores-and-optional-grouped-platt-calibration)
 16. [Age sensitivity analysis](#16-age-sensitivity-analysis)
 17. [Dense PyTorch rather than PyTorch Geometric](#17-dense-pytorch-rather-than-pytorch-geometric)
+18. [Figures from saved outputs only](#18-figures-from-saved-outputs-only)
+19. [Subject-level rather than window-level plotting](#19-subject-level-rather-than-window-level-plotting)
+20. [PLV and |ciPLV| as separate visual conditions](#20-plv-and-ciplv-as-separate-visual-conditions)
+21. [Uncertainty display: repeats and subject bootstrap](#21-uncertainty-display-repeats-and-subject-bootstrap)
+22. [Significance only from saved, corrected statistics](#22-significance-only-from-saved-corrected-statistics)
+23. [Display-only thresholds, exploratory projections, fusion weights](#23-display-only-thresholds-exploratory-projections-fusion-weights)
+24. [Publication style and provenance](#24-publication-style-and-provenance)
 
 ---
 
@@ -898,6 +905,316 @@ synthetic data.
 
 ---
 
+## 18. Figures from saved outputs only
+
+**Previous design**
+- None. This is the first plotting code.
+
+**Problem discovered**
+- Figures must be reproducible and must not contain hand-entered or invented numbers.
+
+**Scientific / mathematical reason**
+- A figure is a view of saved data, so it must be regenerable from committed config +
+  commit hash + the saved files (CLAUDE.md rule 7).
+- Plot functions therefore take only:
+  - an index of saved experiment outputs;
+  - a saved graph run;
+  - an optional saved statistics file.
+- They never train, never recompute features from EEG, and contain no numeric results.
+
+**Final implementation**
+- `src/adgraph/visualization/`:
+  - `results.py`: indexes `manifest.json` + `metrics_repeats.csv` directories.
+  - `figures.py`: registry and driver; `configs/figures/paper.yaml` holds the inventory.
+  - `writer.py`: saves each figure with its exact plotted data.
+- The runner now also saves the inputs some figures need:
+  - `n_parameters` and `fit_seconds` (`hparams.csv`);
+  - optional `embeddings.npz`;
+  - `roi_coords` in graph runs (fsaverage label centroids).
+- Duplicated results across runs are an error unless `duplicates: latest` is chosen
+  explicitly.
+
+**Alternatives considered**
+- Plotting inside the runner. Rejected: it would couple figures to training.
+
+**Effect on interpretation**
+- Every plotted value can be traced to a source file, recorded with sha256 in the manifest.
+
+**Code / config**
+- `src/adgraph/visualization/*`, `configs/figures/*.yaml`, `scripts/make_figures.py`
+- `src/adgraph/experiments/runner.py`, `src/adgraph/source/inverse.py::roi_centroids`
+
+**Validating tests**
+- `test_visualization.py::test_performance_values_come_from_saved_metrics`,
+  `test_generalization_ci_is_centred_on_saved_estimate`, `test_roc_matches_saved_subject_auc`,
+  `test_confusion_matches_saved_summary`, `test_index_and_duplicates`, `test_make_figures_full_inventory`
+
+**Approval status**
+- Author-specified (2026-10-12).
+- Figure selections marked TODO in `paper.yaml` (the Exp 2/3 band in cross-experiment
+  figures; the primary models) are **pending author decision**.
+
+---
+
+## 19. Subject-level rather than window-level plotting
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Each subject contributes many windows. With 20 s / 50 % overlap, consecutive windows
+  share half their samples.
+- Plotting windows as points, or computing error bars over windows, would treat strongly
+  dependent samples as independent observations. That inflates apparent precision roughly
+  by √(windows per subject) and weights subjects by their recording length.
+
+**Scientific / mathematical reason**
+- The subject is the unit of inference (entry 14).
+- Every figure aggregates to subjects first:
+  - classification figures use subject scores (mean of window scores);
+  - PSD and connectivity figures average windows within subject before group means and SDs;
+  - fusion weights are averaged per subject;
+  - embeddings are averaged per subject.
+
+**Final implementation**
+- `results.subject_scores`, `anatomy.subject_level`, `fusion.subject_band_weights`.
+- No figure function uses window rows as plotted observations.
+
+**Alternatives considered**
+- Window-level plots with subject colouring. Rejected: they still suggest window-level n.
+
+**Effect on interpretation**
+- n in every figure is the number of subjects (stated in titles, legends and metadata).
+
+**Code / config**
+- `src/adgraph/visualization/subjects.py`, `anatomy.py`, `spectral.py`, `connectivity.py`,
+  `fusion.py`, `embedding.py`
+
+**Validating tests**
+- `test_psd_heatmap_subject_level_and_stats_guard` (mean of subject means, not of windows)
+- `test_subject_scores_one_point_per_subject_anonymized`, `test_roc_matches_saved_subject_auc`
+  (n = subjects), `test_embeddings`
+
+**Approval status**
+- Author-specified (2026-10-12).
+
+---
+
+## 20. PLV and |ciPLV| as separate visual conditions
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Combining PLV and |ciPLV| results (averaging, or picking the better per model) would mix
+  the primary analysis with its sensitivity analysis, and would hide the leakage check that
+  |ciPLV| provides.
+
+**Scientific / mathematical reason**
+- PLV includes zero-lag coupling; |ciPLV| suppresses it (entry 10).
+- Showing both side by side, with the same model, splits and seeds, lets the reader see
+  whether a result depends on zero-lag coupling.
+- Paired comparisons are only valid when folds are identical. The paired figure verifies
+  `folds.csv` equality and refuses unmatched pairs.
+
+**Final implementation**
+- `CONDITION_STYLE`: PLV = blue filled circle, |ciPLV| = vermillion open square.
+- Distinct in hue, shape and fill, so they stay distinguishable in grayscale.
+- Signed ciPLV is never plotted as connectivity.
+
+**Alternatives considered**
+- Separate figures per condition (still possible via `conditions`).
+
+**Effect on interpretation**
+- Any claim must state which condition it rests on.
+
+**Code / config**
+- `visualization/style.py`, `performance.py::matched_condition_pairs`
+
+**Validating tests**
+- `test_paired_conditions_require_identical_folds`, `test_performance_values_come_from_saved_metrics`
+  (conditions kept apart), `test_connectivity_matrices_and_network` (signed ciPLV refused)
+
+**Approval status**
+- Author-specified (2026-10-12).
+
+---
+
+## 21. Uncertainty display: repeats and subject bootstrap
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Per-fold metrics come from 4–5 test subjects: AUC is unstable or undefined there.
+- Cross-dataset settings have a single split.
+
+**Scientific / mathematical reason**
+- One CV repeat yields one prediction per subject, so its metric is a subject-level estimate.
+- The spread across repeats shows split variability. It is not a confidence interval,
+  because repeats reuse the same subjects.
+- For a CI, subjects are resampled (bootstrap of the repeat-averaged subject scores, as in
+  `summary.json`).
+- The marker is then the metric of those repeat-averaged scores, the quantity the CI
+  describes, not the mean of per-repeat metrics.
+
+**Final implementation**
+- `uncertainty: repeats` (points + mean ± SD) or `bootstrap` (point estimate + 95 % CI from
+  `summary.json`).
+- The generalization figure always uses the bootstrap CI.
+
+**Alternatives considered**
+- Per-fold boxplots (rejected).
+- Pooled window bootstrap (rejected: wrong unit).
+
+**Effect on interpretation**
+- SD across repeats ≠ uncertainty about population performance.
+- Figure metadata states which one is shown.
+
+**Code / config**
+- `visualization/performance.py::strip_panel`, `collect_metrics`
+
+**Validating tests**
+- `test_generalization_ci_is_centred_on_saved_estimate`,
+  `test_performance_values_come_from_saved_metrics`
+
+**Approval status**
+- Proposed; pending author approval.
+
+---
+
+## 22. Significance only from saved, corrected statistics
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Significance marks computed ad hoc in plotting code would:
+  - be untracked tests;
+  - typically be uncorrected for multiplicity;
+  - often use the wrong unit (windows).
+
+**Scientific / mathematical reason**
+- Inference belongs to a separate, documented analysis.
+- The plotting code only displays results from a statistics CSV whose rows are validated:
+  - unit = subject;
+  - named test;
+  - n_subjects > 0;
+  - corrected p in [0, 1] and not below the raw p;
+  - non-empty correction method and family.
+- Without such a file, figures are labelled `descriptive` and show no stars.
+- For fusion weights, the AD vs HC split itself is refused without the statistics.
+
+**Final implementation**
+- `visualization/stats.py` (`load_stats`, `lookup`, `stars`). Comparison ids per figure
+  family are documented in docs/figures.md.
+
+**Alternatives considered**
+- Computing tests in figures. Rejected.
+
+**Effect on interpretation**
+- Readers can tell descriptive from inferential figures (`kind` in `_meta.json`).
+
+**Code / config**
+- `visualization/stats.py`, `performance.annotate_from_stats`, `spectral.fig_psd_heatmap`,
+  `fusion.fig_fusion_weights`
+
+**Validating tests**
+- `test_stats_validation`, `test_performance_significance_only_from_stats`,
+  `test_fusion_weights_and_group_split_guard`, `test_psd_heatmap_subject_level_and_stats_guard`
+
+**Approval status**
+- Author-specified (2026-10-12).
+
+---
+
+## 23. Display-only thresholds, exploratory projections, fusion weights
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Three plots invite over-interpretation:
+  - Network plots need an edge selection to be readable. Selecting by magnitude on the
+    full labelled data would look like a finding.
+  - PCA/UMAP clusters look like evidence.
+  - Attention weights look like importance.
+
+**Scientific / mathematical reason**
+- **Network edges.** Selected only for display (top-N by magnitude). The selection is
+  labelled in the figure title, the data file (`display_rank`) and the metadata
+  (`display_only_threshold.statistical = false`).
+- **Projections.** Unsupervised (labels unused) and titled "exploratory, not statistical
+  evidence".
+- **Graph embeddings.** Taken from one fitted model. Embedding spaces of different folds
+  are not aligned, so pooling them would be meaningless.
+- **Fusion weights.** Describe how a fitted model combines bands, not biological importance.
+
+**Final implementation**
+- `connectivity.fig_connectivity_network`, `embedding.py`, `fusion.py`.
+
+**Alternatives considered**
+- Statistical edge thresholds (need a saved statistics file; not implemented).
+- Aligned embeddings across folds (not meaningful).
+
+**Effect on interpretation**
+- All three are descriptive only.
+
+**Code / config**
+- `visualization/connectivity.py`, `embedding.py`, `fusion.py`
+
+**Validating tests**
+- `test_connectivity_matrices_and_network`, `test_embeddings`,
+  `test_fusion_weights_and_group_split_guard`
+
+**Approval status**
+- Author-specified (2026-10-12).
+
+---
+
+## 24. Publication style and provenance
+
+**Previous design**
+- None.
+
+**Problem discovered**
+- Figures must meet journal requirements and be reproducible.
+
+**Scientific / mathematical reason**
+- **Style:**
+  - Central style (`configs/figures/style.yaml`): column widths, font sizes, line widths,
+    marker sizes.
+  - Okabe–Ito palette, safe for common colour-vision deficiencies. Categories also differ
+    by marker and fill, for grayscale.
+  - `cividis` sequential map (monotonic lightness); `RdBu_r` diverging map with symmetric
+    limits. Diverging sign is lost in grayscale, so values are in the data files.
+- **Output:** PDF/SVG with editable text, plus PNG at 600 dpi.
+- **Provenance:** every figure saves its plotted data and metadata. The manifest has the
+  config, sources (sha256), timestamp and git commit. Files are never overwritten.
+- **Synthetic outputs** are watermarked.
+
+**Final implementation**
+- `visualization/style.py`, `writer.py`, `configs/figures/style.yaml`.
+
+**Alternatives considered**
+- Interactive figures. Not used for publication.
+
+**Effect on interpretation**
+- None on the science; ensures reproducibility.
+
+**Code / config**
+- as above
+
+**Validating tests**
+- `test_writer_never_overwrites_and_records_provenance`, `test_style_sizes`,
+  `test_make_figures_full_inventory`
+
+**Approval status**
+- Author-specified (2026-10-12). Exact journal widths and fonts require author
+  confirmation for the target journal.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -914,3 +1231,8 @@ synthetic data.
    verified to be inside the passband.
 5. The D1 `sub18` age value (7) before the age analyses are run.
 6. Final repeat, fold, epoch and grid sizes (currently provisional).
+7. Figure selections in `configs/figures/paper.yaml` marked TODO:
+   - the band representing Exp 2/3 in cross-experiment figures;
+   - the primary models for ROC, confusion and generalization figures;
+   - main vs supplementary assignment;
+   - the target journal's width and font requirements.

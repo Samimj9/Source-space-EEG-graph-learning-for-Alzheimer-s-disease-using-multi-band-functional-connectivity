@@ -62,10 +62,25 @@ def build_roi_operator(info, cfg: dict, subjects_dir: str | Path) -> dict:
     return {
         "W": np.asarray(W),
         "roi_names": [lab.name for lab in labels],
+        "roi_coords": roi_centroids(labels, subjects_dir),
         "ch_names": list(info["ch_names"]),
         "n_sources": int(sum(s["nuse"] for s in inv["src"])),
         "fwd_ch_names": list(fwd["info"]["ch_names"]),
     }
+
+
+def roi_centroids(labels: list, subjects_dir: str | Path) -> np.ndarray:
+    """MNI coordinates (mm) of each label's surface centre of mass on fsaverage, shape (n_rois, 3).
+
+    Used only for visualization (cortical network plots)."""
+    import mne
+
+    coords = []
+    for lab in labels:
+        vertex = lab.center_of_mass(subject="fsaverage", subjects_dir=subjects_dir)
+        hemi = 0 if lab.hemi == "lh" else 1
+        coords.append(mne.vertex_to_mni(vertex, hemi, "fsaverage", subjects_dir=subjects_dir))
+    return np.asarray(coords, dtype=float).reshape(len(labels), 3)
 
 
 def save_operator(op: dict, path: str | Path) -> None:

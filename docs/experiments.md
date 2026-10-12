@@ -237,7 +237,8 @@ for every graph.
 | `predictions_subjects.csv` | subject score (mean of window scores) per repeat |
 | `metrics_repeats.csv` | subject-level accuracy, balanced accuracy, F1, sensitivity, specificity, ROC-AUC, MCC, confusion matrix, per repeat; pooled runs add per-dataset rows |
 | `summary.json` | mean/SD/percentiles across repeats, repeat-averaged metrics with a subject bootstrap 95 % CI, window-level metrics, optional permutation test |
-| `folds.csv`, `hparams.csv`, `manifest.json` | split assignment, selected hyperparameters with inner scores, provenance |
+| `folds.csv`, `hparams.csv`, `manifest.json` | split assignment, selected hyperparameters with inner scores, `n_parameters` and `fit_seconds` per split, provenance |
+| `embeddings.npz` | optional (`evaluation.save_embeddings: true`, GNNs): fused graph embeddings of train and test windows of every split, from that split's single fitted model, with key, label, dataset |
 
 These files contain per-subject predictions, so they belong in Drive and are never
 committed.

@@ -220,5 +220,19 @@ class GNNModel:
         p = np.concatenate(probs) if probs else np.empty(0)
         return (p, np.concatenate(weights)) if return_band_weights else p
 
+    def n_parameters(self) -> int:
+        return int(sum(p.numel() for p in self.net.parameters()))
+
+    def embed(self, view: DataView) -> np.ndarray:
+        """Fused graph embeddings (N, D) of a view, from this fitted model."""
+        import torch
+
+        x, adj, _ = self._tensors(view)
+        dev = self._device()
+        self.net.eval()
+        with torch.no_grad():
+            return np.concatenate([self.net.fused_embedding(x[i:i + 256].to(dev), adj[i:i + 256].to(dev)).cpu().numpy()
+                                   for i in range(0, len(x), 256)]) if len(x) else np.empty((0, 0))
+
     def predict_score(self, view: DataView, return_band_weights: bool = False):
         return self.predict_proba(view, return_band_weights)

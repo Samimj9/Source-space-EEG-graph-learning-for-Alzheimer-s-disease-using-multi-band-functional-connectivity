@@ -1,0 +1,140 @@
+# Planned figure inventory (docs/figures.md). Figures read only saved outputs.
+# Entries select ONE variant per (setting, condition) via `where` (dotted config keys);
+# PLV and |ciPLV| of a selected model are found automatically and drawn as separate conditions.
+#
+# AUTHOR DECISIONS REQUIRED before final figures (marked TODO): which band represents Exp 2/3 in the
+# cross-experiment comparison, and which models are "primary". These must be fixed in advance; choosing
+# them after looking at test results would bias the comparison.
+duplicates: error
+
+entries_main: &entries_main
+  - {label: "Exp0 sensor PSD · LR", experiment: exp0_sensor_psd, where: {model.name: logreg}}
+  - {label: "Exp0 sensor PSD · SVM", experiment: exp0_sensor_psd, where: {model.name: svm}}
+  - {label: "Exp1 source PSD · LR", experiment: exp1_source_psd, where: {model.name: logreg}}
+  - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
+  - {label: "Exp2 conn. · GCN · α1", experiment: exp2_conn_minimal,                    # TODO author: band
+     where: {model.encoder: gcn, graph.bands: [alpha1]}}
+  - {label: "Exp3 conn.+PSD · GCN · α1", experiment: exp3_conn_psd,                    # TODO author: band
+     where: {model.encoder: gcn, graph.bands: [alpha1]}}
+  - {label: "Exp4 band-mean · GCN", experiment: exp4_band_mean}
+  - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
+     where: {model.shared_encoder: true, model.fusion: attention}}
+  - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+     where: {node_features.components: [psd, strength], model.fusion: attention,
+             graph.bands: [theta, alpha1, alpha2, beta]}}
+
+entries_primary: &entries_primary                                                    # TODO author: confirm
+  - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+     where: {node_features.components: [psd, strength], model.fusion: attention,
+             graph.bands: [theta, alpha1, alpha2, beta]}}
+  - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
+     where: {model.shared_encoder: true, model.fusion: attention}}
+  - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
+  - {label: "Exp0 sensor PSD · SVM", experiment: exp0_sensor_psd, where: {model.name: svm}}
+
+metrics_all: &metrics_all [balanced_accuracy, roc_auc, f1, sensitivity, specificity]
+
+figures:
+  # ---------------------------------------------------------------- main paper
+  - {id: F1_performance_within, family: performance, status: main, width: double,
+     settings: [within_D1, within_D2], metrics: *metrics_all, entries: *entries_main}
+  - {id: F2_generalization, family: generalization, status: main, width: double,
+     metrics: [roc_auc, balanced_accuracy], entries: *entries_primary}
+  - id: F3_band_comparison
+    family: band_comparison
+    status: main
+    metric: roc_auc
+    settings: [within_D1, within_D2]
+    panels:
+      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal, where: {model.encoder: gcn}}
+      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd, where: {model.encoder: gcn}}
+  - {id: F4_ablation_exp6, family: ablation, status: main, experiment: exp6_multiband_psd_strength,
+     metric: roc_auc, settings: [within_D1, within_D2],
+     order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
+  - {id: F5a_roc_within_D1, family: roc, status: main, setting: within_D1, bootstrap_band: 1000,
+     entries: *entries_primary}
+  - {id: F5b_roc_within_D2, family: roc, status: main, setting: within_D2, bootstrap_band: 1000,
+     entries: *entries_primary}
+  - {id: F6_psd_relative_heatmap, family: psd_heatmap, status: main, kind: rel}
+  - {id: F7_plv_matrices, family: connectivity_matrices, status: main, connectivity: plv}
+  - id: F8_fusion_weights
+    family: fusion_weights
+    status: main
+    setting: within_D1
+    entries:
+      - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
+         where: {model.shared_encoder: true, model.fusion: attention}}
+      - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+         where: {node_features.components: [psd, strength], model.fusion: attention,
+                 graph.bands: [theta, alpha1, alpha2, beta]}}
+  - id: F9_age_sensitivity
+    family: age_sensitivity
+    status: main
+    metric: roc_auc
+    settings: [within_D1, within_D2, pooled]
+    groups:
+      - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
+      - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+         where: {node_features.components: [psd, strength], model.fusion: attention,
+                 graph.bands: [theta, alpha1, alpha2, beta]}}
+
+  # ---------------------------------------------------------------- supplementary
+  - {id: S1_performance_pooled, family: performance, status: supplementary, width: double,
+     settings: [pooled], metrics: *metrics_all, entries: *entries_main}
+  - {id: S2_performance_pooled_D1_subjects, family: performance, status: supplementary, scope: D1,
+     settings: [pooled], metrics: [balanced_accuracy, roc_auc], entries: *entries_main}
+  - {id: S3_performance_pooled_D2_subjects, family: performance, status: supplementary, scope: D2,
+     settings: [pooled], metrics: [balanced_accuracy, roc_auc], entries: *entries_main}
+  - {id: S4_performance_cross, family: performance, status: supplementary, uncertainty: bootstrap,
+     settings: [cross_D1_to_D2, cross_D2_to_D1], metrics: *metrics_all, entries: *entries_main}
+  - {id: S5_plv_vs_ciplv_paired, family: paired_conditions, status: supplementary, metric: roc_auc,
+     settings: [within_D1, within_D2],
+     experiments: [exp2_conn_minimal, exp3_conn_psd, exp4_band_mean, exp5_multiband, exp6_multiband_psd_strength]}
+  - id: S6_band_comparison_all_encoders
+    family: band_comparison
+    status: supplementary
+    metric: roc_auc
+    settings: [within_D1, within_D2]
+    panels:
+      - {label: "Exp2 · EdgeWeightedGAT", experiment: exp2_conn_minimal, where: {model.encoder: edge_weighted_gat}}
+      - {label: "Exp2 · WeightedGraphSAGE", experiment: exp2_conn_minimal, where: {model.encoder: weighted_graphsage}}
+      - {label: "Exp3 · EdgeWeightedGAT", experiment: exp3_conn_psd, where: {model.encoder: edge_weighted_gat}}
+      - {label: "Exp3 · WeightedGraphSAGE", experiment: exp3_conn_psd, where: {model.encoder: weighted_graphsage}}
+  - {id: S7_ablation_exp6_pooled_cross, family: ablation, status: supplementary,
+     experiment: exp6_multiband_psd_strength, metric: roc_auc, settings: [pooled],
+     order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
+  - {id: S8a_confusion_within_D1, family: confusion, status: supplementary, setting: within_D1,
+     entries: *entries_primary}
+  - {id: S8b_confusion_within_D2, family: confusion, status: supplementary, setting: within_D2,
+     entries: *entries_primary}
+  - {id: S9a_subject_scores_within_D1, family: subject_scores, status: supplementary, setting: within_D1,
+     entries: *entries_primary}
+  - {id: S9b_subject_scores_within_D2, family: subject_scores, status: supplementary, setting: within_D2,
+     entries: *entries_primary}
+  - {id: S10_roc_pooled, family: roc, status: supplementary, setting: pooled, bootstrap_band: 1000,
+     entries: *entries_primary}
+  - {id: S11_psd_log_heatmap, family: psd_heatmap, status: supplementary, kind: log}
+  - {id: S12a_psd_rel_heatmap_D1, family: psd_heatmap, status: supplementary, kind: rel, dataset: D1}
+  - {id: S12b_psd_rel_heatmap_D2, family: psd_heatmap, status: supplementary, kind: rel, dataset: D2}
+  - {id: S13a_psd_lobes_rel, family: psd_lobes, status: supplementary, kind: rel}
+  - {id: S13b_psd_lobes_log, family: psd_lobes, status: supplementary, kind: log}
+  - {id: S14_ciplv_matrices, family: connectivity_matrices, status: supplementary, connectivity: ciplv}
+  - {id: S15a_plv_network_diff, family: connectivity_network, status: supplementary, connectivity: plv,
+     quantity: AD_minus_HC, display_top_n: 40}
+  - {id: S15b_ciplv_network_diff, family: connectivity_network, status: supplementary, connectivity: ciplv,
+     quantity: AD_minus_HC, display_top_n: 40}
+  - {id: S16_psd_pca_dataset_shift, family: psd_embedding, status: supplementary, kinds: [log, rel], method: pca}
+  - id: S17_graph_embedding_pca
+    family: graph_embedding
+    status: supplementary
+    setting: pooled
+    repeat: 0
+    fold: 0
+    method: pca
+    entry: {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength, conditions: [plv],
+            where: {node_features.components: [psd, strength], model.fusion: attention,
+                    graph.bands: [theta, alpha1, alpha2, beta]}}
+  - {id: S18_complexity_params, family: complexity, status: supplementary, setting: within_D1,
+     metric: roc_auc, quantity: n_parameters, entries: *entries_main}
+  - {id: S19_complexity_runtime, family: complexity, status: supplementary, setting: within_D1,
+     metric: roc_auc, quantity: fit_seconds, entries: *entries_main}

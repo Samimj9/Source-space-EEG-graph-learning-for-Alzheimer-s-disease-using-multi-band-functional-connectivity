@@ -18,6 +18,7 @@ evaluation:
   n_bootstrap: 2000              # subjects resampled
   cross_n_seeds: 1               # cross-dataset: one train-all/test-all split (model seeds only)
   allow_ungated_cross_dataset: false
+  save_embeddings: false         # GNNs: save fused graph embeddings per split (dataset-shift figures)
   permutation:
     n: 0                         # subject-label permutations (each reruns the CV); e.g. 200-1000
     n_repeats: 1                 # CV repeats per permutation

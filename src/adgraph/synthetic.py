@@ -77,6 +77,12 @@ def make_synthetic_store(cohort: dict | None = None, windows_per_subject: tuple[
     manifest = {"synthetic": True, "config_hash": "synthetic", "registry": {"subset_limit": None},
                 "source_operator": {"shared_across_datasets": True, "verification_rel_error": 0.0,
                                     "channels": [f"C{i}" for i in range(n_channels)]}}
+    # Placeholder coordinates on a sphere (synthetic; not anatomical): lh on x < 0, rh on x > 0.
+    ang = np.linspace(0, np.pi, n_rois // 2, endpoint=False)
+    half = np.c_[-40 - 20 * np.sin(ang), 70 * np.cos(ang), 20 * np.sin(2 * ang)]
+    coords = np.vstack([half, half * [-1, 1, 1]])[:n_rois]
+    if len(coords) < n_rois:
+        coords = np.vstack([coords, np.zeros((n_rois - len(coords), 3))])
     return GraphStore(arrays, pd.DataFrame(rows), list(BANDS), np.array(list(BANDS.values())),
                       [f"roi{i:02d}" for i in range(n_rois)], [f"C{i}" for i in range(n_channels)],
-                      pd.DataFrame(subj_rows), manifest)
+                      pd.DataFrame(subj_rows), manifest, roi_coords=coords)

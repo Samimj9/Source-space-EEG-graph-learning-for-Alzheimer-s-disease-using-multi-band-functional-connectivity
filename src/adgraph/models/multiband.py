@@ -103,6 +103,10 @@ class MultiBandGNN(nn.Module):
             return readout(h, self.readout_kind).view(b, k, -1)
         return torch.stack([readout(self.encoders[i](x[:, i], adj[:, i]), self.readout_kind) for i in range(k)], 1)
 
+    def fused_embedding(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """Fused graph embedding (B, D_fused): after band fusion, before covariates and the classifier."""
+        return self.fusion(self.embed(x, adj))[0]
+
     def forward(self, x: torch.Tensor, adj: torch.Tensor, cov: torch.Tensor | None = None,
                 return_band_weights: bool = False):
         fused, w = self.fusion(self.embed(x, adj))

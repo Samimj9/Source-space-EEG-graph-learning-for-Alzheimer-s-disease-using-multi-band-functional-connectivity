@@ -248,6 +248,6 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
     if windows.empty:
         windows = pd.DataFrame(columns=list(WINDOW_COLUMNS))
     store = GraphStore(stacked, windows, list(bands), np.array(list(bands.values()), dtype=float),
-                       op["roi_names"], op["ch_names"], subjects, manifest)
+                       op["roi_names"], op["ch_names"], subjects, manifest, roi_coords=op.get("roi_coords"))
     store.save(out_dir)
     return out_dir
