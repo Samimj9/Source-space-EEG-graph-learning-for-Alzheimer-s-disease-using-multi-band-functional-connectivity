@@ -180,6 +180,13 @@ by dataset and config hash.
 - Label display-only thresholds and exploratory projections as such.
 - Each figure is saved with its data, metadata and a manifest, and is never overwritten.
   Synthetic figures are watermarked and are never results.
+- The pre-result figure decisions are frozen; see the "Pre-result design decisions"
+  section of `docs/figures.md`:
+  - Exp 2/3 have no representative band.
+  - Main figures are Fig. 1–7.
+  - The primary models are Exp 0 SVM, Exp 1 SVM and Exp 6 full.
+  - PLV is primary and |ciPLV| is the robustness analysis.
+  - Changing any of these needs a logged reason.
 
 ## Conventions
 

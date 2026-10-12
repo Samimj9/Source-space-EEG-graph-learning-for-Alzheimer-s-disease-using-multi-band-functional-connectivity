@@ -56,6 +56,12 @@ synthetic data.
 22. [Significance only from saved, corrected statistics](#22-significance-only-from-saved-corrected-statistics)
 23. [Display-only thresholds, exploratory projections, fusion weights](#23-display-only-thresholds-exploratory-projections-fusion-weights)
 24. [Publication style and provenance](#24-publication-style-and-provenance)
+25. [No representative band for Exp 2 / Exp 3](#25-no-representative-band-for-exp-2--exp-3)
+26. [Main metrics: balanced accuracy and ROC-AUC](#26-main-metrics-balanced-accuracy-and-roc-auc)
+27. [Primary models](#27-primary-models)
+28. [PLV primary, |ciPLV| predefined robustness analysis](#28-plv-primary-ciplv-predefined-robustness-analysis)
+29. [Frozen main-paper figure set](#29-frozen-main-paper-figure-set)
+30. [Comparable timing and single-model embeddings](#30-comparable-timing-and-single-model-embeddings)
 
 ---
 
@@ -951,8 +957,7 @@ synthetic data.
 
 **Approval status**
 - Author-specified (2026-10-12).
-- Figure selections marked TODO in `paper.yaml` (the Exp 2/3 band in cross-experiment
-  figures; the primary models) are **pending author decision**.
+- Figure selections were resolved by the author before any result (entries 25–29).
 
 ---
 
@@ -1215,6 +1220,263 @@ synthetic data.
 
 ---
 
+## 25. No representative band for Exp 2 / Exp 3
+
+**Previous design**
+- `paper.yaml` represented Exp 2 and Exp 3 in the overall comparison by their alpha1
+  variant (GCN), marked as a placeholder.
+
+**Problem discovered**
+- Exp 2/3 are single-band models. Representing each by one band forces a band choice.
+- Any choice made after seeing results would be selection on test performance, inflating
+  the apparent performance of Exp 2/3 in the overall figure.
+
+**Scientific / mathematical reason**
+- Selecting the maximum of four correlated estimates biases the selected estimate upward:
+  the winner's curse.
+- Keeping Exp 2/3 band-specific removes that degree of freedom.
+- The band question is answered where it belongs: the band-specific comparison
+  (Fig. 4 / S07 / S08).
+
+**Final implementation**
+- The overall comparison (Fig. 3, S01–S05, S21) uses `entries_overall` = Exp 0 (LR, SVM),
+  Exp 1 (LR, SVM), Exp 4, Exp 5 (attention, shared encoder) and Exp 6 full.
+- Exp 2/3 appear only in `band_comparison` figures, across all four bands.
+
+**Alternatives considered**
+- A pre-specified single band. Rejected: no a priori basis was established.
+- The best band. Rejected: selection bias.
+
+**Effect on interpretation**
+- Fig. 3 compares only models without a band choice.
+- Exp 2/3 conclusions are band-specific statements.
+
+**Code / config**
+- `configs/figures/paper.yaml` (`entries_overall`)
+
+**Validating tests**
+- `test_visualization.py::test_frozen_main_figure_set_and_selections` (Exp 2/3 absent from
+  every non-band figure)
+
+**Approval status**
+- Author decision (2026-10-12), made before any real result.
+
+---
+
+## 26. Main metrics: balanced accuracy and ROC-AUC
+
+**Previous design**
+- The main performance figure showed five metrics.
+
+**Problem discovered**
+- Five metrics per model dilute the main message and multiply implicit comparisons.
+
+**Scientific / mathematical reason**
+- **Balanced accuracy** is insensitive to the class imbalance (D2 has 10 AD / 13 HC) and
+  evaluates the fixed decision rule.
+- **ROC-AUC** is threshold-free and uses the scores directly. For the primary SVM those are
+  margins, so no calibration is needed.
+- Together they cover the decision and ranking aspects.
+- Accuracy, F1, sensitivity and specificity are still computed and stay available.
+
+**Final implementation**
+- `metrics_main` = [balanced_accuracy, roc_auc] for Fig. 3 and Fig. 6.
+- `metrics_supp` (accuracy, F1, sensitivity, specificity) in S01.
+- All metrics remain in `metrics_repeats.csv` and `summary.json`.
+
+**Alternatives considered**
+- MCC as a main metric (available in tables).
+
+**Effect on interpretation**
+- Main-text claims rest on balanced accuracy and ROC-AUC.
+
+**Code / config**
+- `configs/figures/paper.yaml`
+
+**Validating tests**
+- `test_frozen_main_figure_set_and_selections`
+
+**Approval status**
+- Author decision (2026-10-12).
+
+---
+
+## 27. Primary models
+
+**Previous design**
+- Placeholder primary list (Exp 6 full, Exp 5, Exp 1 SVM, Exp 0 SVM).
+
+**Problem discovered**
+- Primary models must be fixed before results.
+
+**Scientific / mathematical reason**
+- Three models span the paper's argument:
+  - **Exp 0 SVM:** the conventional sensor-space spectral baseline.
+  - **Exp 1 SVM:** what source localization alone adds.
+  - **Exp 6 full:** the proposed graph model.
+- The SVM is the baseline representative because its decision function gives
+  calibration-free scores (entry 15).
+
+**Final implementation**
+- `entries_primary` is the default for ROC (S10), confusion (S11), subject scores (S12) and
+  Fig. 6 (generalization).
+- Using the same three in Fig. 6 is a consequence of this decision, applied for
+  consistency.
+
+**Alternatives considered**
+- Including Exp 4/5 in ROC/generalization. Available by configuration, supplementary.
+
+**Effect on interpretation**
+- Primary claims compare these three models.
+
+**Code / config**
+- `configs/figures/paper.yaml` (`entries_primary`)
+
+**Validating tests**
+- `test_frozen_main_figure_set_and_selections`
+
+**Approval status**
+- Author decision (2026-10-12).
+- Applying the same set to Fig. 6 follows from it; author confirmation welcome.
+
+---
+
+## 28. PLV primary, |ciPLV| predefined robustness analysis
+
+**Previous design**
+- Entries 10 and 20 already kept PLV and |ciPLV| separate.
+
+**Problem discovered**
+- The hierarchy had to be explicit in the figure documentation, so that |ciPLV| results
+  cannot later be promoted to primary when they look better.
+
+**Scientific / mathematical reason**
+- Fixing the hierarchy in advance prevents choosing the more favourable measure after
+  the fact.
+- |ciPLV| answers a predefined question: is the result robust to removing zero-lag
+  coupling?
+- A direct comparison is meaningful only on identical subjects, folds and repeats
+  (paired), because split variability would otherwise be confounded with the measure.
+
+**Final implementation**
+- `docs/figures.md` "Pre-result design decisions" §1.
+- Fig. 2b and all main performance figures show PLV as primary. |ciPLV| appears as the
+  second condition or in supplementary figures (S06, S17, S18b).
+- `matched_condition_pairs` refuses pairs with different `folds.csv`.
+
+**Alternatives considered**
+- None. A post-hoc choice of measure is excluded.
+
+**Effect on interpretation**
+- The primary claim rests on PLV.
+- |ciPLV| results qualify robustness and do not replace it.
+
+**Code / config**
+- `docs/figures.md`, `visualization/performance.py`
+
+**Validating tests**
+- `test_paired_conditions_require_identical_folds`
+
+**Approval status**
+- Author decision (2026-10-12).
+
+---
+
+## 29. Frozen main-paper figure set
+
+**Previous design**
+- Nine main figures, including ROC and age sensitivity.
+
+**Problem discovered**
+- Main-paper content should be fixed before results, so that it is not shaped by which
+  results look best.
+
+**Scientific / mathematical reason**
+- Pre-specifying the main figures (and therefore the main claims) limits selective
+  reporting. The figure order follows the paper's argument:
+  1. pipeline
+  2. source characterization
+  3. overall performance
+  4. band specificity
+  5. ablations
+  6. generalization
+  7. multi-band interpretation
+
+**Final implementation**
+- Main set:
+  - Fig. 1 conceptual, drawn later and not generated
+  - Fig2a / Fig2b, Fig3, Fig4, Fig5, Fig6, Fig7 in `paper.yaml`
+- Supplementary: ROC, confusion matrices, detailed |ciPLV| plots, subject-score
+  distributions, PCA/embedding views, network views, complexity plots, age sensitivity.
+- Promotion later requires a logged reason.
+
+**Alternatives considered**
+- ROC in the main text. Kept supplementary by author decision.
+
+**Effect on interpretation**
+- Supplementary figures support but do not define the main claims.
+
+**Code / config**
+- `configs/figures/paper.yaml`, `docs/figures.md`
+
+**Validating tests**
+- `test_frozen_main_figure_set_and_selections`, `test_make_figures_full_inventory`
+
+**Approval status**
+- Author decision (2026-10-12).
+
+---
+
+## 30. Comparable timing and single-model embeddings
+
+**Previous design**
+- Fit times were plotted without environment information.
+- The graph-embedding figure defaulted to repeat 0, fold 0.
+
+**Problem discovered**
+- **Fit time** depends on hardware (CPU model, GPU, threads) and software versions.
+  Combining runs from different Colab sessions or machines would compare environments,
+  not models.
+- **Embeddings** from independently trained models are in unaligned coordinate systems:
+  arbitrary rotations, permutations and scalings of the latent space. Merging them, or
+  relying on an implicit default, risks an uninterpretable plot.
+
+**Scientific / mathematical reason**
+- Timing is only comparable under a fixed environment. Parameter counts are
+  environment-independent.
+- An embedding plot is only meaningful within one fitted model.
+
+**Final implementation**
+- Each experiment manifest stores `compute_environment` (`provenance.compute_environment`):
+  - device, CPU model and count, GPU name and CUDA version;
+  - torch threads, platform, library versions;
+  - a fingerprint of these, excluding host name and time.
+- `fig_complexity` with `fit_seconds` raises `IncomparableTiming` if environments differ or
+  are missing, and writes the environment into the figure metadata.
+- `fig_graph_embedding` requires explicit integer `repeat` and `fold` and uses only that
+  model's embeddings. It is titled exploratory, and its metadata records
+  `single_fitted_model: true`.
+
+**Alternatives considered**
+- Normalizing times by a benchmark. Not reliable.
+- Procrustes-aligning embeddings across folds. Adds a modelling step; not adopted.
+
+**Effect on interpretation**
+- Runtime claims are valid only within the recorded environment.
+- Embedding plots describe one model.
+
+**Code / config**
+- `src/adgraph/provenance.py`, `experiments/runner.py::run_device`
+- `visualization/performance.py::fig_complexity`, `visualization/embedding.py`
+
+**Validating tests**
+- `test_fit_time_requires_one_environment`, `test_graph_embedding_requires_one_fitted_model`
+
+**Approval status**
+- Author decision (2026-10-12).
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -1231,8 +1493,5 @@ synthetic data.
    verified to be inside the passband.
 5. The D1 `sub18` age value (7) before the age analyses are run.
 6. Final repeat, fold, epoch and grid sizes (currently provisional).
-7. Figure selections in `configs/figures/paper.yaml` marked TODO:
-   - the band representing Exp 2/3 in cross-experiment figures;
-   - the primary models for ROC, confusion and generalization figures;
-   - main vs supplementary assignment;
-   - the target journal's width and font requirements.
+7. The target journal's width and font requirements (figure selections were resolved:
+   entries 25–29).

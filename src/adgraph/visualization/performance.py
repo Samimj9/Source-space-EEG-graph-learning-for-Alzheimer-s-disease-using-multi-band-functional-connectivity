@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from . import stats as st
-from .results import read_csv, read_summary, same_splits, select, select_unique
+from .results import read_csv, read_manifest, read_summary, same_splits, select, select_unique
 from .style import (CONDITION_STYLE, METRIC_LABEL, SETTING_LABEL, condition_style, figure_size, marker_kwargs)
 
 CHANCE = {"balanced_accuracy": 0.5, "roc_auc": 0.5}
@@ -411,20 +411,38 @@ def fig_age_sensitivity(index, spec, style, stats=None):
 
 
 # ------------------------------------------------------------------ family 14
+class IncomparableTiming(ValueError):
+    pass
+
+
 def fig_complexity(index, spec, style, stats=None):
+    """Performance vs parameter count (always comparable) or fit time (only within ONE environment).
+
+    Fit times are compared only if every result carries the same ``compute_environment``
+    fingerprint (CPU/GPU, device, threads, platform, library versions); otherwise refused.
+    """
     metric, setting, quantity = spec["metric"], spec["setting"], spec.get("quantity", "n_parameters")
-    rows = []
+    rows, envs = [], {}
     for e in spec["entries"]:
         for _, r in select_unique(index, e, [setting]).iterrows():
             hp = read_csv(r, "hparams.csv")
             if quantity not in hp:
                 raise ValueError(f"{r['path']}/hparams.csv has no {quantity!r} (older run)")
             mr = read_csv(r, "metrics_repeats.csv").query("scope == 'all'")[metric]
+            env = read_manifest(r).get("compute_environment")
+            if quantity == "fit_seconds":
+                if not env:
+                    raise IncomparableTiming(f"{r['path']}: no compute_environment saved; fit times not comparable")
+                envs.setdefault(env["fingerprint"], env)
             rows.append({"label": e["label"], "condition": r["condition"], quantity: hp[quantity].mean(),
+                         "environment": env.get("fingerprint") if env else None,
                          f"{quantity}_sd": hp[quantity].std(ddof=1) if len(hp) > 1 else np.nan,
                          "mean": mr.mean(), "sd": mr.std(ddof=1) if len(mr) > 1 else np.nan,
                          "n_repeats": len(mr), "path": r["path"]})
     df = pd.DataFrame(rows)
+    if len(envs) > 1:
+        raise IncomparableTiming(f"fit times come from {len(envs)} different computational environments "
+                                 f"{sorted(envs)}; rerun in one environment or plot n_parameters")
     fig, ax = plt.subplots(figsize=figure_size(style, spec.get("width", "single")))
     for _, r in df.iterrows():
         ax.errorbar(r[quantity], r["mean"], yerr=r["sd"] if np.isfinite(r["sd"]) else None,
@@ -434,6 +452,9 @@ def fig_complexity(index, spec, style, stats=None):
     ax.set_xlabel({"n_parameters": "Trainable parameters", "fit_seconds": "Fit time per split (s)"}.get(quantity, quantity))
     ax.set_ylabel(METRIC_LABEL.get(metric, metric))
     fig.tight_layout()
+    if quantity == "fit_seconds":
+        ax.set_title(f"one environment: {next(iter(envs.values()))['device']}, "
+                     f"{next(iter(envs.values()))['cpu_model'][:40]}", fontsize=5)
     return fig, df.drop(columns=["path"]), _meta(
-        "descriptive", UNIT_REPEATS, f"x = mean {quantity} over splits; y = mean ± SD across repeats"), \
-        sorted(set(df["path"]))
+        "descriptive", UNIT_REPEATS, f"x = mean {quantity} over splits; y = mean ± SD across repeats",
+        {"compute_environment": next(iter(envs.values())) if envs else None}), sorted(set(df["path"]))

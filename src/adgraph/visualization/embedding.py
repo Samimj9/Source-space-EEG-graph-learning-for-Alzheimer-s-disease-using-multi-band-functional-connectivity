@@ -76,8 +76,11 @@ def fig_graph_embedding(index, spec, style, stats=None):
     path = Path(r["path"]) / "embeddings.npz"
     if not path.exists():
         raise ValueError(f"{path} missing: rerun with evaluation.save_embeddings: true")
+    if not isinstance(spec.get("repeat"), int) or not isinstance(spec.get("fold"), int):
+        raise ValueError("graph-embedding figures need one explicit fitted model: integer 'repeat' and 'fold'; "
+                         "embeddings of independently trained folds are never merged")
     z = np.load(path, allow_pickle=True)
-    sel = (z["repeat"] == spec.get("repeat", 0)) & (z["fold"] == spec.get("fold", 0))
+    sel = (z["repeat"] == spec["repeat"]) & (z["fold"] == spec["fold"])
     if not sel.any():
         raise ValueError("requested repeat/fold not in embeddings.npz")
     e = pd.DataFrame(z["emb"][sel])
@@ -94,10 +97,10 @@ def fig_graph_embedding(index, spec, style, stats=None):
     ax.set_xlabel(axes_lab[0])
     ax.set_ylabel(axes_lab[1])
     ax.set_title(f"{spec['entry']['label']}: fused graph embeddings\none fitted model (repeat "
-                 f"{spec.get('repeat', 0)}, fold {spec.get('fold', 0)}); {spec['setting']}\n{DISCLAIMER}", fontsize=5.5)
+                 f"{spec['repeat']}, fold {spec['fold']}); {spec['setting']}\n{DISCLAIMER}", fontsize=5.5)
     fig.tight_layout()
     meta = {"kind": "descriptive (exploratory)", "statistical_unit": "subject (window embeddings averaged)",
             "notes": "embeddings from a single fitted model (spaces of different folds are not comparable); "
                      "filled = training subjects, open = test subjects", "axes": axes_lab,
-            "repeat": spec.get("repeat", 0), "fold": spec.get("fold", 0)}
+            "repeat": spec["repeat"], "fold": spec["fold"], "single_fitted_model": True}
     return fig, df, meta, [r["path"]]

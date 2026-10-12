@@ -65,7 +65,7 @@ def test_index_and_duplicates(synth, tmp_path):
 # ----------------------------------------------------------------- family 1, 10: no invented numbers
 def test_performance_values_come_from_saved_metrics(synth):
     _, _, index = synth
-    spec = {**spec_of("F1_performance_within"), "metrics": ["roc_auc", "balanced_accuracy"]}
+    spec = {**spec_of("Fig3_performance_overall"), "metrics": ["roc_auc", "balanced_accuracy"]}
     fig, data, meta, sources = performance.fig_performance(index, spec, STYLE)
     assert meta["kind"] == "descriptive" and "subject-level" in meta["statistical_unit"]
     for (label, cond, setting, metric), d in data.groupby(["label", "condition", "setting", "metric"]):
@@ -113,25 +113,25 @@ def test_paired_conditions_require_identical_folds(synth, tmp_path):
 
 # ----------------------------------------------------------------- families 3, 4, 12, 14
 def test_band_comparison(synth):
-    _, data, _, _ = performance.fig_band_comparison(synth[2], spec_of("F3_band_comparison"), STYLE)
+    _, data, _, _ = performance.fig_band_comparison(synth[2], spec_of("Fig4_band_specific_exp2_vs_exp3"), STYLE)
     assert set(data["band"]) == {"theta", "alpha1", "alpha2", "beta"}
     assert set(data["condition"]) == {"plv", "ciplv"}
 
 
 def test_ablation_paired_delta(synth):
-    _, data, meta, _ = performance.fig_ablation(synth[2], spec_of("F4_ablation_exp6"), STYLE)
-    assert set(data["ablation"]) == set(spec_of("F4_ablation_exp6")["order"])
+    _, data, meta, _ = performance.fig_ablation(synth[2], spec_of("Fig5_exp6_ablations"), STYLE)
+    assert set(data["ablation"]) == set(spec_of("Fig5_exp6_ablations")["order"])
     assert np.allclose(data.loc[data["ablation"] == "full", "delta_vs_full"], 0)
     assert set(data["condition"]) == {"plv", "ciplv"}
 
 
 def test_age_sensitivity(synth):
-    _, data, _, _ = performance.fig_age_sensitivity(synth[2], spec_of("F9_age_sensitivity"), STYLE)
+    _, data, _, _ = performance.fig_age_sensitivity(synth[2], spec_of("S13_age_sensitivity"), STYLE)
     assert set(data["model_type"]) == set(performance.AGE_TYPES)
 
 
 def test_complexity(synth):
-    _, data, _, _ = performance.fig_complexity(synth[2], spec_of("S18_complexity_params"), STYLE)
+    _, data, _, _ = performance.fig_complexity(synth[2], spec_of("S21a_complexity_parameters"), STYLE)
     assert (data["n_parameters"] > 0).all()
     gnn = data[data["label"].str.startswith("Exp6")]["n_parameters"].iloc[0]
     lr = data[data["label"] == "Exp1 source PSD · LR"]["n_parameters"].iloc[0]
@@ -236,7 +236,7 @@ def test_embeddings(synth):
     store, _, index = synth
     _, data, meta, _ = embedding.fig_psd_embedding(store, {"kinds": ["log", "rel"]}, STYLE)
     assert data["subject"].is_unique and len(data) == 21 and "exploratory" in meta["kind"]
-    _, g, meta_g, _ = embedding.fig_graph_embedding(index, spec_of("S17_graph_embedding_pca"), STYLE)
+    _, g, meta_g, _ = embedding.fig_graph_embedding(index, spec_of("S20_graph_embedding_pca"), STYLE)
     assert set(g["side"]) == {"train", "test"} and g.groupby("side")["subject"].apply(lambda s: s.is_unique).all()
     try:
         import umap  # noqa: F401
@@ -294,7 +294,7 @@ def test_make_figures_full_inventory(synth, tmp_path):
     made = {f["id"] for f in w.figures}
     skipped = {s["id"] for s in w.skipped}
     assert made | skipped == {f["id"] for f in PAPER["figures"]}
-    assert skipped == {"S6_band_comparison_all_encoders"}       # encoders not run in the synthetic plan
+    assert skipped == {"S07_band_specific_other_encoders"}       # encoders not run in the synthetic plan
     assert {f["family"] for f in PAPER["figures"]} == set(FAMILIES)
     for f in w.figures:
         assert f["status"] in ("main", "supplementary") and f["synthetic"]
@@ -309,3 +309,59 @@ def test_style_sizes():
     w, _ = figure_size(STYLE, "single")
     assert np.isclose(w * 25.4, 85.0)
     assert np.isclose(figure_size(STYLE, "double")[0] * 25.4, 178.0)
+
+
+# ----------------------------------------------------------------- frozen pre-result design decisions
+def test_frozen_main_figure_set_and_selections():
+    main = [f["id"] for f in PAPER["figures"] if f["status"] == "main"]
+    assert main == ["Fig2a_source_psd_relative", "Fig2b_plv_group_matrices", "Fig3_performance_overall",
+                    "Fig4_band_specific_exp2_vs_exp3", "Fig5_exp6_ablations", "Fig6_generalization",
+                    "Fig7_multiband_fusion"]
+    fig3 = spec_of("Fig3_performance_overall")
+    assert fig3["metrics"] == ["balanced_accuracy", "roc_auc"]
+    assert {e["experiment"] for e in fig3["entries"]} == {"exp0_sensor_psd", "exp1_source_psd", "exp4_band_mean",
+                                                          "exp5_multiband", "exp6_multiband_psd_strength"}
+    # Exp 2/3 never get a representative band: they appear only in band-specific figures
+    for f in PAPER["figures"]:
+        entries = f.get("entries", []) + ([f["entry"]] if "entry" in f else []) + f.get("groups", [])
+        if f["family"] != "band_comparison":
+            assert not {e.get("experiment") for e in entries} & {"exp2_conn_minimal", "exp3_conn_psd"}, f["id"]
+    roc = [f for f in PAPER["figures"] if f["family"] == "roc"]
+    assert roc and all(f["status"] == "supplementary" for f in roc)
+    assert [e["label"] for e in roc[0]["entries"]] == ["Exp0 SVM (sensor PSD)", "Exp1 SVM (source PSD)", "Exp6 full"]
+    for fam in ("confusion", "subject_scores", "connectivity_network", "psd_embedding", "graph_embedding", "complexity"):
+        assert all(f["status"] == "supplementary" for f in PAPER["figures"] if f["family"] == fam)
+
+
+def test_fit_time_requires_one_environment(synth, tmp_path):
+    from adgraph.visualization.performance import IncomparableTiming
+
+    _, results, index = synth
+    spec = spec_of("S21b_complexity_fit_time")
+    _, data, meta, _ = performance.fig_complexity(index, spec, STYLE)
+    assert data["environment"].nunique() == 1 and meta["compute_environment"]["fingerprint"]
+    assert {"device", "cpu_model", "versions"} <= set(meta["compute_environment"])
+    root = tmp_path / "env"
+    shutil.copytree(results, root)
+    idx2 = index_results(root)
+    row = select_unique(idx2, spec["entries"][0], ["within_D1"]).iloc[0]
+    man_path = Path(row["path"]) / "manifest.json"
+    man = json.loads(man_path.read_text())
+    man["compute_environment"]["fingerprint"] = "other-machine"
+    man_path.write_text(json.dumps(man))
+    with pytest.raises(IncomparableTiming, match="different computational environments"):
+        performance.fig_complexity(idx2, spec, STYLE)
+    performance.fig_complexity(idx2, spec_of("S21a_complexity_parameters"), STYLE)    # parameters still fine
+    del man["compute_environment"]
+    man_path.write_text(json.dumps(man))
+    with pytest.raises(IncomparableTiming, match="no compute_environment"):
+        performance.fig_complexity(idx2, spec, STYLE)
+
+
+def test_graph_embedding_requires_one_fitted_model(synth):
+    spec = dict(spec_of("S20_graph_embedding_pca"))
+    for bad in ({k: v for k, v in spec.items() if k != "repeat"}, {**spec, "fold": "all"}):
+        with pytest.raises(ValueError, match="one explicit fitted model"):
+            embedding.fig_graph_embedding(synth[2], bad, STYLE)
+    _, data, meta, _ = embedding.fig_graph_embedding(synth[2], spec, STYLE)
+    assert meta["single_fitted_model"] and (meta["repeat"], meta["fold"]) == (0, 0)

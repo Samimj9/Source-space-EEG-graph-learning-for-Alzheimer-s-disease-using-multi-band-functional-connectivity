@@ -37,7 +37,7 @@ from ..evaluation.metrics import (aggregate_subjects, binary_metrics, bootstrap_
 from ..evaluation.splits import (CROSS_SETTINGS, SETTINGS, fold_indices, inner_folds, make_splits, setting_subset)
 from ..graphs.dataset import Dataset, build_dataset
 from ..graphs.store import GraphStore
-from ..provenance import git_commit, versions
+from ..provenance import compute_environment, git_commit, versions
 from .config import apply_hparams, hparam_grid
 from .gate import gate_failures
 
@@ -57,6 +57,20 @@ def score_threshold(v: dict) -> float:
     """Fixed decision threshold on the model's score scale (never tuned on test subjects)."""
     ev = v["evaluation"]
     return ev.get("decision_threshold", 0.0) if model_score_type(v) == "decision_function" else ev["threshold"]
+
+
+def run_device(v: dict) -> str:
+    """Device the variant's model runs on (classical models: CPU)."""
+    if v["input"] == "classical":
+        return "cpu"
+    if v.get("device"):
+        return v["device"]
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
 
 
 def make_model(v: dict, seed: int):
@@ -246,6 +260,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
                       "git_commit": store.manifest.get("git_commit")},
         "cross_dataset_gate_failures": gate_failures(store) if setting in CROSS_SETTINGS else None,
         "git_commit": git_commit(), "versions": versions(),
+        "compute_environment": compute_environment(run_device(v)),   # needed to compare fit_seconds
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
     log.info("%s / %s: subject AUC %.3f", v["name"], setting,

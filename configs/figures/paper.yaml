@@ -1,46 +1,56 @@
-# Planned figure inventory (docs/figures.md). Figures read only saved outputs.
+# Figure inventory (docs/figures.md). Figures read only saved outputs.
 # Entries select ONE variant per (setting, condition) via `where` (dotted config keys);
 # PLV and |ciPLV| of a selected model are found automatically and drawn as separate conditions.
 #
-# AUTHOR DECISIONS REQUIRED before final figures (marked TODO): which band represents Exp 2/3 in the
-# cross-experiment comparison, and which models are "primary". These must be fixed in advance; choosing
-# them after looking at test results would bias the comparison.
+# PRE-RESULT DESIGN DECISIONS (frozen 2026-10-12, before any real result; methodology log entries 25-30):
+# * Exp 2 and Exp 3 have NO representative band. They appear only band-specifically
+#   (theta/alpha1/alpha2/beta) in Fig. 4 / S-band figures, never in the overall comparison.
+# * Main performance metrics: balanced accuracy and ROC-AUC. Accuracy, F1, sensitivity,
+#   specificity: supplementary.
+# * Primary models (ROC, confusion, generalization, subject scores): Exp0 SVM, Exp1 SVM, Exp6 full.
+# * PLV = primary connectivity analysis; |ciPLV| = predefined robustness/sensitivity analysis.
+# * Main paper: Fig. 1 (conceptual pipeline, drawn by hand later, not generated here) and
+#   Fig. 2-7 below. Everything else is supplementary unless later promoted with a logged reason.
 duplicates: error
 
-entries_main: &entries_main
+# Overall comparison: Exp 0, 1, 4, 5, 6 only (no band-specific experiments).
+entries_overall: &entries_overall
   - {label: "Exp0 sensor PSD · LR", experiment: exp0_sensor_psd, where: {model.name: logreg}}
   - {label: "Exp0 sensor PSD · SVM", experiment: exp0_sensor_psd, where: {model.name: svm}}
   - {label: "Exp1 source PSD · LR", experiment: exp1_source_psd, where: {model.name: logreg}}
   - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
-  - {label: "Exp2 conn. · GCN · α1", experiment: exp2_conn_minimal,                    # TODO author: band
-     where: {model.encoder: gcn, graph.bands: [alpha1]}}
-  - {label: "Exp3 conn.+PSD · GCN · α1", experiment: exp3_conn_psd,                    # TODO author: band
-     where: {model.encoder: gcn, graph.bands: [alpha1]}}
   - {label: "Exp4 band-mean · GCN", experiment: exp4_band_mean}
   - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
      where: {model.shared_encoder: true, model.fusion: attention}}
-  - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
      where: {node_features.components: [psd, strength], model.fusion: attention,
              graph.bands: [theta, alpha1, alpha2, beta]}}
 
-entries_primary: &entries_primary                                                    # TODO author: confirm
-  - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+# Primary models: conventional sensor-PSD baseline, source-PSD baseline, proposed graph model.
+entries_primary: &entries_primary
+  - {label: "Exp0 SVM (sensor PSD)", experiment: exp0_sensor_psd, where: {model.name: svm}}
+  - {label: "Exp1 SVM (source PSD)", experiment: exp1_source_psd, where: {model.name: svm}}
+  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
      where: {node_features.components: [psd, strength], model.fusion: attention,
              graph.bands: [theta, alpha1, alpha2, beta]}}
-  - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
-     where: {model.shared_encoder: true, model.fusion: attention}}
-  - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
-  - {label: "Exp0 sensor PSD · SVM", experiment: exp0_sensor_psd, where: {model.name: svm}}
 
-metrics_all: &metrics_all [balanced_accuracy, roc_auc, f1, sensitivity, specificity]
+metrics_main: &metrics_main [balanced_accuracy, roc_auc]
+metrics_supp: &metrics_supp [accuracy, f1, sensitivity, specificity]
 
 figures:
-  # ---------------------------------------------------------------- main paper
-  - {id: F1_performance_within, family: performance, status: main, width: double,
-     settings: [within_D1, within_D2], metrics: *metrics_all, entries: *entries_main}
-  - {id: F2_generalization, family: generalization, status: main, width: double,
-     metrics: [roc_auc, balanced_accuracy], entries: *entries_primary}
-  - id: F3_band_comparison
+  # ================================================================ main paper (frozen)
+  # Fig. 1: methodological pipeline -- conceptual schematic, created later (not data-derived).
+
+  # Fig. 2: source-space spectral / network characterization (two generated panels)
+  - {id: Fig2a_source_psd_relative, family: psd_heatmap, status: main, kind: rel}
+  - {id: Fig2b_plv_group_matrices, family: connectivity_matrices, status: main, connectivity: plv}
+
+  # Fig. 3: overall performance, Exp 0/1/4/5/6
+  - {id: Fig3_performance_overall, family: performance, status: main, width: double,
+     settings: [within_D1, within_D2], metrics: *metrics_main, entries: *entries_overall}
+
+  # Fig. 4: band-specific Exp 2 (connectivity only) vs Exp 3 (connectivity + matching-band PSD)
+  - id: Fig4_band_specific_exp2_vs_exp3
     family: band_comparison
     status: main
     metric: roc_auc
@@ -48,49 +58,43 @@ figures:
     panels:
       - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal, where: {model.encoder: gcn}}
       - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd, where: {model.encoder: gcn}}
-  - {id: F4_ablation_exp6, family: ablation, status: main, experiment: exp6_multiband_psd_strength,
+
+  # Fig. 5: Exp 6 ablations
+  - {id: Fig5_exp6_ablations, family: ablation, status: main, experiment: exp6_multiband_psd_strength,
      metric: roc_auc, settings: [within_D1, within_D2],
      order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
-  - {id: F5a_roc_within_D1, family: roc, status: main, setting: within_D1, bootstrap_band: 1000,
-     entries: *entries_primary}
-  - {id: F5b_roc_within_D2, family: roc, status: main, setting: within_D2, bootstrap_band: 1000,
-     entries: *entries_primary}
-  - {id: F6_psd_relative_heatmap, family: psd_heatmap, status: main, kind: rel}
-  - {id: F7_plv_matrices, family: connectivity_matrices, status: main, connectivity: plv}
-  - id: F8_fusion_weights
+
+  # Fig. 6: within-dataset / pooled / cross-dataset generalization
+  - {id: Fig6_generalization, family: generalization, status: main, width: double,
+     metrics: *metrics_main, entries: *entries_primary}
+
+  # Fig. 7: multi-band interpretation / fusion
+  - id: Fig7_multiband_fusion
     family: fusion_weights
     status: main
     setting: within_D1
     entries:
       - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
          where: {model.shared_encoder: true, model.fusion: attention}}
-      - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
-         where: {node_features.components: [psd, strength], model.fusion: attention,
-                 graph.bands: [theta, alpha1, alpha2, beta]}}
-  - id: F9_age_sensitivity
-    family: age_sensitivity
-    status: main
-    metric: roc_auc
-    settings: [within_D1, within_D2, pooled]
-    groups:
-      - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
-      - {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength,
+      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
          where: {node_features.components: [psd, strength], model.fusion: attention,
                  graph.bands: [theta, alpha1, alpha2, beta]}}
 
-  # ---------------------------------------------------------------- supplementary
-  - {id: S1_performance_pooled, family: performance, status: supplementary, width: double,
-     settings: [pooled], metrics: *metrics_all, entries: *entries_main}
-  - {id: S2_performance_pooled_D1_subjects, family: performance, status: supplementary, scope: D1,
-     settings: [pooled], metrics: [balanced_accuracy, roc_auc], entries: *entries_main}
-  - {id: S3_performance_pooled_D2_subjects, family: performance, status: supplementary, scope: D2,
-     settings: [pooled], metrics: [balanced_accuracy, roc_auc], entries: *entries_main}
-  - {id: S4_performance_cross, family: performance, status: supplementary, uncertainty: bootstrap,
-     settings: [cross_D1_to_D2, cross_D2_to_D1], metrics: *metrics_all, entries: *entries_main}
-  - {id: S5_plv_vs_ciplv_paired, family: paired_conditions, status: supplementary, metric: roc_auc,
+  # ================================================================ supplementary
+  - {id: S01_performance_overall_other_metrics, family: performance, status: supplementary, width: double,
+     settings: [within_D1, within_D2], metrics: *metrics_supp, entries: *entries_overall}
+  - {id: S02_performance_overall_pooled, family: performance, status: supplementary, width: double,
+     settings: [pooled], metrics: *metrics_main, entries: *entries_overall}
+  - {id: S03_performance_pooled_D1_subjects, family: performance, status: supplementary, scope: D1,
+     settings: [pooled], metrics: *metrics_main, entries: *entries_overall}
+  - {id: S04_performance_pooled_D2_subjects, family: performance, status: supplementary, scope: D2,
+     settings: [pooled], metrics: *metrics_main, entries: *entries_overall}
+  - {id: S05_performance_overall_cross, family: performance, status: supplementary, uncertainty: bootstrap,
+     settings: [cross_D1_to_D2, cross_D2_to_D1], metrics: *metrics_main, entries: *entries_overall}
+  - {id: S06_plv_vs_ciplv_paired, family: paired_conditions, status: supplementary, metric: roc_auc,
      settings: [within_D1, within_D2],
      experiments: [exp2_conn_minimal, exp3_conn_psd, exp4_band_mean, exp5_multiband, exp6_multiband_psd_strength]}
-  - id: S6_band_comparison_all_encoders
+  - id: S07_band_specific_other_encoders
     family: band_comparison
     status: supplementary
     metric: roc_auc
@@ -100,41 +104,63 @@ figures:
       - {label: "Exp2 · WeightedGraphSAGE", experiment: exp2_conn_minimal, where: {model.encoder: weighted_graphsage}}
       - {label: "Exp3 · EdgeWeightedGAT", experiment: exp3_conn_psd, where: {model.encoder: edge_weighted_gat}}
       - {label: "Exp3 · WeightedGraphSAGE", experiment: exp3_conn_psd, where: {model.encoder: weighted_graphsage}}
-  - {id: S7_ablation_exp6_pooled_cross, family: ablation, status: supplementary,
+  - id: S08_band_specific_balanced_accuracy
+    family: band_comparison
+    status: supplementary
+    metric: balanced_accuracy
+    settings: [within_D1, within_D2]
+    panels:
+      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal, where: {model.encoder: gcn}}
+      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd, where: {model.encoder: gcn}}
+  - {id: S09_exp6_ablations_pooled, family: ablation, status: supplementary,
      experiment: exp6_multiband_psd_strength, metric: roc_auc, settings: [pooled],
      order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
-  - {id: S8a_confusion_within_D1, family: confusion, status: supplementary, setting: within_D1,
+  - {id: S10a_roc_within_D1, family: roc, status: supplementary, setting: within_D1, bootstrap_band: 1000,
      entries: *entries_primary}
-  - {id: S8b_confusion_within_D2, family: confusion, status: supplementary, setting: within_D2,
+  - {id: S10b_roc_within_D2, family: roc, status: supplementary, setting: within_D2, bootstrap_band: 1000,
      entries: *entries_primary}
-  - {id: S9a_subject_scores_within_D1, family: subject_scores, status: supplementary, setting: within_D1,
+  - {id: S10c_roc_pooled, family: roc, status: supplementary, setting: pooled, bootstrap_band: 1000,
      entries: *entries_primary}
-  - {id: S9b_subject_scores_within_D2, family: subject_scores, status: supplementary, setting: within_D2,
+  - {id: S11a_confusion_within_D1, family: confusion, status: supplementary, setting: within_D1,
      entries: *entries_primary}
-  - {id: S10_roc_pooled, family: roc, status: supplementary, setting: pooled, bootstrap_band: 1000,
+  - {id: S11b_confusion_within_D2, family: confusion, status: supplementary, setting: within_D2,
      entries: *entries_primary}
-  - {id: S11_psd_log_heatmap, family: psd_heatmap, status: supplementary, kind: log}
-  - {id: S12a_psd_rel_heatmap_D1, family: psd_heatmap, status: supplementary, kind: rel, dataset: D1}
-  - {id: S12b_psd_rel_heatmap_D2, family: psd_heatmap, status: supplementary, kind: rel, dataset: D2}
-  - {id: S13a_psd_lobes_rel, family: psd_lobes, status: supplementary, kind: rel}
-  - {id: S13b_psd_lobes_log, family: psd_lobes, status: supplementary, kind: log}
-  - {id: S14_ciplv_matrices, family: connectivity_matrices, status: supplementary, connectivity: ciplv}
-  - {id: S15a_plv_network_diff, family: connectivity_network, status: supplementary, connectivity: plv,
+  - {id: S12a_subject_scores_within_D1, family: subject_scores, status: supplementary, setting: within_D1,
+     entries: *entries_primary}
+  - {id: S12b_subject_scores_within_D2, family: subject_scores, status: supplementary, setting: within_D2,
+     entries: *entries_primary}
+  - id: S13_age_sensitivity
+    family: age_sensitivity
+    status: supplementary
+    metric: roc_auc
+    settings: [within_D1, within_D2, pooled]
+    groups:
+      - {label: "Exp1 SVM (source PSD)", experiment: exp1_source_psd, where: {model.name: svm}}
+      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
+         where: {node_features.components: [psd, strength], model.fusion: attention,
+                 graph.bands: [theta, alpha1, alpha2, beta]}}
+  - {id: S14_source_psd_log, family: psd_heatmap, status: supplementary, kind: log}
+  - {id: S15a_source_psd_relative_D1, family: psd_heatmap, status: supplementary, kind: rel, dataset: D1}
+  - {id: S15b_source_psd_relative_D2, family: psd_heatmap, status: supplementary, kind: rel, dataset: D2}
+  - {id: S16a_source_psd_lobes_rel, family: psd_lobes, status: supplementary, kind: rel}
+  - {id: S16b_source_psd_lobes_log, family: psd_lobes, status: supplementary, kind: log}
+  - {id: S17_ciplv_group_matrices, family: connectivity_matrices, status: supplementary, connectivity: ciplv}
+  - {id: S18a_plv_network_diff, family: connectivity_network, status: supplementary, connectivity: plv,
      quantity: AD_minus_HC, display_top_n: 40}
-  - {id: S15b_ciplv_network_diff, family: connectivity_network, status: supplementary, connectivity: ciplv,
+  - {id: S18b_ciplv_network_diff, family: connectivity_network, status: supplementary, connectivity: ciplv,
      quantity: AD_minus_HC, display_top_n: 40}
-  - {id: S16_psd_pca_dataset_shift, family: psd_embedding, status: supplementary, kinds: [log, rel], method: pca}
-  - id: S17_graph_embedding_pca
+  - {id: S19_psd_pca_dataset_shift, family: psd_embedding, status: supplementary, kinds: [log, rel], method: pca}
+  - id: S20_graph_embedding_pca
     family: graph_embedding
     status: supplementary
     setting: pooled
-    repeat: 0
+    repeat: 0                      # the ONE fitted model whose embeddings are shown (required)
     fold: 0
     method: pca
-    entry: {label: "Exp6 PSD+strength", experiment: exp6_multiband_psd_strength, conditions: [plv],
+    entry: {label: "Exp6 full", experiment: exp6_multiband_psd_strength, conditions: [plv],
             where: {node_features.components: [psd, strength], model.fusion: attention,
                     graph.bands: [theta, alpha1, alpha2, beta]}}
-  - {id: S18_complexity_params, family: complexity, status: supplementary, setting: within_D1,
-     metric: roc_auc, quantity: n_parameters, entries: *entries_main}
-  - {id: S19_complexity_runtime, family: complexity, status: supplementary, setting: within_D1,
-     metric: roc_auc, quantity: fit_seconds, entries: *entries_main}
+  - {id: S21a_complexity_parameters, family: complexity, status: supplementary, setting: within_D1,
+     metric: roc_auc, quantity: n_parameters, entries: *entries_overall}
+  - {id: S21b_complexity_fit_time, family: complexity, status: supplementary, setting: within_D1,
+     metric: roc_auc, quantity: fit_seconds, entries: *entries_overall}   # refused unless one environment

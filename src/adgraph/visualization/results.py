@@ -100,6 +100,10 @@ def read_csv(row, name: str, **kw) -> pd.DataFrame:
     return pd.read_csv(Path(row["path"]) / name, **kw)
 
 
+def read_manifest(row) -> dict:
+    return json.loads((Path(row["path"]) / "manifest.json").read_text())
+
+
 def read_summary(row) -> dict:
     return json.loads((Path(row["path"]) / "summary.json").read_text())
 
