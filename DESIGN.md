@@ -5,7 +5,7 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.2 (2026-10-12)**. No classification has been run.
+Status: **frozen v1.3 (2026-10-12)**. No classification has been run.
 
 Changelog:
 
@@ -20,6 +20,12 @@ Changelog:
   - SVM calibration is subject-grouped.
   - The age sensitivity analysis is implemented.
   - The repeat, fold, epoch and grid counts are **provisional** (§3).
+- **v1.3:**
+  - The primary SVM is scored by its decision function, with threshold 0.
+    Grouped Platt calibration is optional (§4.1).
+  - The signed-ciPLV sign is not interpreted as direction.
+  - The relative-PSD denominator is checked against the preprocessing passband.
+  - See `docs/methodology_architecture_log.md`.
 
 ---
 
@@ -133,9 +139,12 @@ saved as a CSV next to the outputs in Drive.
 
 ### 4.1 From windows to subjects
 
-- **Subject probability** is the mean of that subject's window probabilities
-  for AD.
-- **Decision threshold** is fixed at 0.5. It is not tuned on test data.
+- **Subject score** is the mean of that subject's window scores for AD.
+  - LR, GNNs and the optional calibrated SVM give probabilities.
+  - The primary SVM gives its `decision_function` margin. ROC-AUC uses the
+    margin directly, with no calibration.
+- **Decision threshold** is fixed on the score's own scale: 0.5 for
+  probabilities, 0 for SVM margins. It is not tuned on test data.
 - Window-level predictions are kept for secondary reporting.
 
 ### 4.2 Metrics
@@ -160,7 +169,7 @@ Each metric is computed as follows:
   4–5 test subjects.
 - **Across repeats,** the summary is the mean ± SD, plus the 2.5th–97.5th
   percentile range.
-- **Uncertainty:** each subject's out-of-fold probability is averaged across
+- **Uncertainty:** each subject's out-of-fold score is averaged across
   the 20 repeats. A 95% CI then comes from 2,000 bootstrap resamples **of
   subjects** on those averaged predictions.
 - **Significance against chance:** a subject-level label-permutation test.
@@ -174,7 +183,7 @@ Each metric is computed as follows:
   significant difference" is reported as such.
 - **Per-dataset breakdown in S3:** pooled out-of-fold predictions are also
   scored separately for D1 subjects and D2 subjects (§6).
-- **Per-subject predictions** (subject key, true label, mean probability per
+- **Per-subject predictions** (subject key, true label, mean score per
   repeat) are saved to Drive for every setting. They are never committed.
 
 ### 4.3 Multiplicity and reporting discipline

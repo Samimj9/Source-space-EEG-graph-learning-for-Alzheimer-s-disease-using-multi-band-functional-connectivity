@@ -5,11 +5,12 @@ Per outer split:
       -> hyperparameters chosen by subject-level inner CV inside the train view
       -> model.fit(train view)      (all fitted transforms live in the model)
     test view (role "test", built only after fitting)
-      -> window probabilities -> subject probability = mean over windows
+      -> window scores -> subject score = mean over windows
+         (scores: probabilities, threshold 0.5; or SVM decision-function margins, threshold 0)
 
 Outputs per (variant, setting) directory:
-    predictions_windows.csv   repeat, fold, window_id, key, dataset, subject_id, y, prob [, band weights]
-    predictions_subjects.csv  repeat, key, dataset, y, prob, n_windows
+    predictions_windows.csv   repeat, fold, window_id, key, dataset, subject_id, y, score [, band weights]
+    predictions_subjects.csv  repeat, key, dataset, y, score, n_windows
     metrics_repeats.csv       subject-level metrics per repeat (+ per dataset in pooled runs)
     folds.csv                 subject -> (repeat, fold, side)
     hparams.csv               selected hyperparameters per split + inner-CV scores
@@ -40,11 +41,28 @@ from .gate import gate_failures
 log = logging.getLogger(__name__)
 
 
+def model_score_type(v: dict) -> str:
+    """Score scale produced by a variant's model: 'probability' or 'decision_function'."""
+    if v["input"] == "classical":
+        from ..models.classical import score_type
+
+        return score_type(v["model"]["name"], v["model"].get("calibration", "none"))
+    return "probability"
+
+
+def score_threshold(v: dict) -> float:
+    """Fixed decision threshold on the model's score scale (never tuned on test subjects)."""
+    ev = v["evaluation"]
+    return ev.get("decision_threshold", 0.0) if model_score_type(v) == "decision_function" else ev["threshold"]
+
+
 def make_model(v: dict, seed: int):
     if v["input"] == "classical":
         from ..models.classical import ClassicalModel
 
-        return ClassicalModel(v["model"]["name"], v["model"].get("params", {}), v.get("preprocessing", {}), seed)
+        m = v["model"]
+        return ClassicalModel(m["name"], m.get("params", {}), v.get("preprocessing", {}), seed,
+                              m.get("calibration", "none"), m.get("calibration_folds", 3))
     from ..models.trainer import GNNModel
 
     return GNNModel(v["model"], v["training"], v["node_features"].get("scaling", "node"), v.get("sparsify"), seed,
@@ -71,9 +89,9 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
         for i, (itr, iva) in enumerate(folds):
             model = make_model(vp, seed + i).fit(train_view.take(itr, "train"))
             val = train_view.take(iva, "val")
-            preds.append(val.meta.assign(prob=model.predict_proba(val), y=val.y))
+            preds.append(val.meta.assign(score=model.predict_score(val), y=val.y))
         subj = aggregate_subjects(pd.concat(preds))
-        score = binary_metrics(subj["y"], subj["prob"], ev["threshold"])[ev["selection_metric"]]
+        score = binary_metrics(subj["y"], subj["score"], score_threshold(v))[ev["selection_metric"]]
         scores.append({**params, "inner_score": score})
     best = max(range(len(grid)), key=lambda i: -np.inf if np.isnan(scores[i]["inner_score"])
                else scores[i]["inner_score"])
@@ -100,12 +118,12 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
         out = test.meta[["window_id", "key", "dataset", "subject_id"]].copy()
         out["y"] = test.y
         if v["input"] == "graph" and collect_band_weights:
-            prob, bw = model.predict_proba(test, return_band_weights=True)
+            score, bw = model.predict_score(test, return_band_weights=True)
             for i, name in enumerate(data.info["graph_bands"]):
                 out[f"band_weight_{name}"] = bw[:, i]
         else:
-            prob = model.predict_proba(test)
-        out["prob"] = prob
+            score = model.predict_score(test)
+        out["score"] = score
         out["repeat"], out["fold"] = sp.repeat, sp.fold
         preds.append(out)
         folds += [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "train"} for k in sp.train_keys]
@@ -115,27 +133,29 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
 
 
 def evaluate(pred: pd.DataFrame, threshold: float = 0.5, n_boot: int = 2000, seed: int = 0):
-    """Subject-level metrics per repeat (+ per dataset), summary and bootstrap CI."""
+    """Subject-level metrics per repeat (+ per dataset), summary and bootstrap CI.
+
+    ``threshold`` must be on the score scale of the model (``score_threshold``)."""
     subj = aggregate_subjects(pred, by=("repeat",))
     rows = []
     for r, g in subj.groupby("repeat"):
-        rows.append({"repeat": r, "scope": "all", **binary_metrics(g["y"], g["prob"], threshold)})
+        rows.append({"repeat": r, "scope": "all", **binary_metrics(g["y"], g["score"], threshold)})
         if g["dataset"].nunique() > 1:
             for ds, gd in g.groupby("dataset"):
-                rows.append({"repeat": r, "scope": ds, **binary_metrics(gd["y"], gd["prob"], threshold)})
+                rows.append({"repeat": r, "scope": ds, **binary_metrics(gd["y"], gd["score"], threshold)})
     per_repeat = pd.DataFrame(rows)
-    # Each subject's probability averaged over repeats -> one prediction per subject -> bootstrap CI.
-    mean_subj = subj.groupby("key").agg(dataset=("dataset", "first"), y=("y", "first"), prob=("prob", "mean"))
+    # Each subject's score averaged over repeats -> one prediction per subject -> bootstrap CI.
+    mean_subj = subj.groupby("key").agg(dataset=("dataset", "first"), y=("y", "first"), score=("score", "mean"))
     summary = {
         "n_subjects": int(len(mean_subj)), "n_windows": int(pred["window_id"].nunique()),
         "n_repeats": int(subj["repeat"].nunique()),
         "subject_level": {scope: summarize_repeats(g) for scope, g in per_repeat.groupby("scope")},
-        "subject_level_repeat_averaged": binary_metrics(mean_subj["y"], mean_subj["prob"], threshold),
-        "bootstrap_ci_95": bootstrap_ci(mean_subj["y"].to_numpy(), mean_subj["prob"].to_numpy(), n_boot, seed,
+        "subject_level_repeat_averaged": binary_metrics(mean_subj["y"], mean_subj["score"], threshold),
+        "bootstrap_ci_95": bootstrap_ci(mean_subj["y"].to_numpy(), mean_subj["score"].to_numpy(), n_boot, seed,
                                         threshold),
         "window_level": summarize_repeats(pd.DataFrame(
-            [binary_metrics(g["y"], g["prob"], threshold) for _, g in pred.groupby("repeat")])),
-        "confusion_repeat_averaged": {k: int(v) for k, v in binary_metrics(mean_subj["y"], mean_subj["prob"],
+            [binary_metrics(g["y"], g["score"], threshold) for _, g in pred.groupby("repeat")])),
+        "confusion_repeat_averaged": {k: int(v) for k, v in binary_metrics(mean_subj["y"], mean_subj["score"],
                                                                           threshold).items()
                                       if k in ("tn", "fp", "fn", "tp")},
     }
@@ -168,7 +188,10 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
     out.mkdir(parents=True, exist_ok=False)
 
     pred, folds, hps = cross_validate(data, v, setting)
-    subj, per_repeat, summary = evaluate(pred, ev["threshold"], ev["n_bootstrap"], ev["seed"])
+    thr = score_threshold(v)
+    subj, per_repeat, summary = evaluate(pred, thr, ev["n_bootstrap"], ev["seed"])
+    summary["score"] = {"type": model_score_type(v), "threshold": thr,
+                        "subject_aggregation": "mean of window scores"}
 
     perm_cfg = ev.get("permutation", {}) or {}
     if perm_cfg.get("n", 0) > 0:
@@ -177,7 +200,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
         for _ in range(perm_cfg["n"]):
             p_pred, _, _ = cross_validate(permute_subject_labels(data, rng), v, setting,
                                           n_repeats=perm_cfg.get("n_repeats", 1), collect_band_weights=False)
-            _, p_rep, _ = evaluate(p_pred, ev["threshold"], n_boot=0)
+            _, p_rep, _ = evaluate(p_pred, thr, n_boot=0)
             null.append(p_rep.loc[p_rep["scope"] == "all", "roc_auc"].mean())
         observed = per_repeat.loc[per_repeat["scope"] == "all", "roc_auc"].mean()
         summary["permutation"] = {"metric": "roc_auc", "observed": observed, "n": len(null),
@@ -191,7 +214,8 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
     manifest = {
         "timestamp": datetime.now(timezone.utc).isoformat(), "setting": setting, "variant_config": v,
-        "variant_config_hash": config_hash(v), "data_info": {k: (list(x) if isinstance(x, tuple) else x)
+        "variant_config_hash": config_hash(v), "score_type": model_score_type(v),
+        "score_threshold": score_threshold(v), "data_info": {k: (list(x) if isinstance(x, tuple) else x)
                                                                for k, x in data.info.items()},
         "graph_run": {"root": str(store.root), "config_hash": store.manifest.get("config_hash"),
                       "git_commit": store.manifest.get("git_commit")},

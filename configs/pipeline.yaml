@@ -80,7 +80,9 @@ psd:
     bandwidth_hz: 1.0
   periodogram:
     window: hann
-  relative_range: [1.0, 45.0]   # denominator of relative power
+  relative_range: [1.0, 45.0]   # denominator of relative power, half-open [1, 45) Hz. Must lie inside the
+                                # preprocessing passband (0.1-45 Hz, passband edges; -0.04 dB at 45 Hz,
+                                # -6 dB at 50.6 Hz): enforced by check_relative_range, never auto-adjusted.
   sensor: true
 
 output:

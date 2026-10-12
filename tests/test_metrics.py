@@ -24,10 +24,10 @@ def test_single_class_auc_is_nan():
 
 def test_aggregate_subjects_mean_of_windows():
     pred = pd.DataFrame({"key": ["a", "a", "a", "b", "b"], "dataset": ["D1"] * 5, "y": [1, 1, 1, 0, 0],
-                         "prob": [0.9, 0.6, 0.3, 0.2, 0.4]})
+                         "score": [0.9, 0.6, 0.3, 0.2, 0.4]})
     s = aggregate_subjects(pred).set_index("key")
-    assert s.loc["a", "prob"] == pytest.approx(0.6) and s.loc["a", "n_windows"] == 3
-    assert s.loc["b", "prob"] == pytest.approx(0.3)
+    assert s.loc["a", "score"] == pytest.approx(0.6) and s.loc["a", "n_windows"] == 3
+    assert s.loc["b", "score"] == pytest.approx(0.3)
     bad = pred.assign(y=[1, 0, 1, 0, 0])
     with pytest.raises(ValueError):
         aggregate_subjects(bad)
@@ -46,3 +46,11 @@ def test_corrected_ttest_and_permutation_p():
     r = corrected_resampled_ttest(np.array([0.05, 0.02, 0.04, 0.03, 0.06]), n_train=16, n_test=4)
     assert r["t"] > 0 and 0 < r["p"] < 1 and r["df"] == 4
     assert permutation_p_value(0.9, np.array([0.5, 0.6, 0.95])) == pytest.approx(2 / 4)
+
+
+def test_decision_scores_use_their_own_threshold():
+    y = np.array([1, 1, 0, 0])
+    margin = np.array([1.2, -0.1, -0.8, 0.3])
+    m = binary_metrics(y, margin, threshold=0.0)
+    assert (m["tp"], m["fn"], m["fp"], m["tn"]) == (1, 1, 1, 1)
+    assert m["roc_auc"] == pytest.approx(binary_metrics(y, 1 / (1 + np.exp(-margin)))["roc_auc"])   # rank-based

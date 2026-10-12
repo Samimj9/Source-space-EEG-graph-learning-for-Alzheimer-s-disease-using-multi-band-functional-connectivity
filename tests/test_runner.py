@@ -39,7 +39,7 @@ def _check_outputs(out, store, setting):
     folds = pd.read_csv(out / "folds.csv")
     summary = json.loads((out / "summary.json").read_text())
     manifest = json.loads((out / "manifest.json").read_text())
-    for col in ("window_id", "key", "dataset", "subject_id", "y", "prob", "repeat", "fold"):
+    for col in ("window_id", "key", "dataset", "subject_id", "y", "score", "repeat", "fold"):
         assert col in pred
     # each test window predicted exactly once per repeat; never a training subject
     assert not pred.duplicated(["repeat", "window_id"]).any()
@@ -124,3 +124,19 @@ def test_eeg_plus_age_runs(small_store, tmp_path, config):
     run_variant(small_store, v, "within_D1", tmp_path)
     m = json.loads((tmp_path / v["experiment"] / v["variant"] / "within_D1" / "manifest.json").read_text())
     assert m["data_info"]["covariates"] == ["age"]
+
+
+def test_svm_variant_reports_decision_scores(small_store, tmp_path):
+    vs = {v["model"]["name"]: v for v in expand_variants(load_experiment(EXP / "exp1_source_psd.yaml"))}
+    v = fast(vs["svm"])
+    summary = run_variant(small_store, v, "within_D1", tmp_path)
+    assert summary["score"] == {"type": "decision_function", "threshold": 0.0,
+                                "subject_aggregation": "mean of window scores"}
+    pred = pd.read_csv(tmp_path / v["experiment"] / v["variant"] / "within_D1" / "predictions_windows.csv")
+    assert (pred["score"] < 0).any()                                    # margins, not probabilities
+    vc = fast(set_dotted(vs["svm"], "model.calibration", "grouped_platt"))
+    vc["variant"], vc["hparams"] = "svm_grouped_platt", {}   # tiny cohort: inner folds too small to calibrate
+    s2 = run_variant(small_store, vc, "within_D1", tmp_path)
+    assert s2["score"]["type"] == "probability" and s2["score"]["threshold"] == 0.5
+    lr = run_variant(small_store, fast(vs["logreg"]), "within_D1", tmp_path)
+    assert lr["score"]["type"] == "probability"

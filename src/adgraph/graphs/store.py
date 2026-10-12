@@ -7,7 +7,9 @@ A run directory contains
                      plv, ciplv            (n_windows, n_bands, n_rois, n_rois) float32
                                            symmetric, zero diagonal, in [0, 1]; ciplv = |ciPLV|
                      ciplv_signed          same shape, antisymmetric, in [-1, 1] (optional;
-                                           never used as an adjacency)
+                                           sign = sign of the non-zero-lag phase relation
+                                           for ROI order (j, k), not a direction of
+                                           influence; never used as an adjacency)
                      psd_abs/psd_log/psd_rel            (n_windows, n_bands, n_rois) float32
                      sensor_psd_abs/_log/_rel           (n_windows, n_bands, n_channels) float32
                    and constants: bands, band_edges, roi_names, channels, W

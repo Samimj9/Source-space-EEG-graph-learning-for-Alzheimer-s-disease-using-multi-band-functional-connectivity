@@ -21,7 +21,7 @@ import pandas as pd
 
 from .config import common_channels, config_hash
 from .connectivity.plv import band_analytic, phase_sync
-from .features.psd import window_band_powers
+from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
 from .io.participants import load_participants
@@ -126,6 +126,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
 def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
         limit: int | None = None) -> Path:
     """Build graphs for all D1 and D2 resting-state recordings."""
+    pp = cfg["preprocessing"]
+    check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     chash = config_hash(cfg)
     out_dir = Path(out_root) / f"graphs_v{cfg['version']}_{stamp}_{chash}"

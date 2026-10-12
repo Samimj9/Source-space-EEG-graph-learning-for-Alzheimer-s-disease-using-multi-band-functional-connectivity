@@ -12,7 +12,8 @@ evaluation:
   n_repeats: 20                  # seeds 0..19                             (provisional)
   inner_k: 4                     # subject-level inner CV for hyperparameter selection (provisional)
   seed: 0
-  threshold: 0.5                 # fixed; never tuned on test subjects
+  threshold: 0.5                 # fixed, for probability scores (LR, GNNs, calibrated SVM); never tuned
+  decision_threshold: 0.0        # fixed, for SVM decision_function scores (the SVM's own margin boundary)
   selection_metric: roc_auc      # subject-level, inner CV
   n_bootstrap: 2000              # subjects resampled
   cross_n_seeds: 1               # cross-dataset: one train-all/test-all split (model seeds only)

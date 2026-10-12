@@ -46,3 +46,29 @@ def test_bands_are_half_open_and_disjoint():
 def test_unknown_estimator():
     with pytest.raises(ValueError):
         compute_psd(np.zeros((1, 100)), SF, {"method": "fft"})
+
+
+def test_relative_range_inside_preserved_passband():
+    """The relative-power denominator must only cover frequencies the preprocessing filter preserves."""
+    import mne
+
+    from adgraph.features.psd import check_relative_range
+
+    pp = CFG["preprocessing"]
+    lo, hi = CFG["psd"]["relative_range"]
+    check_relative_range([lo, hi], pp["l_freq"], pp["h_freq"])
+    h = mne.filter.create_filter(None, pp["sfreq"], pp["l_freq"], pp["h_freq"], method="fir",
+                                 fir_design="firwin", verbose="error")
+    f = np.fft.rfftfreq(2 ** 18, 1 / pp["sfreq"])
+    gain_db = 20 * np.log10(np.abs(np.fft.rfft(h, 2 ** 18)))
+    inside = (f >= lo) & (f <= hi)
+    assert gain_db[inside].min() > -0.1                      # flat (< 0.1 dB loss) over the whole denominator
+    assert gain_db[np.argmin(abs(f - 56.25))] < -40           # stopband well above 45 Hz
+
+
+@pytest.mark.parametrize("rng_,lo,hi", [([1.0, 50.0], 0.1, 45.0), ([0.05, 45.0], 0.1, 45.0), ([1.0, 45.0], 0.1, 40.0)])
+def test_relative_range_outside_passband_is_rejected(rng_, lo, hi):
+    from adgraph.features.psd import check_relative_range
+
+    with pytest.raises(ValueError, match="passband"):
+        check_relative_range(rng_, lo, hi)

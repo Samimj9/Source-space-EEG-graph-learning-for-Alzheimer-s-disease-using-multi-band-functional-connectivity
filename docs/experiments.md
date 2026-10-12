@@ -16,7 +16,7 @@ scripts/build_graphs.py ──► processed/graphs_v3_<stamp>_<hash>/
 scripts/run_experiment.py --config configs/experiments/<exp>.yaml --graphs <run dir>
    GraphStore.load ─► build_dataset (stateless, per window) ─► subject-level splits
    ─► per outer split: inner-CV hyperparameter selection ─► model.fit(train view)
-   ─► predict(test view) ─► window probabilities ─► subject probability (mean) ─► metrics
+   ─► predict(test view) ─► window scores ─► subject score (mean) ─► metrics
 ```
 
 ### Segmentation (frozen primary setting)
@@ -66,12 +66,19 @@ them.
 **ciPLV sign handling**
 
 - `phase_sync` computes the signed ciPLV, `Im C / sqrt(1 − (Re C)²)`. It lies in
-  [−1, 1] and is antisymmetric: the sign shows which ROI leads in phase.
-- None of the models is a signed or directed graph model, so every GNN adjacency
-  and every connectivity strength uses the **magnitude** |ciPLV|, stored as
-  `ciplv`. It is symmetric, has a zero diagonal and lies in [0, 1], like PLV.
+  [−1, 1] and is antisymmetric.
+- Its sign is the sign of the non-zero-lag (imaginary) component of the mean
+  phase relationship φ_j − φ_k. It is therefore defined relative to the ROI
+  ordering (j, k) and flips when the order is swapped.
+- The sign does **not** establish directed connectivity or causal direction.
+  Phase is circular, and common drive or differing regional dynamics can produce
+  a consistent phase offset without any directed interaction.
+- Every GNN adjacency and every connectivity strength uses the symmetric,
+  non-negative **magnitude** |ciPLV|, stored as `ciplv`. It has a zero diagonal
+  and lies in [0, 1], like PLV.
 - The signed matrix is stored separately as `ciplv_signed`
-  (`output.save_signed_ciplv`). `build_graph` refuses it as an adjacency.
+  (`output.save_signed_ciplv`), for descriptive use only. `build_graph` refuses
+  it as an adjacency.
 - Both connectivity arrays are checked on load: symmetric, zero diagonal, values
   in [0, 1] (`check_adjacency`).
 
@@ -204,11 +211,19 @@ for every graph.
    subjects from the training subjects only.
 5. **Loss weights** are computed from the training view: one vote per subject and
    classes balanced by subject count (`training_weights`).
-6. **SVM probability calibration** (Platt) is fitted on out-of-fold decision
-   values from a **subject-grouped** internal CV (`GroupedPlattSVC`,
-   `StratifiedGroupKFold`). No subject's windows are ever on both the fitting
-   and the calibration side. sklearn's window-level `CalibratedClassifierCV` is
-   not used.
+6. **SVM scores.**
+   - The primary SVM baseline (`model.calibration: none`) uses the
+     `decision_function` margin as its score. ROC-AUC and the subject-level
+     aggregation (mean margin) use it directly, with the fixed threshold 0
+     (`evaluation.decision_threshold`). No calibration is fitted.
+   - `model.calibration: grouped_platt` is optional, only for when calibrated
+     probabilities are explicitly required. Platt scaling is then fitted on
+     out-of-fold margins from a **subject-grouped** internal CV
+     (`GroupedPlattSVC`, `StratifiedGroupKFold`), and the threshold is 0.5.
+   - sklearn's window-level `CalibratedClassifierCV` is never used.
+   - LR and GNNs output probabilities with threshold 0.5.
+   - Every run records `score_type` and the threshold in `summary.json` and
+     `manifest.json`.
 7. **Age** (EEG + age models) is standardized with the training subjects' mean
    and SD (`CovariateScaler`, one value per subject), inside each fold.
 8. **Cross-dataset runs** are refused unless the graph run passes the DESIGN.md §7
@@ -218,8 +233,8 @@ for every graph.
 
 | File | Content |
 |---|---|
-| `predictions_windows.csv` | per window and repeat: identifiers, y, prob (+ learned band weights for multi-band models) |
-| `predictions_subjects.csv` | subject probability per repeat |
+| `predictions_windows.csv` | per window and repeat: identifiers, y, score (probability, or SVM margin) (+ learned band weights for multi-band models) |
+| `predictions_subjects.csv` | subject score (mean of window scores) per repeat |
 | `metrics_repeats.csv` | subject-level accuracy, balanced accuracy, F1, sensitivity, specificity, ROC-AUC, MCC, confusion matrix, per repeat; pooled runs add per-dataset rows |
 | `summary.json` | mean/SD/percentiles across repeats, repeat-averaged metrics with a subject bootstrap 95 % CI, window-level metrics, optional permutation test |
 | `folds.csv`, `hparams.csv`, `manifest.json` | split assignment, selected hyperparameters with inner scores, provenance |

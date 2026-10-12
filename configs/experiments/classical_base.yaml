@@ -8,9 +8,13 @@ preprocessing:                   # fitted inside each training fold only
   standardize: true
   select_k_best: null            # e.g. 50 (univariate F-test)
   pca_components: null           # e.g. 0.95 or 20
-  calibration_folds: 3           # SVM Platt scaling: subject-grouped internal CV folds
 model:
   name: logreg                   # logreg | svm
   params: {C: 1.0, kernel: linear}
+  # SVM only. none (primary): score = decision_function margin, used directly for ROC-AUC and
+  # subject aggregation, threshold 0. grouped_platt (optional, only when calibrated probabilities
+  # are explicitly required): Platt scaling with subject-grouped internal CV.
+  calibration: none
+  calibration_folds: 3
 hparams:                         # provisional grid
   model.params.C: [0.001, 0.01, 0.1, 1.0, 10.0]

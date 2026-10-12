@@ -98,7 +98,9 @@ class GraphSparsifier:
 
 
 class GNNModel:
-    """sklearn-like estimator around ``MultiBandGNN``."""
+    """sklearn-like estimator around ``MultiBandGNN``; scores are P(class 1) (threshold 0.5)."""
+
+    score_type = "probability"
 
     def __init__(self, model: dict, training: dict, node_scaling: str = "node", sparsify: dict | None = None,
                  seed: int = 0, device: str | None = None):
@@ -217,3 +219,6 @@ class GNNModel:
                 weights.append(bw.cpu().numpy())
         p = np.concatenate(probs) if probs else np.empty(0)
         return (p, np.concatenate(weights)) if return_band_weights else p
+
+    def predict_score(self, view: DataView, return_band_weights: bool = False):
+        return self.predict_proba(view, return_band_weights)

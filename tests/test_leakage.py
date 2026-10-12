@@ -38,7 +38,7 @@ def test_selection_and_pca_inside_pipeline(store, step):
     data = build_classical(store, {"source": "sensor", "psd_kinds": ["log"]})
     train, test = _views(data)
     m = ClassicalModel("svm", {"C": 1.0}, {"standardize": True, **step}).fit(train)
-    assert len(m.predict_proba(test)) == len(test)
+    assert len(m.predict_score(test)) == len(test)
 
 
 def test_training_weights_one_vote_per_subject_and_balanced(store):
@@ -78,10 +78,25 @@ def test_graph_scaler_and_sparsifier_fit_on_train_only(store):
     assert ((topk > 0).sum(-1) >= 5).all()
 
 
-def test_svm_calibration_is_subject_grouped(store):
+def test_primary_svm_uses_decision_function(store):
+    from sklearn.svm import SVC
+
     data = build_classical(store, {"source": "source", "psd_kinds": ["log"]})
     train, test = _views(data, "pooled")
     m = ClassicalModel("svm", {"C": 1.0}).fit(train)
+    assert m.score_type == "decision_function" and isinstance(m.clf, SVC)
+    s = m.predict_score(test)
+    assert np.allclose(s, m.clf.decision_function(m._design(test)))
+    assert (s < 0).any() and (s > 0).any()                               # margins, not probabilities
+    with pytest.raises(ValueError, match="grouped_platt"):
+        m.predict_proba(test)
+
+
+def test_svm_calibration_is_subject_grouped(store):
+    data = build_classical(store, {"source": "source", "psd_kinds": ["log"]})
+    train, test = _views(data, "pooled")
+    m = ClassicalModel("svm", {"C": 1.0}, calibration="grouped_platt").fit(train)
+    assert m.score_type == "probability"
     folds = m.clf.calibration_folds_
     assert len(folds) == 3
     for fit_subjects, cal_subjects in folds:

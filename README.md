@@ -11,6 +11,7 @@ neural networks.
 - Evaluation design (frozen): [`DESIGN.md`](DESIGN.md)
 - Experiments, tensor shapes, leakage rules: [`docs/experiments.md`](docs/experiments.md)
 - Methodological choices: [`docs/methods_decisions.md`](docs/methods_decisions.md)
+- Why each decision was made: [`docs/methodology_architecture_log.md`](docs/methodology_architecture_log.md)
 
 Data are not distributed with this repository. The pipeline runs in Google
 Colab against a mounted Google Drive. See `configs/paths.example.yaml`.

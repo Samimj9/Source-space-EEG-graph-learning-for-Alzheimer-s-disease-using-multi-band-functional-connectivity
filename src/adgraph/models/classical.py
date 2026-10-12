@@ -9,10 +9,17 @@ Every fitted step is owned by the model and fitted on the training view only:
 Covariates are appended *after* the EEG transforms, so they are never selected away or
 mixed into PCA components.
 
-SVM probabilities use Platt scaling fitted on out-of-fold decision values from a
-**subject-grouped** internal CV (``GroupedPlattSVC``): no subject's windows are ever on
-both the fitting and the calibration side. sklearn's window-level
-``CalibratedClassifierCV`` is deliberately not used.
+Scores (``predict_score``):
+* logreg: P(class 1) (``score_type = "probability"``, threshold 0.5);
+* svm, ``calibration: none`` (**primary SVM baseline**): the SVC ``decision_function``
+  margin (``score_type = "decision_function"``, threshold 0). ROC-AUC and subject-level
+  aggregation (mean margin over windows) use this score directly; no probability
+  calibration is required;
+* svm, ``calibration: grouped_platt`` (optional, only when calibrated probabilities are
+  explicitly needed): Platt scaling fitted on out-of-fold decision values from a
+  **subject-grouped** internal CV (``GroupedPlattSVC``); no subject's windows are ever on
+  both the fitting and the calibration side. sklearn's window-level
+  ``CalibratedClassifierCV`` is never used.
 """
 
 from __future__ import annotations
@@ -31,6 +38,16 @@ from ..graphs.dataset import DataView, require_train, training_weights
 from .covariates import CovariateScaler
 
 CLASSIFIERS = ("logreg", "svm")
+CALIBRATIONS = ("none", "grouped_platt")
+
+
+def score_type(name: str, calibration: str = "none") -> str:
+    """'probability' or 'decision_function' for a classical model configuration."""
+    if calibration not in CALIBRATIONS:
+        raise ValueError(f"calibration must be one of {CALIBRATIONS}")
+    if name == "svm" and calibration == "none":
+        return "decision_function"
+    return "probability"
 
 
 class GroupedPlattSVC(ClassifierMixin, BaseEstimator):
@@ -97,25 +114,30 @@ def make_feature_pipeline(preprocessing: dict, n_features: int, seed: int) -> Pi
     return Pipeline(steps or [("identity", FunctionTransformer())])
 
 
-def make_classifier(name: str, params: dict, seed: int, calibration_folds: int = 3):
+def make_classifier(name: str, params: dict, seed: int, calibration: str = "none", calibration_folds: int = 3):
     if name == "logreg":
         return LogisticRegression(C=params.get("C", 1.0), solver="lbfgs", max_iter=10_000)   # L2 (default)
     if name == "svm":
-        return GroupedPlattSVC(C=params.get("C", 1.0), kernel=params.get("kernel", "linear"),
-                               gamma=params.get("gamma", "scale"), calibration_folds=calibration_folds,
-                               random_state=seed)
+        if calibration == "grouped_platt":
+            return GroupedPlattSVC(C=params.get("C", 1.0), kernel=params.get("kernel", "linear"),
+                                   gamma=params.get("gamma", "scale"), calibration_folds=calibration_folds,
+                                   random_state=seed)
+        return SVC(C=params.get("C", 1.0), kernel=params.get("kernel", "linear"), gamma=params.get("gamma", "scale"))
     raise ValueError(f"unknown classifier {name!r}; choose from {CLASSIFIERS}")
 
 
 class ClassicalModel:
-    """Window-level classifier; ``predict_proba`` returns P(class 1) per window.
+    """Window-level classifier; ``predict_score`` returns one score per window (see module doc).
 
     Class balance and the one-subject-one-vote rule are applied through sample
     weights (``training_weights``), not through ``class_weight``.
     """
 
-    def __init__(self, name: str, params: dict | None = None, preprocessing: dict | None = None, seed: int = 0):
+    def __init__(self, name: str, params: dict | None = None, preprocessing: dict | None = None, seed: int = 0,
+                 calibration: str = "none", calibration_folds: int = 3):
         self.name, self.params, self.preprocessing, self.seed = name, params or {}, preprocessing or {}, seed
+        self.calibration, self.calibration_folds = calibration, calibration_folds
+        self.score_type = score_type(name, calibration)
         self.features = self.cov_scaler = self.clf = None
 
     def _design(self, view: DataView) -> np.ndarray:
@@ -130,16 +152,24 @@ class ClassicalModel:
         self.features = make_feature_pipeline(self.preprocessing, X.shape[1], self.seed).fit(X, y)
         self.cov_scaler = CovariateScaler().fit(view) if "cov" in view.payload else None
         Z = self._design(view)
-        self.clf = make_classifier(self.name, self.params, self.seed,
-                                   self.preprocessing.get("calibration_folds", 3))
+        self.clf = make_classifier(self.name, self.params, self.seed, self.calibration, self.calibration_folds)
         w = training_weights(view.meta, view.target)
-        if self.name == "svm":
+        if isinstance(self.clf, GroupedPlattSVC):
             self.clf.fit(Z, y, sample_weight=w, groups=view.subjects)
         else:
             self.clf.fit(Z, y, sample_weight=w)
         return self
 
-    def predict_proba(self, view: DataView) -> np.ndarray:
+    def predict_score(self, view: DataView) -> np.ndarray:
         if self.clf is None:
             raise RuntimeError("model not fitted")
-        return self.clf.predict_proba(self._design(view))[:, 1]
+        Z = self._design(view)
+        if self.score_type == "decision_function":
+            return self.clf.decision_function(Z)
+        return self.clf.predict_proba(Z)[:, 1]
+
+    def predict_proba(self, view: DataView) -> np.ndarray:
+        if self.score_type != "probability":
+            raise ValueError("uncalibrated SVM has no probabilities; use predict_score (decision_function) or set "
+                             "model.calibration: grouped_platt")
+        return self.predict_score(view)

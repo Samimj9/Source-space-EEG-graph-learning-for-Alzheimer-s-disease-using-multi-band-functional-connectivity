@@ -13,13 +13,16 @@ METRICS = ("accuracy", "balanced_accuracy", "f1", "sensitivity", "specificity", 
 
 
 def aggregate_subjects(pred: pd.DataFrame, by: tuple[str, ...] = ()) -> pd.DataFrame:
-    """Subject probability = mean of that subject's window probabilities.
+    """Subject score = mean of that subject's window scores.
 
-    ``pred`` needs columns key, dataset, y, prob (+ any ``by`` columns, e.g. repeat).
+    Scores are probabilities (LR, GNNs, calibrated SVM) or SVM decision-function margins;
+    the mean is taken on the model's own scale. ``pred`` needs columns key, dataset, y,
+    score (+ any ``by`` columns, e.g. repeat).
     """
     cols = list(by) + ["key"]
     out = (pred.groupby(cols, sort=False)
-           .agg(dataset=("dataset", "first"), y=("y", "first"), prob=("prob", "mean"), n_windows=("prob", "size"))
+           .agg(dataset=("dataset", "first"), y=("y", "first"), score=("score", "mean"),
+                n_windows=("score", "size"))
            .reset_index())
     if (pred.groupby(cols)["y"].nunique() > 1).any():
         raise ValueError("label varies within a subject")
@@ -32,12 +35,16 @@ def confusion(y: np.ndarray, pred: np.ndarray) -> dict[str, int]:
             "fn": int(((y == 1) & (pred == 0)).sum()), "tp": int(((y == 1) & (pred == 1)).sum())}
 
 
-def binary_metrics(y: np.ndarray, prob: np.ndarray, threshold: float = 0.5) -> dict[str, float]:
+def binary_metrics(y: np.ndarray, score: np.ndarray, threshold: float = 0.5) -> dict[str, float]:
     """Accuracy, balanced accuracy, F1 (positive = AD), sensitivity, specificity, ROC-AUC, MCC and the
-    confusion matrix (tn, fp, fn, tp). Undefined values (e.g. AUC with one class) are NaN."""
+    confusion matrix (tn, fp, fn, tp). Undefined values (e.g. AUC with one class) are NaN.
+
+    ``score`` is any monotone score for class 1 (probability or decision value); ROC-AUC uses it
+    directly, the threshold-based metrics use ``score >= threshold`` (0.5 for probabilities,
+    0 for SVM margins)."""
     y = np.asarray(y).astype(int)
-    prob = np.asarray(prob, dtype=float)
-    pred = (prob >= threshold).astype(int)
+    score = np.asarray(score, dtype=float)
+    pred = (score >= threshold).astype(int)
     c = confusion(y, pred)
     tp, tn, fp, fn = c["tp"], c["tn"], c["fp"], c["fn"]
 
@@ -54,24 +61,24 @@ def binary_metrics(y: np.ndarray, prob: np.ndarray, threshold: float = 0.5) -> d
         "f1": div(2 * prec * sens, prec + sens) if not (np.isnan(prec) or np.isnan(sens)) else float("nan"),
         "sensitivity": sens,
         "specificity": spec,
-        "roc_auc": roc_auc_score(y, prob) if len(np.unique(y)) == 2 else float("nan"),
+        "roc_auc": roc_auc_score(y, score) if len(np.unique(y)) == 2 else float("nan"),
         "mcc": div(tp * tn - fp * fn, denom),
         **c,
     }
     return out
 
 
-def bootstrap_ci(y: np.ndarray, prob: np.ndarray, n_boot: int = 2000, seed: int = 0, threshold: float = 0.5,
+def bootstrap_ci(y: np.ndarray, score: np.ndarray, n_boot: int = 2000, seed: int = 0, threshold: float = 0.5,
                  level: float = 0.95, metrics=METRICS) -> dict[str, tuple[float, float]]:
     """Percentile CI by resampling *subjects* (one row per subject) with replacement."""
     rng = np.random.default_rng(seed)
-    y, prob = np.asarray(y), np.asarray(prob)
+    y, score = np.asarray(y), np.asarray(score)
     draws = {m: [] for m in metrics}
     for _ in range(n_boot):
         i = rng.integers(0, len(y), len(y))
         if len(np.unique(y[i])) < 2:
             continue
-        m = binary_metrics(y[i], prob[i], threshold)
+        m = binary_metrics(y[i], score[i], threshold)
         for k in metrics:
             draws[k].append(m[k])
     a = (1 - level) / 2

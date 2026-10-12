@@ -49,9 +49,15 @@ def test_matrix_properties_plv_ciplv_signed():
     assert np.allclose(ciplv, np.abs(signed))                                       # magnitude adjacency
 
 
-def test_signed_ciplv_sign_reflects_lead():
+def test_signed_ciplv_sign_follows_phase_offset_and_roi_order():
+    """Sign = sign of sin(mean phase difference phi_j - phi_k); swapping the ROI order flips it."""
     t = np.arange(0, 20, 1 / 250)
     a = np.sin(2 * np.pi * 10 * t)
-    b = np.sin(2 * np.pi * 10 * t - np.pi / 4)        # b lags a
+    b = np.sin(2 * np.pi * 10 * t - np.pi / 4)        # phi_a - phi_b = +pi/4
     _, _, signed = phase_sync(_analytic(np.stack([a, b])))
     assert signed[0, 1] > 0.5 and signed[1, 0] == pytest.approx(-signed[0, 1])
+    _, _, swapped = phase_sync(_analytic(np.stack([b, a])))
+    assert swapped[0, 1] == pytest.approx(-signed[0, 1])
+    c = np.sin(2 * np.pi * 10 * t + 7 * np.pi / 4)     # same circular offset as -pi/4: sign is circular
+    _, _, wrapped = phase_sync(_analytic(np.stack([a, c])))
+    assert wrapped[0, 1] == pytest.approx(signed[0, 1], abs=1e-3)

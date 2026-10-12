@@ -91,7 +91,7 @@ def test_wrong_number_of_bands_rejected():
         MultiBandGNN("gcn", 2, 4)(x, a)
 
 
-def test_gat_masks_absent_edges():
+def test_edge_weighted_gat_masks_absent_edges():
     conv = EdgeWeightedGATConv(2, 4, heads=1)
     x, a = rand_graphs(k=1)
     a = a[:, 0]

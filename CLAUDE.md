@@ -153,7 +153,12 @@ by dataset and config hash.
 - Encoders are `gcn` (standard), `edge_weighted_gat` and `weighted_graphsage`.
   In writing, always call the latter two EdgeWeightedGAT and
   WeightedGraphSAGE, never plain GAT or GraphSAGE.
-- SVM calibration and every inner split are subject-grouped.
+- The primary SVM is scored by its `decision_function` margin, with no
+  calibration and threshold 0. Optional Platt calibration (`grouped_platt`) and
+  every inner split are subject-grouped.
+- Signed ciPLV's sign is the sign of the non-zero-lag phase relation for the ROI
+  order. Never describe it as directed or causal connectivity.
+- Decision rationale lives in `docs/methodology_architecture_log.md`.
 - EEG + age configs live in `configs/experiments/age/`.
 - Repeats, folds, epochs and grids are provisional.
 - **Do not run experiments or the pipeline on real data unless the user asks.**

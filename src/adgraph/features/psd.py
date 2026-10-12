@@ -19,8 +19,23 @@ Implementation
    (rectangle rule on half-open bands, so adjacent bands never share a bin).
 3. Log band power = log10(absolute band power).
 4. Relative band power = absolute band power / total power in ``relative_range``
-   (same half-open rule). The default range is 1–45 Hz: the band-pass upper edge
-   of preprocessing and above the 0.1 Hz high-pass drift region.
+   (same half-open rule, so bins 1.0 ... 44.5 Hz at 0.5 Hz resolution).
+
+Relative-power denominator vs. preprocessing passband
+-----------------------------------------------------
+The denominator must only contain frequencies that preprocessing preserves.
+Preprocessing is a zero-phase FIR band-pass 0.1–45 Hz (MNE ``firwin``), where 0.1
+and 45 Hz are the *passband edges*. Its response, measured at 250 Hz
+(tests/test_psd.py::test_relative_range_inside_preserved_passband):
+
+    0.1 Hz -0.03 dB | 1 Hz -0.00 dB | 44.5 Hz -0.01 dB | 45 Hz -0.04 dB
+    47 Hz -0.6 dB   | 50.6 Hz -6 dB (cutoff) | 56.25 Hz -48 dB (stopband)
+
+So 1–45 Hz lies entirely inside the preserved passband and is kept unchanged. The lower
+limit of 1 Hz (rather than 0.1 Hz) excludes the slow-drift region that the 0.1 Hz
+high-pass only partly removes; the reason for choosing exactly 1 Hz requires author
+confirmation. ``check_relative_range`` makes the pipeline fail, rather than silently
+adapt, if the range is ever set outside the configured passband.
 
 The features are stateless per window (no fitting), so they can be computed for
 all windows before any train/test split without leakage.
@@ -56,6 +71,14 @@ def compute_psd(x: np.ndarray, sfreq: float, cfg: dict) -> tuple[np.ndarray, np.
     else:
         raise ValueError(f"unknown PSD method {method!r}; choose from {ESTIMATORS}")
     return freqs, psd
+
+
+def check_relative_range(relative_range: list[float], l_freq: float, h_freq: float) -> None:
+    """Raise if the relative-power denominator extends outside the preprocessing passband."""
+    lo, hi = relative_range
+    if not (l_freq <= lo < hi <= h_freq):
+        raise ValueError(f"psd.relative_range {relative_range} Hz is not inside the preprocessing passband "
+                         f"[{l_freq}, {h_freq}] Hz; choose a denominator range that preprocessing preserves")
 
 
 def _band_sum(freqs: np.ndarray, psd: np.ndarray, lo: float, hi: float) -> np.ndarray:
