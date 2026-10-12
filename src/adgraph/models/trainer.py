@@ -3,6 +3,7 @@
 ``GNNModel.fit(train_view)``:
   1. fits ``NodeFeatureScaler`` on training windows only,
   2. fits the graph sparsifier on training windows only (if it has parameters),
+  2b. fits the covariate (age) scaler on training subjects only, if covariates are present,
   3. optionally splits *training subjects* into train/validation for early stopping,
   4. trains with subject- and class-balanced sample weights.
 ``predict_proba(view)`` applies the fitted transforms and returns P(class 1) per window.
@@ -16,6 +17,7 @@ import random
 import numpy as np
 
 from ..graphs.dataset import DataView, require_train, training_weights
+from .covariates import CovariateScaler
 
 
 def seed_everything(seed: int) -> None:
@@ -104,6 +106,7 @@ class GNNModel:
         self.scaler = NodeFeatureScaler(node_scaling)
         self.sparsifier = GraphSparsifier(**(sparsify or {"method": "none"}))
         self.device = device
+        self.cov_scaler: CovariateScaler | None = None
         self.net = None
         self.history: list[dict] = []
 
@@ -118,13 +121,17 @@ class GNNModel:
 
         x = self.scaler.transform(view.payload["x"])
         adj = self.sparsifier.transform(view.payload["adj"])
-        return torch.from_numpy(np.ascontiguousarray(x)), torch.from_numpy(np.ascontiguousarray(adj))
+        cov = None
+        if self.cov_scaler is not None:
+            cov = torch.from_numpy(self.cov_scaler.transform(view.payload["cov"]))
+        return torch.from_numpy(np.ascontiguousarray(x)), torch.from_numpy(np.ascontiguousarray(adj)), cov
 
-    def build_net(self, in_dim: int, n_bands: int):
+    def build_net(self, in_dim: int, n_bands: int, n_covariates: int = 0):
         from .multiband import MultiBandGNN
 
         cfg = dict(self.model_cfg)
-        return MultiBandGNN(encoder=cfg.pop("encoder"), in_dim=in_dim, n_bands=n_bands, **cfg)
+        return MultiBandGNN(encoder=cfg.pop("encoder"), in_dim=in_dim, n_bands=n_bands, n_covariates=n_covariates,
+                            **cfg)
 
     # -- API
     def fit(self, view: DataView) -> "GNNModel":
@@ -144,11 +151,13 @@ class GNNModel:
 
         self.scaler.fit(fit_view)
         self.sparsifier.fit(fit_view)
+        self.cov_scaler = CovariateScaler().fit(fit_view) if "cov" in fit_view.payload else None
         dev = self._device()
-        x, adj = self._tensors(fit_view)
+        x, adj, cov = self._tensors(fit_view)
+        n_cov = 0 if cov is None else cov.shape[1]
         y = torch.from_numpy(fit_view.y.astype(np.float32))
         w = torch.from_numpy(training_weights(fit_view.meta, fit_view.target).astype(np.float32))
-        self.net = self.build_net(x.shape[-1], x.shape[1]).to(dev)
+        self.net = self.build_net(x.shape[-1], x.shape[1], n_cov).to(dev)
         opt = torch.optim.Adam(self.net.parameters(), lr=self.train_cfg.get("lr", 1e-3),
                                weight_decay=self.train_cfg.get("weight_decay", 1e-4))
         bs, epochs = self.train_cfg.get("batch_size", 32), self.train_cfg.get("epochs", 100)
@@ -160,7 +169,7 @@ class GNNModel:
             total = 0.0
             for i in range(0, len(y), bs):
                 idx = perm[i:i + bs]
-                logits = self.net(x[idx].to(dev), adj[idx].to(dev))
+                logits = self.net(x[idx].to(dev), adj[idx].to(dev), None if cov is None else cov[idx].to(dev))
                 loss = (F.binary_cross_entropy_with_logits(logits, y[idx].to(dev), reduction="none")
                         * w[idx].to(dev)).sum() / w[idx].sum().to(dev)
                 opt.zero_grad()
@@ -197,12 +206,13 @@ class GNNModel:
         if self.net is None:
             raise RuntimeError("model not fitted")
         dev = self._device()
-        x, adj = self._tensors(view)
+        x, adj, cov = self._tensors(view)
         self.net.eval()
         probs, weights = [], []
         with torch.no_grad():
             for i in range(0, len(x), 256):
-                logits, bw = self.net(x[i:i + 256].to(dev), adj[i:i + 256].to(dev), return_band_weights=True)
+                c = None if cov is None else cov[i:i + 256].to(dev)
+                logits, bw = self.net(x[i:i + 256].to(dev), adj[i:i + 256].to(dev), c, return_band_weights=True)
                 probs.append(torch.sigmoid(logits).cpu().numpy())
                 weights.append(bw.cpu().numpy())
         p = np.concatenate(probs) if probs else np.empty(0)

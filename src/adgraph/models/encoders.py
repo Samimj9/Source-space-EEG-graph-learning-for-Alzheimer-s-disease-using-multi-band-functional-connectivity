@@ -28,12 +28,21 @@ class DenseEncoder(nn.Module):
         return torch.relu(x)
 
 
-def build_encoder(name: str, in_dim: int, hidden: int, n_layers: int, dropout: float, **kwargs) -> DenseEncoder:
-    from .gat import gat_encoder
-    from .gcn import gcn_encoder
-    from .graphsage import sage_encoder
+ENCODERS = ("gcn", "edge_weighted_gat", "weighted_graphsage")
 
-    makers = {"gcn": gcn_encoder, "gat": gat_encoder, "graphsage": sage_encoder}
+
+def build_encoder(name: str, in_dim: int, hidden: int, n_layers: int, dropout: float, **kwargs) -> DenseEncoder:
+    """``gcn`` (standard weighted-adjacency GCN), ``edge_weighted_gat`` (EdgeWeightedGAT) or
+    ``weighted_graphsage`` (WeightedGraphSAGE). The canonical unweighted GAT / GraphSAGE are
+    deliberately not offered under their plain names."""
+    from .edge_weighted_gat import edge_weighted_gat_encoder
+    from .gcn import gcn_encoder
+    from .weighted_graphsage import weighted_graphsage_encoder
+
+    makers = {"gcn": gcn_encoder, "edge_weighted_gat": edge_weighted_gat_encoder,
+              "weighted_graphsage": weighted_graphsage_encoder}
     if name not in makers:
-        raise ValueError(f"unknown encoder {name!r}; choose from {sorted(makers)}")
+        hint = {"gat": "edge_weighted_gat", "graphsage": "weighted_graphsage"}.get(name)
+        raise ValueError(f"unknown encoder {name!r}; choose from {ENCODERS}"
+                         + (f" (the weighted variant is called {hint!r})" if hint else ""))
     return makers[name](in_dim, hidden, n_layers, dropout, **kwargs)

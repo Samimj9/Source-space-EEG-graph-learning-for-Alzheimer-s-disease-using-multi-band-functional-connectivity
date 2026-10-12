@@ -7,7 +7,8 @@ graph:
   band_mode: multi
 node_features:
   components: [psd]
-  psd_bands: matched
+  psd_kinds: [log, rel]
+  psd_bands: matched             # band graph b gets [log PSD_b, rel PSD_b] (F = 2)
 sweep:
   graph.connectivity: [plv, ciplv]
   model.shared_encoder: [true, false]

@@ -1,11 +1,14 @@
-# Experiment 6: multi-band GNN with node features X_i,b = [PSD_i,b, strength_i,b]
-# (strength from band b's own connectivity matrix). Candidate richest model, with ablations.
+# Experiment 6: multi-band GNN with node features, per ROI i and band b,
+#   X_i,b = [log_absolute_PSD_i,b, relative_PSD_i,b, strength_i,b]      (F = 3)
+# strength_i,b = mean connectivity of ROI i in band b's own adjacency (PLV or |ciPLV|).
+# Candidate richest model, with ablations.
 extends: gnn_base.yaml
 experiment: exp6_multiband_psd_strength
 graph:
   band_mode: multi
 node_features:
   components: [psd, strength]
+  psd_kinds: [log, rel]
   psd_bands: matched
 model:
   fusion: attention              # learned fusion; see variants for its ablation

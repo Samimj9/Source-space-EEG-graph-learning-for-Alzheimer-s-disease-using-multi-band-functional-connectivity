@@ -1,0 +1,6 @@
+# Experiment 3b (optional, SECONDARY): as Experiment 3, but every single-band graph gets the
+# PSD of all four bands as node features (F = 8). Not the primary Experiment 3.
+extends: exp3_conn_psd.yaml
+experiment: exp3b_conn_psd_allbands
+node_features:
+  psd_bands: all

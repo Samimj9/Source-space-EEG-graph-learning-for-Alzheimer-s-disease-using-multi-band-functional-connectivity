@@ -1,4 +1,7 @@
-"""Dense weighted GraphSAGE (Hamilton et al., 2017).
+"""WeightedGraphSAGE: dense GraphSAGE with edge-weighted neighbour aggregation.
+
+This is a *modified* GraphSAGE (Hamilton et al., 2017), not the canonical unweighted
+mean-aggregator GraphSAGE, and must be reported as "weighted GraphSAGE" in the paper.
 
 h_i' = W_self h_i + W_neigh AGG_j(A_ij, h_j), optionally L2-normalized.
 
@@ -23,7 +26,7 @@ from .encoders import DenseEncoder
 AGGREGATORS = ("sum", "mean", "max")
 
 
-class DenseSAGEConv(nn.Module):
+class WeightedSAGEConv(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, aggr: str = "sum", normalize: bool = False):
         super().__init__()
         if aggr not in AGGREGATORS:
@@ -45,7 +48,7 @@ class DenseSAGEConv(nn.Module):
         return F.normalize(out, dim=-1) if self.normalize else out
 
 
-def sage_encoder(in_dim: int, hidden: int, n_layers: int, dropout: float, aggr: str = "sum",
+def weighted_graphsage_encoder(in_dim: int, hidden: int, n_layers: int, dropout: float, aggr: str = "sum",
                  normalize: bool = False, **_) -> DenseEncoder:
     dims = [in_dim] + [hidden] * n_layers
-    return DenseEncoder([DenseSAGEConv(dims[i], dims[i + 1], aggr, normalize) for i in range(n_layers)], dropout)
+    return DenseEncoder([WeightedSAGEConv(dims[i], dims[i + 1], aggr, normalize) for i in range(n_layers)], dropout)

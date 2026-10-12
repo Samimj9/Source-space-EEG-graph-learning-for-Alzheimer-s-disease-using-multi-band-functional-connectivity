@@ -24,7 +24,7 @@ def make_synthetic_store(cohort: dict | None = None, windows_per_subject: tuple[
     rng = np.random.default_rng(seed)
     cohort = cohort or DEFAULT_COHORT
     k = len(BANDS)
-    plv, ciplv, psd_abs, s_abs, rows, subj_rows = [], [], [], [], [], []
+    plv, ciplv, ci_signed, psd_abs, s_abs, rows, subj_rows = [], [], [], [], [], [], []
     block = np.arange(min(10, n_rois))
     for ds, (n_ad, n_hc) in cohort.items():
         for sid, y in enumerate([1] * n_ad + [0] * n_hc, start=1):
@@ -39,7 +39,11 @@ def make_synthetic_store(cohort: dict | None = None, windows_per_subject: tuple[
                 for b in range(k):
                     np.fill_diagonal(base[b], 0.0)
                 plv.append(base)
-                ciplv.append(base * rng.uniform(0.2, 0.6, size=(k, 1, 1)))
+                mag = base * rng.uniform(0.2, 0.6, size=(k, 1, 1))
+                sign = np.sign(rng.standard_normal((k, n_rois, n_rois)))
+                sign = np.triu(sign, 1) - np.triu(sign, 1).transpose(0, 2, 1)       # antisymmetric signs
+                ciplv.append(mag)
+                ci_signed.append(mag * sign)
                 spec = np.array([1.0, 1.4, 1.0, 0.6])[:, None] * np.exp(rng.normal(subj_level, 0.2, (k, n_rois)))
                 if y == 1 and psd_effect:
                     spec[0] *= 1 + psd_effect
@@ -64,6 +68,7 @@ def make_synthetic_store(cohort: dict | None = None, windows_per_subject: tuple[
     total = lambda a: a.sum(1, keepdims=True) * 1.3                       # noqa: E731 (power outside 4-30 Hz)
     arrays = {
         "plv": np.array(plv, np.float32), "ciplv": np.array(ciplv, np.float32),
+        "ciplv_signed": np.array(ci_signed, np.float32),
         "psd_abs": psd_abs.astype(np.float32), "psd_log": np.log10(psd_abs).astype(np.float32),
         "psd_rel": (psd_abs / total(psd_abs)).astype(np.float32),
         "sensor_psd_abs": s_abs.astype(np.float32), "sensor_psd_log": np.log10(s_abs).astype(np.float32),

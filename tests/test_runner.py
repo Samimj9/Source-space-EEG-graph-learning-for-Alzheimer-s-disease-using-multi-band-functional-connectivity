@@ -113,3 +113,14 @@ def test_dry_run_reports_shapes(small_store):
     shapes = json.loads(table.iloc[0]["shapes"])
     assert shapes["x"][1:] == [4, 68, 3] and shapes["adj"][1:] == [4, 68, 68]
     assert json.loads(table.iloc[-1]["shapes"])["X"][1] == 2 * 4 * 30
+
+
+@pytest.mark.parametrize("config", ["age/exp1_source_psd_plus_age.yaml", "age/exp0_sensor_psd_plus_age.yaml",
+                                    "age/exp6_multiband_psd_strength_plus_age.yaml"])
+def test_eeg_plus_age_runs(small_store, tmp_path, config):
+    v = fast(first_variant(config))
+    if v["input"] == "graph":
+        pytest.importorskip("torch")
+    run_variant(small_store, v, "within_D1", tmp_path)
+    m = json.loads((tmp_path / v["experiment"] / v["variant"] / "within_D1" / "manifest.json").read_text())
+    assert m["data_info"]["covariates"] == ["age"]

@@ -8,8 +8,9 @@ preprocessing:                   # fitted inside each training fold only
   standardize: true
   select_k_best: null            # e.g. 50 (univariate F-test)
   pca_components: null           # e.g. 0.95 or 20
+  calibration_folds: 3           # SVM Platt scaling: subject-grouped internal CV folds
 model:
   name: logreg                   # logreg | svm
   params: {C: 1.0, kernel: linear}
-hparams:
+hparams:                         # provisional grid
   model.params.C: [0.001, 0.01, 0.1, 1.0, 10.0]

@@ -5,9 +5,9 @@ import pytest
 from adgraph.experiments.config import expand_variants, hparam_grid, load_experiment
 
 EXP_DIR = Path("configs/experiments")
-EXPERIMENTS = sorted(p for p in EXP_DIR.glob("*.yaml") if "base" not in p.name)
+EXPERIMENTS = sorted(p for p in EXP_DIR.glob("**/*.yaml") if "base" not in p.name)
 EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minimal": 24, "exp3_conn_psd": 24,
-                   "exp4_band_mean": 2, "exp5_multiband": 16, "exp6_multiband_psd_strength": 16,
+                   "exp3b_conn_psd_allbands": 24, "exp4_band_mean": 2, "exp5_multiband": 16, "exp6_multiband_psd_strength": 16,
                    "baseline_age": 1, "probe_dataset": 1, "baseline_conn_classical": 4}
 
 
@@ -15,7 +15,9 @@ EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minima
 def test_config_expands(path):
     cfg = load_experiment(path)
     variants = expand_variants(cfg)
-    assert len(variants) == EXPECTED_COUNTS[cfg["experiment"]]
+    base_name = cfg["experiment"].removesuffix("_plus_age")
+    assert len(variants) == EXPECTED_COUNTS[base_name]
+    assert cfg["covariates"] == (["age"] if cfg["experiment"].endswith("_plus_age") else [])
     for v in variants:
         assert v["evaluation"]["k"] == 5 and v["evaluation"]["n_repeats"] == 20
         assert v["evaluation"]["threshold"] == 0.5
@@ -48,5 +50,19 @@ def test_variant_names_are_readable():
 
 def test_exp2_uses_constant_node_features_and_three_encoders():
     vs = expand_variants(load_experiment(EXP_DIR / "exp2_conn_minimal.yaml"))
-    assert {v["model"]["encoder"] for v in vs} == {"gcn", "gat", "graphsage"}
+    assert {v["model"]["encoder"] for v in vs} == {"gcn", "edge_weighted_gat", "weighted_graphsage"}
     assert all(v["node_features"]["components"] == ["constant"] and v["graph"]["band_mode"] == "single" for v in vs)
+
+
+def test_exp3_primary_uses_matching_band_psd():
+    v = expand_variants(load_experiment(EXP_DIR / "exp3_conn_psd.yaml"))[0]
+    assert v["node_features"]["psd_bands"] == "matched" and v["node_features"]["psd_kinds"] == ["log", "rel"]
+    v = expand_variants(load_experiment(EXP_DIR / "exp3b_conn_psd_allbands.yaml"))[0]
+    assert v["node_features"]["psd_bands"] == "all"
+
+
+def test_age_configs_cover_eeg_experiments():
+    names = {p.stem for p in (EXP_DIR / "age").glob("*.yaml")}
+    for e in ("exp0_sensor_psd", "exp1_source_psd", "exp2_conn_minimal", "exp3_conn_psd", "exp4_band_mean",
+              "exp5_multiband", "exp6_multiband_psd_strength"):
+        assert f"{e}_plus_age" in names

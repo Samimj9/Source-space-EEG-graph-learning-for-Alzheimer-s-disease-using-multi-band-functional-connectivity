@@ -5,6 +5,9 @@ A run directory contains
 
     graphs.npz     per-window arrays (index i <-> row i of windows.csv):
                      plv, ciplv            (n_windows, n_bands, n_rois, n_rois) float32
+                                           symmetric, zero diagonal, in [0, 1]; ciplv = |ciPLV|
+                     ciplv_signed          same shape, antisymmetric, in [-1, 1] (optional;
+                                           never used as an adjacency)
                      psd_abs/psd_log/psd_rel            (n_windows, n_bands, n_rois) float32
                      sensor_psd_abs/_log/_rel           (n_windows, n_bands, n_channels) float32
                    and constants: bands, band_edges, roi_names, channels, W
@@ -26,9 +29,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-CONNECTIVITY = ("plv", "ciplv")
+CONNECTIVITY = ("plv", "ciplv")            # adjacency-valid (non-negative, symmetric) measures
 PSD_KINDS = ("abs", "log", "rel")
-ARRAY_KEYS = CONNECTIVITY + tuple(f"psd_{k}" for k in PSD_KINDS) + tuple(f"sensor_psd_{k}" for k in PSD_KINDS)
+ARRAY_KEYS = CONNECTIVITY + ("ciplv_signed",) + tuple(f"psd_{k}" for k in PSD_KINDS) + tuple(f"sensor_psd_{k}" for k in PSD_KINDS)
 WINDOW_COLUMNS = ("window_id", "key", "dataset", "subject_id", "label", "y", "window_index",
                   "start_sample", "stop_sample", "tmin", "tmax", "sample_weight")
 
@@ -36,6 +39,16 @@ WINDOW_COLUMNS = ("window_id", "key", "dataset", "subject_id", "label", "y", "wi
 def window_id(key: str, window_index: int) -> str:
     """Stable window identifier: subject key + index among all candidate windows (before rejection)."""
     return f"{key}-w{window_index:04d}"
+
+
+def check_adjacency(a: np.ndarray, name: str = "adjacency", atol: float = 1e-5) -> None:
+    """Adjacency contract: symmetric, zero diagonal, values in [0, 1]. a (..., R, R)."""
+    if not np.allclose(a, np.swapaxes(a, -1, -2), atol=atol):
+        raise ValueError(f"{name}: not symmetric")
+    if np.abs(np.diagonal(a, axis1=-2, axis2=-1)).max() > atol:
+        raise ValueError(f"{name}: non-zero diagonal")
+    if a.min() < -atol or a.max() > 1 + atol:
+        raise ValueError(f"{name}: values outside [0, 1] (signed ciPLV must not be used as an adjacency)")
 
 
 @dataclass
@@ -64,12 +77,19 @@ class GraphStore:
         if self.windows["window_id"].duplicated().any():
             raise ValueError("duplicate window_id")
         n, k, r, c = self.n_windows, len(self.bands), len(self.roi_names), len(self.channels)
-        expected = {"plv": (n, k, r, r), "ciplv": (n, k, r, r)}
+        expected = {"plv": (n, k, r, r), "ciplv": (n, k, r, r), "ciplv_signed": (n, k, r, r)}
         expected.update({f"psd_{p}": (n, k, r) for p in PSD_KINDS})
         expected.update({f"sensor_psd_{p}": (n, k, c) for p in PSD_KINDS})
         for name, arr in self.arrays.items():
             if name in expected and arr.shape != expected[name]:
                 raise ValueError(f"{name} has shape {arr.shape}, expected {expected[name]}")
+        for name in CONNECTIVITY:
+            if name in self.arrays and self.n_windows:
+                check_adjacency(self.arrays[name], name)
+        if "ciplv_signed" in self.arrays and self.n_windows:
+            a = self.arrays["ciplv_signed"]
+            if not np.allclose(a, -np.swapaxes(a, -1, -2), atol=1e-5) or np.abs(a).max() > 1 + 1e-5:
+                raise ValueError("ciplv_signed must be antisymmetric with values in [-1, 1]")
         if self.band_edges.shape != (k, 2):
             raise ValueError(f"band_edges shape {self.band_edges.shape} != ({k}, 2)")
 

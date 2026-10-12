@@ -89,7 +89,7 @@ src/adgraph/        Importable Python package (all reusable logic lives here).
   features/         PSD band power
   connectivity/     band-limited PLV and ciPLV
   graphs/           store schema (store.py), experiment inputs and DataViews (dataset.py)
-  models/           LR/SVM (classical.py), dense GCN/GAT/GraphSAGE, multi-band fusion, trainer
+  models/           LR/SVM (classical.py), dense GCN / EdgeWeightedGAT / WeightedGraphSAGE, fusion, trainer
   evaluation/       subject-level splits, metrics, statistics
   experiments/      config loading/variants, cross-dataset gate, runner
 notebooks/          Thin Colab notebooks: mount Drive, install, call src/. Numbered by stage.
@@ -136,6 +136,8 @@ by dataset and config hash.
   *i* of the arrays.
 - PLV is primary and ciPLV is the sensitivity analysis. They are stored and
   evaluated separately and never merged.
+- Graph adjacencies use the magnitude |ciPLV| (`ciplv`). The signed,
+  antisymmetric ciPLV (`ciplv_signed`) is never used as an adjacency.
 
 ## Experiments
 
@@ -148,6 +150,12 @@ by dataset and config hash.
   - Anything fitted lives inside an estimator, whose `fit` accepts only a
     `train` `DataView`.
   - Never fit a scaler, selector or threshold outside a model.
+- Encoders are `gcn` (standard), `edge_weighted_gat` and `weighted_graphsage`.
+  In writing, always call the latter two EdgeWeightedGAT and
+  WeightedGraphSAGE, never plain GAT or GraphSAGE.
+- SVM calibration and every inner split are subject-grouped.
+- EEG + age configs live in `configs/experiments/age/`.
+- Repeats, folds, epochs and grids are provisional.
 - **Do not run experiments or the pipeline on real data unless the user asks.**
   `--synthetic` and `pytest` are always fine.
 - Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed).
@@ -155,7 +163,7 @@ by dataset and config hash.
 ## Conventions
 
 - Python 3.10+ (Colab default). Core stack: `mne`, `numpy`, `scipy`, `pandas`,
-  `scikit-learn`, `torch`, `torch_geometric`. `mne` is pinned in
+  `scikit-learn`, `torch` (dense GNNs, no `torch_geometric`). `mne` is pinned in
   `requirements.txt` (forward/inverse results must not drift).
 - Set and log random seeds (numpy, torch, python) for every run.
 - Units: keep EEG in volts inside MNE objects. Dataset 1 EDFs are mislabeled

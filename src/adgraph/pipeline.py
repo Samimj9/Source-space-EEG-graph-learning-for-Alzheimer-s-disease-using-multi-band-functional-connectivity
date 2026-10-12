@@ -90,14 +90,17 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     n_w, n_b, n_r, n_c = len(kept), len(bands), roi.shape[0], data.shape[0]
     plv = np.zeros((n_w, n_b, n_r, n_r), np.float32)
     ciplv = np.zeros_like(plv)
+    ciplv_signed = np.zeros_like(plv)
     # Band-pass + Hilbert once per band on the continuous ROI signals, then cut windows.
     for b, (lo, hi) in enumerate(bands.values()):
         analytic = band_analytic(roi, sfreq, lo, hi)
         for w, s in enumerate(kept):
-            plv[w, b], ciplv[w, b] = phase_sync(analytic[:, s:s + win_len])
+            plv[w, b], ciplv[w, b], ciplv_signed[w, b] = phase_sync(analytic[:, s:s + win_len])
 
     psd_cfg = cfg["psd"]
     out = {"plv": plv, "ciplv": ciplv}
+    if cfg["output"].get("save_signed_ciplv", True):
+        out["ciplv_signed"] = ciplv_signed
     for prefix, sig, n in (("psd", roi, n_r), ("sensor_psd", data, n_c)):
         if prefix == "sensor_psd" and not psd_cfg.get("sensor", True):
             continue
@@ -154,6 +157,8 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
     log.info("ROI operator %s, %d sources, verified (rel. err %.1e)", op["W"].shape, op["n_sources"], op_err)
 
     array_keys = ["plv", "ciplv"] + [f"psd_{k}" for k in PSD_KINDS]
+    if cfg["output"].get("save_signed_ciplv", True):
+        array_keys.append("ciplv_signed")
     if cfg["psd"].get("sensor", True):
         array_keys += [f"sensor_psd_{k}" for k in PSD_KINDS]
     arrays = {k: [] for k in array_keys}
@@ -208,7 +213,7 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
 
     bands = cfg["connectivity"]["bands"]
     n_b, n_r, n_c = len(bands), len(op["roi_names"]), len(op["ch_names"])
-    empty_shape = {"plv": (0, n_b, n_r, n_r), "ciplv": (0, n_b, n_r, n_r)}
+    empty_shape = {k: (0, n_b, n_r, n_r) for k in ("plv", "ciplv", "ciplv_signed")}
     stacked = {k: np.concatenate(v) if v else np.empty(empty_shape.get(k, (0, n_b, n_c if "sensor" in k else n_r)),
                                                          np.float32) for k, v in arrays.items()}
     windows = pd.DataFrame(win_rows)

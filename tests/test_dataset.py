@@ -121,3 +121,79 @@ def test_dataset_probe_target(store):
     d = build_classical(store, {"source": "source", "psd_kinds": ["log"]}, target="dataset")
     assert d.target == "y_dataset"
     assert (d.meta["y_dataset"] == (d.meta["dataset"] == "D2")).all()
+
+
+@pytest.mark.parametrize("conn", ["plv", "ciplv"])
+def test_strength_from_magnitude_adjacency(store, conn):
+    d = build_graph(store, g(conn), nf(["strength"]))
+    A = store.arrays[conn]
+    assert (A >= 0).all()                                            # ciplv is the magnitude |ciPLV|
+    off = A.sum(-1) / 67                                             # zero diagonal
+    assert np.allclose(d.payload["x"][..., 0], off, atol=1e-5)
+    assert (d.payload["x"] >= 0).all() and (d.payload["x"] <= 1).all()
+
+
+def test_signed_ciplv_is_not_an_adjacency(store):
+    assert np.allclose(np.abs(store.arrays["ciplv_signed"]), store.arrays["ciplv"])
+    with pytest.raises(ValueError, match="signed"):
+        build_graph(store, g("ciplv_signed"), nf(["constant"]))
+
+
+def test_adjacency_contract():
+    from adgraph.graphs.store import check_adjacency
+
+    a = np.random.default_rng(0).uniform(size=(2, 5, 5))
+    a = (a + np.swapaxes(a, -1, -2)) / 2
+    a[:, range(5), range(5)] = 0
+    check_adjacency(a)
+    with pytest.raises(ValueError, match="symmetric"):
+        check_adjacency(a + np.triu(np.ones((5, 5)), 1) * 0.1)
+    with pytest.raises(ValueError, match="diagonal"):
+        check_adjacency(a + np.eye(5) * 0.5)
+    with pytest.raises(ValueError, match="outside"):
+        check_adjacency(-a)
+
+
+def test_store_validates_signed_ciplv(store):
+    bad = dict(store.arrays, ciplv_signed=np.abs(store.arrays["ciplv_signed"]))   # symmetric -> invalid
+    with pytest.raises(ValueError, match="antisymmetric"):
+        GraphStore(bad, store.windows, store.bands, store.band_edges, store.roi_names, store.channels)
+
+
+def test_experiment_node_feature_layouts(store):
+    from pathlib import Path
+
+    from adgraph.experiments.config import expand_variants, load_experiment
+    from adgraph.graphs.dataset import build_dataset
+
+    exp = Path("configs/experiments")
+    n = store.n_windows
+    for cfg, shape_x, names in [
+        ("exp3_conn_psd.yaml", (n, 1, 68, 2), ["psd_log:theta", "psd_rel:theta"]),
+        ("exp3b_conn_psd_allbands.yaml", (n, 1, 68, 8), None),
+        ("exp4_band_mean.yaml", (n, 1, 68, 8), None),
+        ("exp5_multiband.yaml", (n, 4, 68, 2), ["psd_log:band", "psd_rel:band"]),
+        ("exp6_multiband_psd_strength.yaml", (n, 4, 68, 3), ["psd_log:band", "psd_rel:band", "strength"]),
+    ]:
+        v = expand_variants(load_experiment(exp / cfg))[0]
+        d = build_dataset(store, v)
+        assert d.payload["x"].shape == shape_x, cfg
+        if names:
+            assert d.info["feature_names"] == names
+    # Exp 3 primary: theta graph gets theta PSD, beta graph gets beta PSD
+    vs = {v["variant"]: v for v in expand_variants(load_experiment(exp / "exp3_conn_psd.yaml"))}
+    for band, b in (("theta", 0), ("beta", 3)):
+        d = build_dataset(store, vs[f"plv__{band}__gcn"])
+        assert np.allclose(d.payload["x"][:, 0, :, 0], store.arrays["psd_log"][:, b])
+        assert np.allclose(d.payload["x"][:, 0, :, 1], store.arrays["psd_rel"][:, b])
+
+
+def test_covariates_payload(store):
+    from adgraph.graphs.dataset import add_covariates
+
+    d = add_covariates(build_graph(store, g(), nf(["constant"])), ["age"])
+    assert d.payload["cov"].shape == (store.n_windows, 1)
+    with pytest.raises(ValueError):
+        add_covariates(build_classical(store, {"source": "age"}), ["age"])
+    with pytest.raises(ValueError):
+        add_covariates(d, ["mmse"])

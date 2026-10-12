@@ -1,0 +1,7 @@
+# Age sensitivity analysis (DESIGN.md §5): EEG + age version of exp6_multiband_psd_strength.
+# Age is standardized with training-subject statistics inside each fold; classical models
+# append it to the EEG feature vector, GNNs concatenate it to the pooled graph embedding
+# right before the final classifier. Compare with exp6_multiband_psd_strength (EEG-only) and baseline_age (age-only).
+extends: ../exp6_multiband_psd_strength.yaml
+experiment: exp6_multiband_psd_strength_plus_age
+covariates: [age]

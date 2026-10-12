@@ -37,7 +37,9 @@ windowing:
   # continuous signal before segmentation. Other lengths stay configurable.
   window_s: 20.0
   step_s: 10.0
-  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (filter edges, settling)
+  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (filter edges, settling).
+                                # Configurable; this is why a nominal 300 s recording yields 27 (not 29)
+                                # 20 s / 50 % windows: n = floor((T - 2*trim - window) / step) + 1
   rejection:
     mad_k: 5.0                  # threshold = median + k * MAD of this subject's peak-to-peak values
     max_bad_channel_fraction: 0.15
@@ -63,7 +65,7 @@ connectivity:
     alpha1: [8.0, 10.0]
     alpha2: [10.0, 13.0]
     beta: [13.0, 30.0]
-  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = leakage-robust sensitivity, never merged
+  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = |ciPLV|, leakage-robust sensitivity, never merged
 
 psd:
   # Band power for the same bands as connectivity, per window, for the 68 ROIs and
@@ -83,5 +85,6 @@ psd:
 
 output:
   save_roi_timeseries: false    # true: roi_timeseries/<key>.npy (continuous, float32) per subject
+  save_signed_ciplv: true       # keep antisymmetric signed ciPLV as `ciplv_signed` (never an adjacency)
 
 seed: 0

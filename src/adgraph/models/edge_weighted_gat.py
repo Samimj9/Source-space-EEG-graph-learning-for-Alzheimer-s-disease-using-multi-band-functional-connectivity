@@ -1,4 +1,7 @@
-"""Dense, edge-weight-aware graph attention (GAT, Velickovic et al., 2018).
+"""EdgeWeightedGAT: dense graph attention with edge weights in attention and messages.
+
+This is a *modified* GAT, not the canonical unweighted GAT of Velickovic et al. (2018),
+and must be reported as "edge-weighted GAT" (EdgeWeightedGAT) in the paper.
 
 Attention logits for edge j -> i in head h:
     e_ij = LeakyReLU(a_src . W h_i + a_dst . W h_j + c_h * A_ij)
@@ -22,7 +25,7 @@ from torch.nn import functional as F
 from .encoders import DenseEncoder
 
 
-class DenseEdgeGATConv(nn.Module):
+class EdgeWeightedGATConv(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, heads: int = 4, concat: bool = True, dropout: float = 0.0,
                  edge_in_message: bool = True):
         super().__init__()
@@ -59,9 +62,9 @@ class DenseEdgeGATConv(nn.Module):
         return (out, alpha) if return_attention else out
 
 
-def gat_encoder(in_dim: int, hidden: int, n_layers: int, dropout: float, heads: int = 4,
+def edge_weighted_gat_encoder(in_dim: int, hidden: int, n_layers: int, dropout: float, heads: int = 4,
                 edge_in_message: bool = True, **_) -> DenseEncoder:
     dims = [in_dim] + [hidden] * n_layers
-    convs = [DenseEdgeGATConv(dims[i], dims[i + 1], heads=heads, concat=True, dropout=dropout,
+    convs = [EdgeWeightedGATConv(dims[i], dims[i + 1], heads=heads, concat=True, dropout=dropout,
                        edge_in_message=edge_in_message) for i in range(n_layers)]
     return DenseEncoder(convs, dropout)

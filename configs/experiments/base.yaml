@@ -1,12 +1,16 @@
-# Shared evaluation protocol for every experiment (DESIGN.md §3-4). Frozen: change only with a
-# logged reason in docs/methods_decisions.md.
+# Shared evaluation protocol for every experiment (DESIGN.md §3-4).
+# FROZEN: subject-level splitting, nested inner CV for selection, fixed 0.5 threshold, metrics.
+# PROVISIONAL (configurable, not yet the final scientific protocol): k, n_repeats, inner_k,
+# bootstrap/permutation counts here, and epochs / early stopping / hparam grids in the model
+# bases. Override per run, e.g. --override evaluation.n_repeats=5.
 target: label                    # label (AD vs HC) | dataset (dataset-identity probe, pooled only)
+covariates: []                   # [] = EEG-only | [age] = EEG + age (age standardized on training subjects)
 settings: [within_D1, within_D2, pooled, cross_D1_to_D2, cross_D2_to_D1]
 evaluation:
   scheme: kfold                  # kfold | loso (supplementary sensitivity analysis)
-  k: 5                           # outer stratified subject folds
-  n_repeats: 20                  # seeds 0..19
-  inner_k: 4                     # subject-level inner CV for hyperparameter selection
+  k: 5                           # outer stratified subject folds          (provisional)
+  n_repeats: 20                  # seeds 0..19                             (provisional)
+  inner_k: 4                     # subject-level inner CV for hyperparameter selection (provisional)
   seed: 0
   threshold: 0.5                 # fixed; never tuned on test subjects
   selection_metric: roc_auc      # subject-level, inner CV

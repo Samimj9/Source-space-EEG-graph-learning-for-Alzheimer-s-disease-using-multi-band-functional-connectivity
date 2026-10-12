@@ -25,11 +25,11 @@ def test_classical_scaler_uses_training_windows_only(store):
     data = build_classical(store, {"source": "source", "psd_kinds": ["log", "rel"]})
     train, test = _views(data)
     m = ClassicalModel("logreg", {"C": 1.0}).fit(train)
-    assert np.allclose(m.pipeline.named_steps["scale"].mean_, train.payload["X"].mean(0))
+    assert np.allclose(m.features.named_steps["scale"].mean_, train.payload["X"].mean(0))
     p1 = m.predict_proba(test)
     # corrupting test features changes nothing that was fitted
     test.payload["X"][:] = 1e6
-    assert np.allclose(m.pipeline.named_steps["scale"].mean_, train.payload["X"].mean(0))
+    assert np.allclose(m.features.named_steps["scale"].mean_, train.payload["X"].mean(0))
     assert p1.shape == (len(test),)
 
 
@@ -76,3 +76,42 @@ def test_graph_scaler_and_sparsifier_fit_on_train_only(store):
     topk = GraphSparsifier("topk", k=5).transform(test.payload["adj"])
     assert np.allclose(topk, np.swapaxes(topk, -1, -2))
     assert ((topk > 0).sum(-1) >= 5).all()
+
+
+def test_svm_calibration_is_subject_grouped(store):
+    data = build_classical(store, {"source": "source", "psd_kinds": ["log"]})
+    train, test = _views(data, "pooled")
+    m = ClassicalModel("svm", {"C": 1.0}).fit(train)
+    folds = m.clf.calibration_folds_
+    assert len(folds) == 3
+    for fit_subjects, cal_subjects in folds:
+        assert set(fit_subjects).isdisjoint(cal_subjects)                 # no subject on both sides
+    assert sorted(np.concatenate([c for _, c in folds])) == sorted(set(train.subjects))
+    p = m.predict_proba(test)
+    assert p.shape == (len(test),) and ((p > 0) & (p < 1)).all()
+
+
+def test_grouped_platt_requires_groups(store):
+    from adgraph.models.classical import GroupedPlattSVC
+
+    with pytest.raises(ValueError, match="groups"):
+        GroupedPlattSVC().fit(np.random.rand(20, 3), np.r_[np.zeros(10), np.ones(10)])
+
+
+def test_age_covariate_scaled_on_training_subjects_only(store):
+    from adgraph.graphs.dataset import add_covariates
+    from adgraph.models.covariates import CovariateScaler
+
+    data = add_covariates(build_classical(store, {"source": "source", "psd_kinds": ["log"]}), ["age"])
+    train, test = _views(data)
+    sc = CovariateScaler().fit(train)
+    ages = train.meta.drop_duplicates("key")["age"].to_numpy()
+    assert sc.mean_[0] == pytest.approx(ages.mean()) and sc.std_[0] == pytest.approx(ages.std())
+    with pytest.raises(LeakageError):
+        CovariateScaler().fit(test)
+    m = ClassicalModel("logreg").fit(train)
+    Z = m._design(train)
+    assert Z.shape[1] == train.payload["X"].shape[1] + 1                  # age appended after EEG features
+    assert np.allclose(Z[:, -1], (train.payload["cov"][:, 0] - ages.mean()) / ages.std(), atol=1e-5)
+    m2 = ClassicalModel("logreg", preprocessing={"pca_components": 3}).fit(train)
+    assert m2._design(test).shape[1] == 4                                 # PCA on EEG only, age kept apart

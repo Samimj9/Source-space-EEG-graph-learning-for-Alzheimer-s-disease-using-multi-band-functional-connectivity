@@ -3,12 +3,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from adgraph.models.gat import DenseEdgeGATConv  # noqa: E402
+from adgraph.models.edge_weighted_gat import EdgeWeightedGATConv  # noqa: E402
 from adgraph.models.gcn import DenseGCNConv  # noqa: E402
-from adgraph.models.graphsage import DenseSAGEConv  # noqa: E402
+from adgraph.models.weighted_graphsage import WeightedSAGEConv  # noqa: E402
 from adgraph.models.multiband import FUSIONS, BandFusion, MultiBandGNN  # noqa: E402
 
-ENCODERS = ["gcn", "gat", "graphsage"]
+ENCODERS = ["gcn", "edge_weighted_gat", "weighted_graphsage"]
 B, K, R = 3, 4, 68
 
 
@@ -20,7 +20,7 @@ def rand_graphs(b=B, k=K, r=R, f=2, seed=0):
     return torch.randn(b, k, r, f, generator=g), a
 
 
-@pytest.mark.parametrize("conv", [DenseGCNConv(2, 8), DenseEdgeGATConv(2, 8, heads=2), DenseSAGEConv(2, 8)])
+@pytest.mark.parametrize("conv", [DenseGCNConv(2, 8), EdgeWeightedGATConv(2, 8, heads=2), WeightedSAGEConv(2, 8)])
 def test_conv_shapes(conv):
     x, a = rand_graphs(k=1)
     assert conv(x[:, 0], a[:, 0]).shape == (B, R, 8)
@@ -92,7 +92,7 @@ def test_wrong_number_of_bands_rejected():
 
 
 def test_gat_masks_absent_edges():
-    conv = DenseEdgeGATConv(2, 4, heads=1)
+    conv = EdgeWeightedGATConv(2, 4, heads=1)
     x, a = rand_graphs(k=1)
     a = a[:, 0]
     a[:, :, 10:] = 0
@@ -113,15 +113,59 @@ def test_gnn_model_fit_predict(store):
     sub = setting_subset(data.meta, "within_D1")
     meta = data.meta.iloc[sub].reset_index(drop=True)
     tr, te = fold_indices(meta, make_splits(meta, "within_D1", 5, 1, 0)[0])
-    model = GNNModel({"encoder": "gat", "hidden": 8, "n_layers": 1, "fusion": "gate", "encoder_kwargs": {"heads": 2}},
+    model = GNNModel({"encoder": "edge_weighted_gat", "hidden": 8, "n_layers": 1, "fusion": "gate", "encoder_kwargs": {"heads": 2}},
                      {"epochs": 2, "batch_size": 16,
                       "early_stopping": {"enabled": True, "patience": 1, "val_subject_fraction": 0.25}}, seed=0)
     model.fit(data.view(sub[tr], "train"))
     p, w = model.predict_proba(data.view(sub[te], "test"), return_band_weights=True)
     assert p.shape == (len(te),) and ((p >= 0) & (p <= 1)).all() and w.shape == (len(te), 4)
     assert "val_loss" in model.history[0]
-    p2 = GNNModel({"encoder": "gat", "hidden": 8, "n_layers": 1, "fusion": "gate", "encoder_kwargs": {"heads": 2}},
+    p2 = GNNModel({"encoder": "edge_weighted_gat", "hidden": 8, "n_layers": 1, "fusion": "gate", "encoder_kwargs": {"heads": 2}},
                   {"epochs": 2, "batch_size": 16,
                    "early_stopping": {"enabled": True, "patience": 1, "val_subject_fraction": 0.25}}, seed=0)
     p2 = p2.fit(data.view(sub[tr], "train")).predict_proba(data.view(sub[te], "test"))
     assert np.allclose(p, p2, atol=1e-5)                                  # seeded -> reproducible
+
+
+@pytest.mark.parametrize("name", ["gat", "graphsage"])
+def test_canonical_names_are_not_offered(name):
+    from adgraph.models.encoders import build_encoder
+
+    with pytest.raises(ValueError, match="weighted"):
+        build_encoder(name, 2, 8, 1, 0.0)
+
+
+def test_covariates_enter_only_the_head():
+    torch.manual_seed(0)
+    x, a = rand_graphs(k=4)
+    net = MultiBandGNN("gcn", 2, 4, hidden=8, fusion="attention", n_covariates=1).eval()
+    assert net.head[0].in_features == net.fusion.out_dim + 1
+    out1 = net(x, a, torch.zeros(B, 1))
+    out2 = net(x, a, torch.ones(B, 1) * 3)
+    assert not torch.allclose(out1, out2)                                # age changes the logit ...
+    _, w1 = net(x, a, torch.zeros(B, 1), return_band_weights=True)
+    _, w2 = net(x, a, torch.ones(B, 1) * 3, return_band_weights=True)
+    assert torch.allclose(w1, w2)                                        # ... but not the graph part
+    with pytest.raises(ValueError):
+        net(x, a)
+    with pytest.raises(ValueError):
+        MultiBandGNN("gcn", 2, 4, hidden=8)(x, a, torch.zeros(B, 1))
+
+
+def test_gnn_model_with_age(store):
+    from adgraph.evaluation.splits import fold_indices, make_splits, setting_subset
+    from adgraph.graphs.dataset import add_covariates, build_graph
+    from adgraph.models.trainer import GNNModel
+
+    data = add_covariates(build_graph(store, {"connectivity": "plv", "bands": ["theta", "alpha1", "alpha2", "beta"],
+                                              "band_mode": "multi"},
+                                      {"components": ["psd", "strength"], "psd_kinds": ["log", "rel"]}), ["age"])
+    sub = setting_subset(data.meta, "within_D2")
+    meta = data.meta.iloc[sub].reset_index(drop=True)
+    tr, te = fold_indices(meta, make_splits(meta, "within_D2", 5, 1, 0)[0])
+    m = GNNModel({"encoder": "weighted_graphsage", "hidden": 8, "n_layers": 1, "fusion": "attention"},
+                 {"epochs": 1}, seed=0).fit(data.view(sub[tr], "train"))
+    ages = data.view(sub[tr], "train").meta.drop_duplicates("key")["age"]
+    assert m.cov_scaler.mean_[0] == pytest.approx(ages.mean())
+    assert m.net.n_covariates == 1
+    assert m.predict_proba(data.view(sub[te], "test")).shape == (len(te),)

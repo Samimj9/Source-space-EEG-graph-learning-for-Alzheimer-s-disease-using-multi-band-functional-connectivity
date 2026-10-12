@@ -1,0 +1,7 @@
+# Age sensitivity analysis (DESIGN.md §5): EEG + age version of exp0_sensor_psd.
+# Age is standardized with training-subject statistics inside each fold; classical models
+# append it to the EEG feature vector, GNNs concatenate it to the pooled graph embedding
+# right before the final classifier. Compare with exp0_sensor_psd (EEG-only) and baseline_age (age-only).
+extends: ../exp0_sensor_psd.yaml
+experiment: exp0_sensor_psd_plus_age
+covariates: [age]

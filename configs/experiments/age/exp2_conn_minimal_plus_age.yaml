@@ -1,0 +1,7 @@
+# Age sensitivity analysis (DESIGN.md §5): EEG + age version of exp2_conn_minimal.
+# Age is standardized with training-subject statistics inside each fold; classical models
+# append it to the EEG feature vector, GNNs concatenate it to the pooled graph embedding
+# right before the final classifier. Compare with exp2_conn_minimal (EEG-only) and baseline_age (age-only).
+extends: ../exp2_conn_minimal.yaml
+experiment: exp2_conn_minimal_plus_age
+covariates: [age]

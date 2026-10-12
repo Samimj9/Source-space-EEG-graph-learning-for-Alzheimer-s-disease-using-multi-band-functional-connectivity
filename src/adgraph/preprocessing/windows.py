@@ -17,8 +17,12 @@ def expected_n_windows(duration_s: float, window_s: float, step_s: float, edge_t
     """Number of candidate windows (before rejection) for a recording of ``duration_s``.
 
     n = floor((duration - 2 * trim - window) / step) + 1, or 0 if the trimmed
-    recording is shorter than one window. Primary setting (20 s, 10 s step,
-    10 s trim): a 300 s recording gives floor((300 - 20 - 20) / 10) + 1 = 27.
+    recording is shorter than one window.
+
+    Primary setting (20 s windows, 10 s step, 10 s trim at each end): a nominal 300 s
+    recording gives floor((300 - 20 - 20) / 10) + 1 = **27** windows, not the 29 one
+    would get without trimming (floor((300 - 20) / 10) + 1), because the first and
+    last 10 s are discarded (``windowing.edge_trim_s``, configurable).
     """
     usable = duration_s - 2 * edge_trim_s - window_s
     return 0 if usable < 0 else int(np.floor(usable / step_s + 1e-9)) + 1

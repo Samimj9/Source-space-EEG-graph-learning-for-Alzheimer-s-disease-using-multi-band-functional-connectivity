@@ -10,4 +10,4 @@ node_features:
 sweep:
   graph.connectivity: [plv, ciplv]
   graph.bands: [[theta], [alpha1], [alpha2], [beta]]
-  model.encoder: [gcn, gat, graphsage]
+  model.encoder: [gcn, edge_weighted_gat, weighted_graphsage]

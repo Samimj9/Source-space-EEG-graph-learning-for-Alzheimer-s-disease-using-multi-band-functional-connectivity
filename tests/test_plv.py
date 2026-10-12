@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from scipy.signal import hilbert
 
 from adgraph.connectivity.plv import band_analytic, phase_sync
@@ -13,7 +14,7 @@ def test_identical_and_lagged_signals():
     x = np.sin(2 * np.pi * 10 * t)
     rng = np.random.default_rng(1)
     sigs = np.stack([x, x, np.sin(2 * np.pi * 10 * t + np.pi / 2), rng.standard_normal(t.size)])
-    plv, ciplv = phase_sync(_analytic(sigs))
+    plv, ciplv, signed = phase_sync(_analytic(sigs))
     assert plv.shape == (4, 4) and np.allclose(np.diag(plv), 0)
     assert np.allclose(plv, plv.T)
     assert plv[0, 1] > 0.99 and ciplv[0, 1] < 0.05      # zero lag: PLV high, ciPLV ~0
@@ -31,3 +32,26 @@ def test_band_analytic_isolates_band():
     mid = slice(5 * sf, 25 * sf)
     assert np.allclose(np.abs(theta[0, mid]), 1, atol=0.05)
     assert np.allclose(np.abs(beta[0, mid]), 1, atol=0.05)
+
+
+def test_matrix_properties_plv_ciplv_signed():
+    rng = np.random.default_rng(3)
+    t = np.arange(0, 20, 1 / 250)
+    base = np.sin(2 * np.pi * 10 * t)
+    sigs = np.stack([np.sin(2 * np.pi * 10 * t + ph) + 0.5 * rng.standard_normal(t.size)
+                     for ph in rng.uniform(0, 2 * np.pi, 12)] + [base])
+    plv, ciplv, signed = phase_sync(_analytic(sigs))
+    for m in (plv, ciplv):
+        assert np.allclose(m, m.T) and np.allclose(np.diag(m), 0)
+        assert (m >= 0).all() and (m <= 1).all()
+    assert np.allclose(signed, -signed.T) and np.allclose(np.diag(signed), 0)     # antisymmetric
+    assert (signed >= -1).all() and (signed <= 1).all() and (signed < 0).any()
+    assert np.allclose(ciplv, np.abs(signed))                                       # magnitude adjacency
+
+
+def test_signed_ciplv_sign_reflects_lead():
+    t = np.arange(0, 20, 1 / 250)
+    a = np.sin(2 * np.pi * 10 * t)
+    b = np.sin(2 * np.pi * 10 * t - np.pi / 4)        # b lags a
+    _, _, signed = phase_sync(_analytic(np.stack([a, b])))
+    assert signed[0, 1] > 0.5 and signed[1, 0] == pytest.approx(-signed[0, 1])

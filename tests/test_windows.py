@@ -29,7 +29,8 @@ def test_expected_n_windows_matches_starts(duration):
 
 
 def test_expected_n_windows_examples():
-    assert expected_n_windows(300, 20, 10, 10) == 27
+    assert expected_n_windows(300, 20, 10, 10) == 27       # 10 s trimmed at both ends
+    assert expected_n_windows(300, 20, 10, 0) == 29        # without trimming
     assert expected_n_windows(39.9, 20, 10, 10) == 0
 
 

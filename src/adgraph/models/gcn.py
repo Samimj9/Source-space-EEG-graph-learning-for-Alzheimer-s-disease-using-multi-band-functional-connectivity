@@ -1,4 +1,5 @@
-"""Dense weighted GCN (Kipf & Welling, 2017).
+"""Dense GCN (Kipf & Welling, 2017) on the weighted adjacency: the standard
+weighted-adjacency graph baseline (symmetric normalization with self-loops).
 
 H' = D^-1/2 (A + I) D^-1/2 H W, with A the weighted connectivity matrix.
 With constant node features the first layer outputs row sums of the normalized

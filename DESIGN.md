@@ -5,13 +5,21 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.1 (2026-10-12)**. No classification has been run.
+Status: **frozen v1.2 (2026-10-12)**. No classification has been run.
 
 Changelog:
 
 - **v1.1:** primary segmentation frozen at 20 s windows with 50 % overlap (both
   datasets). Experiment set 0–6 fixed (§10). The code for every setting exists,
   but nothing has been run on real data.
+- **v1.2:**
+  - Exp 3 primary uses matching-band PSD (F = 2); all-band PSD becomes
+    secondary Exp 3b.
+  - GAT and GraphSAGE are reported as EdgeWeightedGAT and WeightedGraphSAGE.
+  - GNNs use |ciPLV|; signed ciPLV is stored separately.
+  - SVM calibration is subject-grouped.
+  - The age sensitivity analysis is implemented.
+  - The repeat, fold, epoch and grid counts are **provisional** (§3).
 
 ---
 
@@ -64,6 +72,15 @@ segmentation. The **subject** is the unit of inference. The subject key is
 ---
 
 ## 3. Subject-level split strategy
+
+> Frozen here: subject-level splitting, nested subject-level inner CV for
+> selection, the per-fold fitting rules, and the fixed threshold. **Provisional
+> and configurable, not yet final:**
+> - K = 5 outer folds, 20 repeats, inner K = 4
+> - epochs, early stopping, hyperparameter grids
+> - bootstrap and permutation counts
+>
+> These numbers are defaults in `configs/experiments/base.yaml`.
 
 ### 3.1 Within-dataset (S1, S2)
 
@@ -183,7 +200,12 @@ Each metric is computed as follows:
    paper's multi-band claim (Experiments 2/3 vs. 4/5).
 5. **Age-adjusted sensitivity analysis,** S2 in particular. Edge features are
    residualized on age with a regression fitted on training subjects only, and
-   the model is retrained. *Not implemented yet.*
+   the model is retrained. *Implemented as "EEG + age" instead:*
+   - Classical models append age, standardized on the training subjects, to the
+     feature vector.
+   - GNNs concatenate it to the pooled graph embedding before the classifier.
+   - Configs: `configs/experiments/age/`.
+   - The comparison is age-only vs. EEG-only vs. EEG + age on identical splits.
 
 The age-only baseline is `baseline_age.yaml`.
 
@@ -335,11 +357,11 @@ Full details (inputs, tensor shapes, configs, leakage architecture) are in
 |---|---|---|---|
 | 0 | Conventional sensor-space spectral baseline (Paper 2) | electrode PSD | LR, SVM |
 | 1 | Does source localization alone help? | 68-ROI source PSD | LR, SVM |
-| 2 | Value of source connectivity alone | single-band PLV / ciPLV graph, constant node feature | GCN, GAT, GraphSAGE |
-| 3 | Connectivity + local spectral activity | single-band graph, ROI PSD node features | GCN, GAT, GraphSAGE |
+| 2 | Value of source connectivity alone | single-band PLV / \|ciPLV\| graph, constant node feature | GCN, EdgeWeightedGAT, WeightedGraphSAGE |
+| 3 | Connectivity + local spectral activity | single-band graph, matching-band ROI PSD [log, rel] (Exp 3b: all bands, secondary) | GCN, EdgeWeightedGAT, WeightedGraphSAGE |
 | 4 | Simple graph baseline | band-averaged graph, ROI PSD node features | GNN |
 | 5 | Multi-band GNN (candidate: learned fusion) | 4 band graphs, matched-band PSD | GNN, shared/band-specific encoders, mean/concat/gate/attention fusion |
-| 6 | Richest model, with ablations | 4 band graphs, [PSD, strength] per band | GNN + attention fusion; ablations: no PSD, no strength, no learned fusion, each band dropped |
+| 6 | Richest model, with ablations | 4 band graphs, [log PSD, rel PSD, strength] per band | GNN + attention fusion; ablations: no PSD, no strength, no learned fusion, each band dropped |
 
 Conventions:
 

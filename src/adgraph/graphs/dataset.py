@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .store import CONNECTIVITY, PSD_KINDS, GraphStore
+from .store import CONNECTIVITY, PSD_KINDS, GraphStore, check_adjacency
 
 ROLES = ("train", "val", "test")
 
@@ -156,7 +156,11 @@ def build_classical(store: GraphStore, features: dict, target: str = "label") ->
 
 # ---------------------------------------------------------------- graphs
 def node_strength(adj: np.ndarray) -> np.ndarray:
-    """Weighted node strength: mean connectivity of each node to all others. adj (..., R, R) -> (..., R)."""
+    """Weighted node strength: mean connectivity of each node to all others. adj (..., R, R) -> (..., R).
+
+    Computed from the adjacency actually used by the model, i.e. PLV or the magnitude
+    |ciPLV| (never the signed ciPLV), so strength is in [0, 1] for both measures.
+    """
     r = adj.shape[-1]
     off = adj.sum(-1) - np.diagonal(adj, axis1=-2, axis2=-1)
     return off / (r - 1)
@@ -183,7 +187,8 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
     meta = _meta(store, target)
     conn = graph["connectivity"]
     if conn not in CONNECTIVITY:
-        raise ValueError(f"connectivity must be one of {CONNECTIVITY}")
+        raise ValueError(f"connectivity must be one of {CONNECTIVITY} (signed ciPLV is not a valid adjacency; "
+                         f"'ciplv' is its magnitude)")
     bands = list(graph["bands"])
     mode = graph["band_mode"]
     b_idx = store.band_index(bands)
@@ -195,6 +200,7 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
         A = A.mean(axis=1, keepdims=True)
     elif mode != "multi":
         raise ValueError(f"unknown band_mode {mode!r}")
+    check_adjacency(A, conn)                        # symmetric, zero diagonal, in [0, 1]
     n, k, r, _ = A.shape
     graph_bands = bands if mode == "multi" else ["+".join(bands)]
 
@@ -235,11 +241,36 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
                    target_column(target))
 
 
+COVARIATES = ("age",)
+
+
+def add_covariates(data: Dataset, covariates: list[str]) -> Dataset:
+    """Attach raw subject-level covariates as payload ``cov`` (N, n_cov).
+
+    They are *not* standardized here: models standardize them with training-subject
+    statistics (``models.covariates.CovariateScaler``).
+    """
+    if not covariates:
+        return data
+    unknown = set(covariates) - set(COVARIATES)
+    if unknown:
+        raise ValueError(f"unsupported covariates {sorted(unknown)}; available {COVARIATES}")
+    missing = [c for c in covariates if c not in data.meta or data.meta[c].isna().any()]
+    if missing:
+        raise ValueError(f"covariates {missing} missing for some subjects")
+    if "X" in data.payload and data.info.get("source") == "age":
+        raise ValueError("age is already the feature of the age-only baseline")
+    payload = dict(data.payload, cov=data.meta[list(covariates)].to_numpy(np.float32))
+    return Dataset(data.meta, payload, data.kind, {**data.info, "covariates": list(covariates)}, data.target)
+
+
 def build_dataset(store: GraphStore, cfg: dict) -> Dataset:
-    """Dispatch on ``cfg['input']``: ``classical`` or ``graph``."""
+    """Dispatch on ``cfg['input']``: ``classical`` or ``graph``; then attach ``cfg['covariates']``."""
     target = cfg.get("target", "label")
     if cfg["input"] == "classical":
-        return build_classical(store, cfg["features"], target)
-    if cfg["input"] == "graph":
-        return build_graph(store, cfg["graph"], cfg["node_features"], target)
-    raise ValueError(f"unknown input {cfg['input']!r}")
+        data = build_classical(store, cfg["features"], target)
+    elif cfg["input"] == "graph":
+        data = build_graph(store, cfg["graph"], cfg["node_features"], target)
+    else:
+        raise ValueError(f"unknown input {cfg['input']!r}")
+    return add_covariates(data, cfg.get("covariates") or [])

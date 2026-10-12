@@ -1,0 +1,7 @@
+# Age sensitivity analysis (DESIGN.md §5): EEG + age version of baseline_conn_classical.
+# Age is standardized with training-subject statistics inside each fold; classical models
+# append it to the EEG feature vector, GNNs concatenate it to the pooled graph embedding
+# right before the final classifier. Compare with baseline_conn_classical (EEG-only) and baseline_age (age-only).
+extends: ../baseline_conn_classical.yaml
+experiment: baseline_conn_classical_plus_age
+covariates: [age]
