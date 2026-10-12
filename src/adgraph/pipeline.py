@@ -27,6 +27,8 @@ from .io.eeg import list_recordings, load_raw, make_montage
 from .io.participants import load_participants
 from .preprocessing.clean import preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
+from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
+                         atomic_write_csv, atomic_write_json, check_unit, stable_hash, supersede, write_marker)
 from .provenance import git_commit, versions
 from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
 
@@ -123,17 +125,18 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     return out
 
 
-def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
-        limit: int | None = None) -> Path:
-    """Build graphs for all D1 and D2 resting-state recordings."""
-    pp = cfg["preprocessing"]
-    check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    chash = config_hash(cfg)
-    out_dir = Path(out_root) / f"graphs_v{cfg['version']}_{stamp}_{chash}"
-    out_dir.mkdir(parents=True, exist_ok=False)
+# ====================================================================== resumable run
+DATA_ARRAY_KEYS = ("plv", "ciplv", "ciplv_signed", "psd_abs", "psd_log", "psd_rel",
+                   "sensor_psd_abs", "sensor_psd_log", "sensor_psd_rel")
 
-    # Subject registry: recordings joined to metadata. All subjects are used as provided.
+
+def graph_run_dir(out_root: str | Path, cfg: dict, limit: int | None = None) -> Path:
+    """Deterministic run directory for a configuration (so an interrupted run can be resumed)."""
+    return Path(out_root) / (f"graphs_v{cfg['version']}_{config_hash(cfg)}" + (f"_limit{limit}" if limit else ""))
+
+
+def build_registry(paths: dict, limit: int | None = None):
+    """Recordings joined to participant metadata (all subjects used as provided)."""
     recs, meta = [], []
     for ds in DATASETS:
         recs.append(list_recordings(paths[f"dataset{ds[1]}"]["eeg_dir"], ds))
@@ -146,8 +149,39 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
                 .sort_values(["dataset", "subject_id"]).reset_index(drop=True))
     if limit:
         registry = registry.groupby("dataset", group_keys=False).head(limit).reset_index(drop=True)
+    return registry, recs, no_meta, no_rec
 
-    # One sensor->ROI operator for both datasets.
+
+# ---------------------------------------------------------------------- shared operator
+def operator_identity(cfg: dict) -> dict:
+    """Everything the sensor->ROI operator depends on (the source-model configuration)."""
+    import mne
+
+    return {"kind": "operator", "code_version": CODE_VERSIONS["operator"], "source": cfg["source"],
+            "channels": common_channels(cfg), "montage": cfg["channels"]["montage"],
+            "reference": cfg["preprocessing"]["reference"], "mne": mne.__version__}
+
+
+def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, force: bool = False) -> dict:
+    """Load the verified operator from the cache if its source-model hash matches; else build it once.
+
+    fsaverage is fetched and the forward/inverse model computed only when no valid cached
+    operator exists (or ``force``)."""
+    ident = operator_identity(cfg)
+    op_id = stable_hash(ident)
+    cache_dir = Path(cache_dir)
+    name = f"operator_{op_id}"
+    state, marker = check_unit(cache_dir, name, ident)
+    if state == "complete" and not force:
+        z = np.load(cache_dir / f"{name}.npz")
+        log.info("reusing cached ROI operator %s", op_id)
+        return {"W": z["W"], "roi_names": z["roi_names"].tolist(), "ch_names": z["ch_names"].tolist(),
+                "fwd_ch_names": z["fwd_ch_names"].tolist(), "n_sources": int(z["n_sources"]),
+                "roi_coords": z["roi_coords"] if "roi_coords" in z.files else None,
+                "verification_rel_error": float(z["verification_rel_error"]), "operator_id": op_id,
+                "from_cache": True}
+    if state in ("corrupt", "incompatible") or (state == "complete" and force):
+        supersede(cache_dir / f"{name}.npz", cache_dir)
     fetch_fsaverage(subjects_dir)
     info = canonical_info(cfg)
     op = build_roi_operator(info, cfg, subjects_dir)
@@ -156,84 +190,172 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
         raise RuntimeError(f"ROI operator does not match the full inverse (rel. err {op_err:.2e})")
     if op["fwd_ch_names"] != common_channels(cfg):
         raise RuntimeError(f"forward model channels {op['fwd_ch_names']} != common set")
-    log.info("ROI operator %s, %d sources, verified (rel. err %.1e)", op["W"].shape, op["n_sources"], op_err)
+    atomic_savez(cache_dir / f"{name}.npz", W=op["W"], roi_names=np.array(op["roi_names"]),
+                 ch_names=np.array(op["ch_names"]), fwd_ch_names=np.array(op["fwd_ch_names"]),
+                 n_sources=op["n_sources"], verification_rel_error=op_err,
+                 **({"roi_coords": np.asarray(op["roi_coords"])} if op.get("roi_coords") is not None else {}))
+    write_marker(cache_dir, name, ident, [f"{name}.npz"])
+    log.info("ROI operator %s built and verified (rel. err %.1e)", op_id, op_err)
+    return {**op, "verification_rel_error": op_err, "operator_id": op_id, "from_cache": False}
 
-    array_keys = ["plv", "ciplv"] + [f"psd_{k}" for k in PSD_KINDS]
-    if cfg["output"].get("save_signed_ciplv", True):
-        array_keys.append("ciplv_signed")
-    if cfg["psd"].get("sensor", True):
-        array_keys += [f"sensor_psd_{k}" for k in PSD_KINDS]
-    arrays = {k: [] for k in array_keys}
-    save_ts = cfg["output"].get("save_roi_timeseries", False)
-    if save_ts:
-        (out_dir / "roi_timeseries").mkdir()
-    win_rows, subj_rows = [], []
+
+# ---------------------------------------------------------------------- per-subject units
+def subject_identity(cfg: dict, rec, operator_id: str) -> dict:
+    """A subject's output is reusable only for the same config, code version, operator and input file."""
+    return {"kind": "graph_subject", "code_version": CODE_VERSIONS["graph_subject"], "config_hash": config_hash(cfg),
+            "operator_id": operator_id, "key": rec.key,
+            "input": {"path": str(rec.path), "size_bytes": int(rec.size_bytes),
+                      "mtime": float(getattr(rec, "mtime", 0.0) or 0.0)}}
+
+
+def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict, np.ndarray]:
+    """Full per-subject computation: load, preprocess, ROI signals, windows, PSD, connectivity."""
+    row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
+                                         "mmse", "acer", "comment", "path", "size_bytes")}
+    raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+    raw, pp_qc = preprocess(raw, cfg)
+    if raw.ch_names != list(op["ch_names"]):
+        raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
+    res = process_recording(raw, op["W"], cfg)
+    n = res["n_windows_kept"]
+    status = "ok" if n >= cfg["windowing"]["min_windows"] else "below_min_windows"
+    subj_qc = {"median_std_uv": pp_qc["median_std_uv"], "n_bad_channels": pp_qc["n_bad_channels"],
+               "rejection_threshold_uv": res["rejection_threshold_uv"],
+               "n_windows_total": res["n_windows_total"], "n_windows_kept": n}
+    subject_row = {**row, **{k: load_qc[k] for k in ("orig_sfreq", "duration_s", "unit_scale")}, **subj_qc,
+                   "bad_channels": json.dumps(pp_qc["bad_channels"]),
+                   "bad_fraction_warning": pp_qc["bad_fraction_warning"],
+                   "unrecognised_channels": ",".join(load_qc["unrecognised_channels"]), "status": status}
+    arrays = {k: res[k] for k in DATA_ARRAY_KEYS if k in res}
+    win_rows = [{
+        "window_id": window_id(rec.key, int(res["window_index"][w])), "key": rec.key,
+        "dataset": rec.dataset, "subject_id": rec.subject_id, "label": rec.label, "y": rec.y,
+        "window_index": int(res["window_index"][w]), "start_sample": int(res["start_sample"][w]),
+        "stop_sample": int(res["stop_sample"][w]), "tmin": res["tmin"][w], "tmax": res["tmax"][w],
+        "sample_weight": 1.0 / n if n else np.nan,
+        "qc_frac_channels_over_threshold": res["qc_frac_channels_over_threshold"][w],
+        "qc_max_ptp_uv": res["qc_max_ptp_uv"][w], **{f"subject_{k}": v for k, v in subj_qc.items()},
+    } for w in range(n)]
+    windows = pd.DataFrame(win_rows, columns=list(WINDOW_COLUMNS) if not win_rows else None)
+    log.info("%s: %d/%d windows, %d bad channels", rec.key, n, res["n_windows_total"], pp_qc["n_bad_channels"])
+    return arrays, windows, subject_row, res["roi_timeseries"]
+
+
+def save_subject(unit_dir: Path, identity: dict, arrays: dict, windows: pd.DataFrame, subject_row: dict,
+                 roi_ts: np.ndarray | None) -> None:
+    """Payload files first (atomic), completion marker last."""
+    files = [atomic_savez(unit_dir / "arrays.npz", **arrays), atomic_write_csv(unit_dir / "windows.csv", windows),
+             atomic_write_json(unit_dir / "subject.json", subject_row)]
+    if roi_ts is not None:
+        files.append(atomic_save_npy(unit_dir / "roi_timeseries.npy", roi_ts.astype(np.float32)))
+    (unit_dir / "failed.json").unlink(missing_ok=True)
+    write_marker(unit_dir, "subject", identity, files)
+
+
+def subject_states(run_dir: Path, registry: pd.DataFrame, cfg: dict, operator_id: str) -> pd.DataFrame:
+    """Checkpoint state of every subject, read from disk only (no computation)."""
+    status = StatusTable(run_dir / "status.csv")
+    rows = []
     for rec in registry.itertuples():
-        row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
-                                             "mmse", "acer", "comment", "path", "size_bytes")}
-        try:
-            raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
-            raw, pp_qc = preprocess(raw, cfg)
-            if raw.ch_names != op["ch_names"]:
-                raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
-            res = process_recording(raw, op["W"], cfg)
-        except Exception as exc:  # recorded in subjects.csv and the manifest, never silent
-            log.exception("%s failed", rec.key)
-            subj_rows.append({**row, "status": f"error: {exc}"})
-            continue
+        unit_dir = run_dir / "subjects" / rec.key
+        state, _ = check_unit(unit_dir, "subject", subject_identity(cfg, rec, operator_id))
+        table = status.get(rec.key)
+        if state == "complete":
+            shown = "completed"
+        elif (unit_dir / "failed.json").exists() and table == "failed":
+            shown = "failed"
+        elif table == "running":
+            shown = "interrupted"            # was running when the process stopped; will be recomputed
+        elif state in ("incompatible", "corrupt"):
+            shown = state
+        else:
+            shown = "pending"
+        rows.append({"key": rec.key, "dataset": rec.dataset, "state": shown, "checkpoint": state,
+                     "message": (json.loads((unit_dir / "failed.json").read_text()).get("status", "")
+                                 if (unit_dir / "failed.json").exists() else "")})
+    return pd.DataFrame(rows)
 
-        n = res["n_windows_kept"]
-        status = "ok" if n >= cfg["windowing"]["min_windows"] else "below_min_windows"
-        subj_qc = {
-            "median_std_uv": pp_qc["median_std_uv"], "n_bad_channels": pp_qc["n_bad_channels"],
-            "rejection_threshold_uv": res["rejection_threshold_uv"],
-            "n_windows_total": res["n_windows_total"], "n_windows_kept": n,
-        }
-        subj_rows.append({
-            **row, **{k: load_qc[k] for k in ("orig_sfreq", "duration_s", "unit_scale")}, **subj_qc,
-            "bad_channels": json.dumps(pp_qc["bad_channels"]), "bad_fraction_warning": pp_qc["bad_fraction_warning"],
-            "unrecognised_channels": ",".join(load_qc["unrecognised_channels"]), "status": status,
-        })
-        if status != "ok":
-            continue
-        for k in arrays:
-            arrays[k].append(res[k])
-        if save_ts:
-            np.save(out_dir / "roi_timeseries" / f"{rec.key}.npy", res["roi_timeseries"])
-        for w in range(n):
-            win_rows.append({
-                "window_id": window_id(rec.key, int(res["window_index"][w])), "key": rec.key,
-                "dataset": rec.dataset, "subject_id": rec.subject_id, "label": rec.label, "y": rec.y,
-                "window_index": int(res["window_index"][w]), "start_sample": int(res["start_sample"][w]),
-                "stop_sample": int(res["stop_sample"][w]), "tmin": res["tmin"][w], "tmax": res["tmax"][w],
-                "sample_weight": 1.0 / n,
-                "qc_frac_channels_over_threshold": res["qc_frac_channels_over_threshold"][w],
-                "qc_max_ptp_uv": res["qc_max_ptp_uv"][w],
-                **{f"subject_{k}": v for k, v in subj_qc.items()},
-            })
-        log.info("%s: %d/%d windows, %d bad channels", rec.key, n, res["n_windows_total"], pp_qc["n_bad_channels"])
+
+def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = None,
+           run_dir: str | Path | None = None, operator_cache: str | Path | None = None) -> dict:
+    """What is completed / pending / failed for this configuration, without computing anything."""
+    run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
+    registry, *_ = build_registry(paths, limit)
+    ident = operator_identity(cfg)
+    op_id = stable_hash(ident)
+    cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
+    op_state, _ = check_unit(cache, f"operator_{op_id}", ident)
+    subj = subject_states(run_dir, registry, cfg, op_id) if run_dir.exists() else \
+        pd.DataFrame({"key": registry["key"], "dataset": registry["dataset"], "state": "pending",
+                      "checkpoint": "missing", "message": ""})
+    asm = "missing"
+    if (run_dir / "assembly.done.json").exists():
+        asm = "complete" if (run_dir / "graphs.npz").exists() else "corrupt"
+    return {"run_dir": str(run_dir), "config_hash": config_hash(cfg), "operator_id": op_id,
+            "operator_cache": op_state, "subjects": subj, "assembly": asm,
+            "counts": subj["state"].value_counts().to_dict()}
+
+
+# ---------------------------------------------------------------------- assembly
+def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dict, op: dict,
+             no_meta: list, no_rec: list, limit: int | None, keys_failed: dict) -> Path:
+    """Concatenate completed subject units into the cohort store (skipped if already assembled)."""
+    units = {}
+    for rec in registry.itertuples():
+        mp = run_dir / "subjects" / rec.key / "subject.done.json"
+        units[rec.key] = (json.loads(mp.read_text())["files"] if rec.key not in keys_failed and mp.exists()
+                          else {"failed": keys_failed.get(rec.key, "missing")})
+    ident = {"kind": "graph_assembly", "code_version": CODE_VERSIONS["graph_assembly"],
+             "config_hash": config_hash(cfg), "operator_id": op["operator_id"], "units": units,
+             "subset_limit": limit}
+    state, _ = check_unit(run_dir, "assembly", ident)
+    if state == "complete":
+        log.info("cohort already assembled for these subject units; nothing to do")
+        return run_dir
+    if state != "missing":                     # units changed (e.g. a failed subject now succeeded)
+        for f in ("graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "assembly.done.json"):
+            supersede(run_dir / f, run_dir)
 
     bands = cfg["connectivity"]["bands"]
     n_b, n_r, n_c = len(bands), len(op["roi_names"]), len(op["ch_names"])
-    empty_shape = {k: (0, n_b, n_r, n_r) for k in ("plv", "ciplv", "ciplv_signed")}
-    stacked = {k: np.concatenate(v) if v else np.empty(empty_shape.get(k, (0, n_b, n_c if "sensor" in k else n_r)),
-                                                         np.float32) for k, v in arrays.items()}
-    windows = pd.DataFrame(win_rows)
+    keys = [k for k in DATA_ARRAY_KEYS if (k != "ciplv_signed" or cfg["output"].get("save_signed_ciplv", True))
+            and (not k.startswith("sensor") or cfg["psd"].get("sensor", True))]
+    arrays = {k: [] for k in keys}
+    win, subj_rows = [], []
+    for rec in registry.itertuples():
+        unit_dir = run_dir / "subjects" / rec.key
+        if rec.key in keys_failed:
+            subj_rows.append(json.loads((unit_dir / "failed.json").read_text()))
+            continue
+        row = json.loads((unit_dir / "subject.json").read_text())
+        subj_rows.append(row)
+        if row["status"] != "ok":
+            continue
+        z = np.load(unit_dir / "arrays.npz")
+        for k in keys:
+            arrays[k].append(z[k])
+        win.append(pd.read_csv(unit_dir / "windows.csv"))
+    shape = {k: (0, n_b, n_r, n_r) for k in ("plv", "ciplv", "ciplv_signed")}
+    stacked = {k: np.concatenate(v) if v else np.empty(shape.get(k, (0, n_b, n_c if "sensor" in k else n_r)),
+                                                        np.float32) for k, v in arrays.items()}
+    windows = pd.concat(win, ignore_index=True) if win else pd.DataFrame(columns=list(WINDOW_COLUMNS))
     subjects = pd.DataFrame(subj_rows)
-
+    win_s, step_s = window_samples(cfg["preprocessing"]["sfreq"], cfg["windowing"]["window_s"],
+                                   cfg["windowing"]["step_s"])
     manifest = {
-        "run_timestamp": stamp, "config_hash": chash, "git_commit": git_commit(), "versions": versions(),
-        "config": cfg,
+        "graph_run_id": stable_hash(ident), "assembled_at": datetime.now(timezone.utc).isoformat(),
+        "config_hash": config_hash(cfg), "code_versions": CODE_VERSIONS, "git_commit": git_commit(),
+        "versions": versions(), "config": cfg,
         "inputs": recs[["key", "path", "size_bytes"]].to_dict("records"),
         "registry": {"recordings_without_metadata": no_meta, "metadata_without_recording": no_rec,
                      "subset_limit": limit},
-        "source_operator": {"shape": list(op["W"].shape), "n_sources": op["n_sources"], "channels": op["ch_names"],
-                            "shared_across_datasets": True, "verification_rel_error": op_err,
-                            "roi_names": op["roi_names"], "W": op["W"].tolist()},
-        "segmentation": {"window_samples": window_samples(cfg["preprocessing"]["sfreq"], cfg["windowing"]["window_s"],
-                                                          cfg["windowing"]["step_s"])[0],
-                         "step_samples": window_samples(cfg["preprocessing"]["sfreq"], cfg["windowing"]["window_s"],
-                                                        cfg["windowing"]["step_s"])[1]},
+        "source_operator": {"operator_id": op["operator_id"], "from_cache": op.get("from_cache", False),
+                            "shape": list(np.asarray(op["W"]).shape), "n_sources": op["n_sources"],
+                            "channels": list(op["ch_names"]), "shared_across_datasets": True,
+                            "verification_rel_error": op["verification_rel_error"],
+                            "roi_names": list(op["roi_names"]), "W": np.asarray(op["W"]).tolist()},
+        "segmentation": {"window_samples": win_s, "step_samples": step_s},
+        "subject_units": {k: v for k, v in units.items()},
         "summary": {
             "n_graphs": int(len(windows)),
             "subjects_ok": subjects.loc[subjects["status"] == "ok", "key"].tolist(),
@@ -242,12 +364,101 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path,
                                  "graphs": int(windows["dataset"].eq(ds).sum()) if len(windows) else 0}
                             for ds in DATASETS},
         },
-        "outputs": ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"]
-                   + (["roi_timeseries/"] if save_ts else []),
+        "outputs": ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "subjects/<key>/"],
     }
-    if windows.empty:
-        windows = pd.DataFrame(columns=list(WINDOW_COLUMNS))
     store = GraphStore(stacked, windows, list(bands), np.array(list(bands.values()), dtype=float),
-                       op["roi_names"], op["ch_names"], subjects, manifest, roi_coords=op.get("roi_coords"))
-    store.save(out_dir)
-    return out_dir
+                       list(op["roi_names"]), list(op["ch_names"]), subjects, manifest,
+                       roi_coords=op.get("roi_coords"))
+    store.save(run_dir)
+    write_marker(run_dir, "assembly", ident, ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"])
+    return run_dir
+
+
+# ---------------------------------------------------------------------- discovery
+def list_graph_runs(processed_dir: str | Path) -> pd.DataFrame:
+    """All graph run directories with their state (assembled or not, smoke test or full)."""
+    rows = []
+    for d in sorted(Path(processed_dir).glob("graphs_v*")):
+        if not d.is_dir():
+            continue
+        man = d / "manifest.json"
+        assembled = (d / "assembly.done.json").exists() and man.exists()
+        m = json.loads(man.read_text()) if assembled else {}
+        rows.append({"run_dir": str(d), "assembled": assembled, "limit_smoke_test": "_limit" in d.name,
+                     "forced": "_force" in d.name, "assembled_at": m.get("assembled_at", ""),
+                     "graph_run_id": m.get("graph_run_id", ""), "config_hash": m.get("config_hash", "")})
+    return pd.DataFrame(rows, columns=["run_dir", "assembled", "limit_smoke_test", "forced", "assembled_at",
+                                       "graph_run_id", "config_hash"])
+
+
+def latest_complete_graph_run(processed_dir: str | Path) -> Path:
+    """Most recently assembled full (non-smoke-test) graph run; raises if there is none."""
+    runs = list_graph_runs(processed_dir)
+    runs = runs[runs["assembled"] & ~runs["limit_smoke_test"]].sort_values("assembled_at")
+    if runs.empty:
+        raise FileNotFoundError(f"no assembled graph run in {processed_dir}")
+    return Path(runs["run_dir"].iloc[-1])
+
+
+# ---------------------------------------------------------------------- driver
+def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, limit: int | None = None,
+        resume: bool = True, force: bool = False, run_dir: str | Path | None = None,
+        operator_cache: str | Path | None = None) -> Path:
+    """Build graphs for all D1 and D2 resting-state recordings, resumably.
+
+    * Each subject is a checkpointed unit (``subjects/<key>/``), saved as soon as it finishes.
+    * On restart (``resume``, default) subjects whose unit validates against the current
+      config hash, code version, operator and input file are skipped; missing, interrupted,
+      corrupted or incompatible units are recomputed; failed subjects are retried.
+    * ``force`` starts a fresh run directory (``..._force<stamp>``) and rebuilds the operator;
+      existing outputs are never overwritten.
+    """
+    pp = cfg["preprocessing"]
+    check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
+    run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
+    if force and run_dir.exists():
+        run_dir = run_dir.with_name(run_dir.name + "_force" + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"))
+    if run_dir.exists() and not resume:
+        raise FileExistsError(f"{run_dir} exists; use resume (default) to continue it or force to start fresh")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ident_path = run_dir / "run_identity.json"
+    ident = {"config_hash": config_hash(cfg), "subset_limit": limit}
+    if ident_path.exists():
+        if json.loads(ident_path.read_text())["identity"] != ident:
+            raise IncompatibleCheckpoint(f"{run_dir} belongs to a different configuration")
+    else:
+        atomic_write_json(ident_path, {"identity": ident, "created_at": datetime.now(timezone.utc).isoformat(),
+                                       "config": cfg})
+
+    registry, recs, no_meta, no_rec = build_registry(paths, limit)
+    op = get_operator(cfg, subjects_dir, operator_cache or run_dir.parent / "_operator_cache", force)
+    table = StatusTable(run_dir / "status.csv")
+    table.ensure(registry["key"].tolist())
+    save_ts = cfg["output"].get("save_roi_timeseries", False)
+    failed = {}
+    for rec in registry.itertuples():
+        unit_dir = run_dir / "subjects" / rec.key
+        sident = subject_identity(cfg, rec, op["operator_id"])
+        state, _ = check_unit(unit_dir, "subject", sident)
+        if state == "complete":
+            if table.get(rec.key) != "completed":
+                table.set(rec.key, "completed", "validated existing checkpoint")
+            log.info("%s: completed checkpoint found, skipped", rec.key)
+            continue
+        if state in ("incompatible", "corrupt"):
+            log.warning("%s: %s checkpoint, recomputing", rec.key, state)
+            supersede(unit_dir, run_dir)
+        table.set(rec.key, "running")
+        try:
+            arrays, windows, subject_row, roi_ts = process_subject(rec, cfg, op)
+        except Exception as exc:  # recorded, never silent; KeyboardInterrupt etc. propagate
+            log.exception("%s failed", rec.key)
+            row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
+                                                 "mmse", "acer", "comment", "path", "size_bytes")}
+            atomic_write_json(unit_dir / "failed.json", {**row, "status": f"error: {exc}"})
+            table.set(rec.key, "failed", str(exc)[:500])
+            failed[rec.key] = f"error: {exc}"
+            continue
+        save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None)
+        table.set(rec.key, "completed")
+    return assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed)

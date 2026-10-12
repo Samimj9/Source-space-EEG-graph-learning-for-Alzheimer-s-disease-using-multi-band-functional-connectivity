@@ -229,7 +229,7 @@ for every graph.
 8. **Cross-dataset runs** are refused unless the graph run passes the DESIGN.md §7
    gate (`experiments/gate.py`).
 
-## 5. Outputs (`<out>/<experiment>_<stamp>/<variant>/<setting>/`, never overwritten)
+## 5. Outputs (`<out>/<experiment>/<variant>/<setting>/`, checkpointed, never overwritten)
 
 | File | Content |
 |---|---|
@@ -242,6 +242,20 @@ for every graph.
 
 These files contain per-subject predictions, so they belong in Drive and are never
 committed.
+
+**Checkpoints in the same directory**
+
+| File | Content |
+|---|---|
+| `_identity.json` | experiment identity: training-config hash, `graph_run_id`, setting, code version |
+| `units/fold_r<rrr>_f<ff>.*` + `.done.json` | one outer fold: predictions, fold table, hparam row, optional embeddings |
+| `units/inner_*` | one inner-CV trial (parameter set × inner fold) |
+| `units/perm_*` | one permutation |
+| `status.csv` | pending / running / completed / failed per outer fold |
+| `final.done.json` | validates the final outputs above (written last) |
+
+On restart, the same command loads validated units and computes only what is missing.
+`--status` reports progress, and `--force` moves the directory to `<out>/_superseded/`.
 
 ## 6. Commands (to be run later in Colab, on real graphs)
 

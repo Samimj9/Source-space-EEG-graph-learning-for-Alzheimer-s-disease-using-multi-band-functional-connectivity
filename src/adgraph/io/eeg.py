@@ -18,15 +18,15 @@ PATTERNS = {
 
 
 def list_recordings(eeg_dir: str | Path, dataset: str) -> pd.DataFrame:
-    """One row per resting-state recording: key, dataset, subject_id, path, size_bytes."""
+    """One row per resting-state recording: key, dataset, subject_id, path, size_bytes, mtime."""
     rows = []
     for p in sorted(Path(eeg_dir).iterdir()):
         m = PATTERNS[dataset].match(p.name)
         if m:
             sid = int(m.group(1))
             rows.append({"key": subject_key(dataset, sid), "dataset": dataset, "subject_id": sid,
-                         "path": str(p), "size_bytes": p.stat().st_size})
-    df = pd.DataFrame(rows, columns=["key", "dataset", "subject_id", "path", "size_bytes"])
+                         "path": str(p), "size_bytes": p.stat().st_size, "mtime": p.stat().st_mtime})
+    df = pd.DataFrame(rows, columns=["key", "dataset", "subject_id", "path", "size_bytes", "mtime"])
     if df["key"].duplicated().any():
         raise ValueError(f"{dataset}: several recordings for {df.loc[df['key'].duplicated(), 'key'].tolist()}")
     return df.sort_values("subject_id").reset_index(drop=True)

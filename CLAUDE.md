@@ -45,7 +45,13 @@ code, configs, docs and small summary tables only.
    already lists several; keep that log the single source of truth.
 6. **Every pipeline run writes a manifest** (JSON: parameters, software
    versions, git commit, input file list, timestamp) next to its outputs in
-   Drive. Outputs are timestamped, never overwritten.
+   Drive.
+   - Outputs are never overwritten. Completed checkpoint units are
+     immutable.
+   - Intentional recomputation (`--force`) goes to a fresh directory, or
+     moves old outputs to `_superseded/`.
+   - Output directories are keyed by config hash (needed for resuming), not
+     by timestamp; timestamps live in manifests and markers.
 7. Don't present a number in the paper that can't be regenerated from a
    committed config + a commit hash.
 
@@ -131,8 +137,10 @@ by dataset and config hash.
 - **Frozen primary segmentation:** 20 s windows, 50 % overlap (5000 / 2500
   samples at 250 Hz), same for both datasets, cut after all filtering of the
   continuous signal.
-- Each run writes `processed/graphs_v3_<UTC stamp>_<config hash>/` with
-  `graphs.npz`, `windows.csv`, `subjects.csv` and `manifest.json`. The schema is
+- Each run writes `processed/graphs_v3_<config hash>/` with
+  `subjects/<key>/` (per-subject checkpoints), `status.csv`, and after
+  assembly `graphs.npz`, `windows.csv`, `subjects.csv` and `manifest.json`
+  (with `graph_run_id`). The schema is
   in `src/adgraph/graphs/store.py`, and row *i* of `windows.csv` matches index
   *i* of the arrays.
 - PLV is primary and ciPLV is the sensitivity analysis. They are stored and
@@ -187,6 +195,42 @@ by dataset and config hash.
   - The primary models are Exp 0 SVM, Exp 1 SVM and Exp 6 full.
   - PLV is primary and |ciPLV| is the robustness analysis.
   - Changing any of these needs a logged reason.
+
+## Checkpointing and resume (see methodology log entry 31)
+
+- **Mechanism.** Every unit of work is checkpointed with atomic writes and a
+  validated completion marker: identity + SHA-256 of payload files
+  (`src/adgraph/checkpoint.py`). Payload is written first, marker last, so an
+  interrupted unit is never treated as complete.
+- **Graphs:**
+  - Each subject is saved as soon as it finishes. On restart, completed
+    subjects are skipped.
+  - Missing, interrupted, corrupted or incompatible subjects are recomputed,
+    and failed subjects are retried.
+  - The sensor→ROI operator is cached under `<cache_dir>/operators` by its
+    source-model hash, so fsaverage and the forward/inverse model are only
+    built when needed.
+  - The cohort is reassembled only when the subject units change.
+- **Experiments:**
+  - Each outer fold, inner-CV trial and permutation is saved on completion.
+  - Unit identity = training-config hash + `graph_run_id` + setting + split
+    id + repeat + fold + seed (+ trial params / permutation index) + code
+    version.
+  - Raising `n_repeats` reuses existing repeats.
+  - A different config or graph run raises `IncompatibleCheckpoint`; results
+    are never silently reused.
+- **CLI:**
+  - `--resume` is the default and continues the same command.
+  - `--status` shows completed / partial / pending / failed without running
+    anything.
+  - `--force` recomputes intentionally: a fresh directory, or old outputs
+    moved to `_superseded/`.
+  - `--no-resume` refuses an existing directory.
+- **Code versions.** Bump the matching entry in `CODE_VERSIONS`
+  (`checkpoint.py`) whenever a change alters what a unit computes; old units
+  then become incompatible.
+- **Figures** only read final, validated experiment outputs and never train.
+  Superseded and unfinished results are ignored.
 
 ## Conventions
 

@@ -79,13 +79,13 @@ def fig_graph_embedding(index, spec, style, stats=None):
     if not isinstance(spec.get("repeat"), int) or not isinstance(spec.get("fold"), int):
         raise ValueError("graph-embedding figures need one explicit fitted model: integer 'repeat' and 'fold'; "
                          "embeddings of independently trained folds are never merged")
-    z = np.load(path, allow_pickle=True)
-    sel = (z["repeat"] == spec["repeat"]) & (z["fold"] == spec["fold"])
-    if not sel.any():
+    z = np.load(path, allow_pickle=False)
+    prefix = f"r{spec['repeat']:03d}_f{spec['fold']:02d}__"
+    if prefix + "emb" not in z.files:
         raise ValueError("requested repeat/fold not in embeddings.npz")
-    e = pd.DataFrame(z["emb"][sel])
+    e = pd.DataFrame(z[prefix + "emb"])                                    # one fitted model only
     dims = list(e.columns)
-    e = e.assign(key=z["key"][sel], side=z["side"][sel], y=z["y"][sel], dataset=z["dataset"][sel])
+    e = e.assign(key=z[prefix + "key"], side=z[prefix + "side"], y=z[prefix + "y"], dataset=z[prefix + "dataset"])
     per = e.groupby(["key", "side"]).agg({**{d: "mean" for d in dims}, "y": "first", "dataset": "first"}).reset_index()
     emb, axes_lab = project(per[dims].to_numpy(), spec.get("method", "pca"))   # one embedding per subject
     anon = anonymize(per["key"])

@@ -62,6 +62,7 @@ synthetic data.
 28. [PLV primary, |ciPLV| predefined robustness analysis](#28-plv-primary-ciplv-predefined-robustness-analysis)
 29. [Frozen main-paper figure set](#29-frozen-main-paper-figure-set)
 30. [Comparable timing and single-model embeddings](#30-comparable-timing-and-single-model-embeddings)
+31. [Checkpointing and resume](#31-checkpointing-and-resume)
 
 ---
 
@@ -1474,6 +1475,105 @@ synthetic data.
 
 **Approval status**
 - Author decision (2026-10-12).
+
+---
+
+## 31. Checkpointing and resume
+
+**Previous design**
+- Graph construction kept every subject in memory and saved the whole cohort once, at
+  the end, into a new timestamped directory.
+- The sensor→ROI operator (fsaverage fetch, forward model, inverse, ROI extraction) was
+  rebuilt on every run.
+- Experiments wrote their outputs only after all repeats, folds and permutations had
+  finished, again into a timestamped directory.
+
+**Problem discovered**
+- Colab sessions disconnect and time out. Under the previous design a disconnect lost all
+  work since the start of the run, and a rerun started from zero.
+- Timestamped directories meant a rerun could not find its own earlier partial work, and
+  nothing stopped results from different configurations or graph runs being mixed by hand.
+
+**Scientific / engineering reason**
+- Recomputation must not change results. A result may only be reused if it was produced
+  from the same configuration, the same graph run, the same split, repeat, fold and seed,
+  and the same code.
+- An interrupted or corrupted output must never be mistaken for a completed one.
+
+**Final implementation**
+- `src/adgraph/checkpoint.py`:
+  - Atomic writes: temp file, fsync, `os.replace`.
+  - A unit is complete only when its marker `<name>.done.json` exists, its `identity`
+    equals the expected identity, and every listed payload file has the recorded SHA-256.
+    Payload is written first and the marker last.
+  - States: complete / missing / incompatible / corrupt. Corrupt or incompatible units are
+    moved to `_superseded/<stamp>/`, never deleted or overwritten.
+  - `CODE_VERSIONS` per unit type; bumping one makes old units incompatible.
+  - `status.csv` (pending / running / completed / failed) is informational only;
+    completion is always decided by the marker.
+- Graph construction (`pipeline.run`):
+  - Output directory `graphs_v3_<config hash>/` (no timestamp), so a rerun of the same
+    command finds its own work. `run_identity.json` guards against a different config.
+  - One unit per subject under `subjects/<key>/`. Identity: config hash, operator id,
+    input path, size and mtime, code version.
+  - A subject that raises an error is recorded as failed and retried on the next run.
+  - The cohort files (`graphs.npz`, `windows.csv`, `subjects.csv`, `manifest.json`) are
+    assembled from the subject units. The assembly is redone only when the units change.
+    The manifest carries a `graph_run_id`.
+  - The operator is cached as `operator_<id>.npz` keyed by the source-model hash (source
+    config, channels, montage, reference, MNE version). fsaverage is fetched only when
+    no valid cached operator exists.
+- Experiments (`runner.run_variant`):
+  - Output directory `<out>/<experiment>/<variant>/<setting>/` (no timestamp).
+  - Units: each outer fold (predictions, metadata, embeddings), each inner-CV trial (one
+    hyperparameter combination on one inner fold) and each permutation.
+  - Unit identity: training-config hash, `graph_run_id`, setting, split id (hash of the
+    train/test subjects), repeat, fold, seed, trial parameters or permutation index, code
+    version.
+  - The training hash excludes evaluation-only keys (`n_repeats`, `cross_n_seeds`,
+    `n_bootstrap`, `permutation`). Raising `n_repeats` therefore reuses existing folds.
+    Any training-relevant change gives a new identity.
+  - An existing directory with a different identity raises `IncompatibleCheckpoint`.
+    Only `--force` supersedes it.
+  - Final files are written atomically, with a final marker written last.
+- CLI (`build_graphs.py`, `run_experiment.py`):
+  - `--resume` is the default.
+  - `--status` reports progress without running anything.
+  - `--force` recomputes intentionally (new directory or superseded outputs).
+  - `--no-resume` refuses an existing directory.
+- Figures: `index_results` ignores `_superseded/` and runs without a valid final marker.
+  Notebooks pick graph runs with `latest_complete_graph_run`.
+
+**Alternatives considered**
+- Keep timestamped directories and add a separate resume pointer. More state to keep
+  consistent; not adopted.
+- Use the status table as the source of truth. A crash can leave it stale; not adopted.
+- Content-hash the raw EDF inputs. Robust, but reads every file on every run over Drive;
+  size + mtime used instead (see caveats).
+- Delete incompatible outputs. Rejected: outputs are never destroyed (CLAUDE.md rule 6).
+
+**Effect on interpretation**
+- None on results: a resumed run produces the same outputs as an uninterrupted run with
+  the same seeds (tested).
+- Caveats:
+  - Input identity uses file size and mtime, not a content hash. An edited file with
+    unchanged size and mtime would not be detected.
+  - `CODE_VERSIONS` must be bumped by hand when a change alters what a unit computes.
+  - Failed subjects are retried automatically on every run until they succeed.
+
+**Code / config**
+- `src/adgraph/checkpoint.py`, `src/adgraph/pipeline.py`, `src/adgraph/experiments/runner.py`
+- `src/adgraph/graphs/store.py::graph_run_id`, `src/adgraph/visualization/results.py::index_results`
+- `scripts/build_graphs.py`, `scripts/run_experiment.py`
+
+**Validating tests**
+- `tests/test_checkpoint.py` (synthetic data, simulated crashes, corrupted and torn
+  files, config changes, `--force`, CLI subprocess, figure-only reads)
+- `tests/test_runner.py::test_outputs_never_overwritten`
+
+**Approval status**
+- Author-specified (resumability requirements, 2026-10-12). Implementation details
+  approved in principle.
 
 ---
 

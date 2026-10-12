@@ -101,9 +101,11 @@ def test_cross_dataset_gate_blocks_unverified_runs(small_store, tmp_path):
 
 def test_outputs_never_overwritten(small_store, tmp_path):
     v = fast(first_variant("exp0_sensor_psd.yaml"))
-    run_variant(small_store, v, "within_D1", tmp_path)
+    first = run_variant(small_store, v, "within_D1", tmp_path)
+    again = run_variant(small_store, v, "within_D1", tmp_path)                 # resumed: reused, not rewritten
+    assert json.dumps(again, sort_keys=True) == json.dumps(first, sort_keys=True)
     with pytest.raises(FileExistsError):
-        run_variant(small_store, v, "within_D1", tmp_path)
+        run_variant(small_store, v, "within_D1", tmp_path, resume=False)
 
 
 def test_dry_run_reports_shapes(small_store):

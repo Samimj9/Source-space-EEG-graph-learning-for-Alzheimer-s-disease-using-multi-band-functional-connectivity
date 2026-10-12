@@ -17,7 +17,7 @@ A run directory contains
     windows.csv    one row per window: identifiers + QC (see WINDOW_COLUMNS)
     subjects.csv   one row per subject: metadata + QC
     manifest.json  provenance (config, hash, commit, versions, operator check)
-    roi_timeseries/<key>.npy   optional, continuous (n_rois, n_times) float32 per subject;
+    subjects/<key>/roi_timeseries.npy  optional, continuous (n_rois, n_times) float32 per subject;
                    a window is ``ts[:, start_sample:stop_sample]``
 
 PLV and ciPLV are kept as separate arrays and are never combined here.
@@ -37,6 +37,23 @@ PSD_KINDS = ("abs", "log", "rel")
 ARRAY_KEYS = CONNECTIVITY + ("ciplv_signed",) + tuple(f"psd_{k}" for k in PSD_KINDS) + tuple(f"sensor_psd_{k}" for k in PSD_KINDS)
 WINDOW_COLUMNS = ("window_id", "key", "dataset", "subject_id", "label", "y", "window_index",
                   "start_sample", "stop_sample", "tmin", "tmax", "sample_weight")
+
+
+def graph_run_id(store) -> str:
+    """Identity of a graph run's content, used to tie experiment checkpoints to it.
+
+    Pipeline-assembled runs carry ``manifest['graph_run_id']``; otherwise (synthetic or
+    older stores) it is computed from the config hash, window ids and array contents."""
+    if store.manifest.get("graph_run_id"):
+        return str(store.manifest["graph_run_id"])
+    import hashlib
+
+    h = hashlib.sha256(str(store.manifest.get("config_hash")).encode())
+    h.update("|".join(store.windows["window_id"].astype(str)).encode())
+    for k in sorted(store.arrays):
+        h.update(k.encode())
+        h.update(np.ascontiguousarray(store.arrays[k]).tobytes())
+    return h.hexdigest()[:16]
 
 
 def window_id(key: str, window_index: int) -> str:
@@ -116,21 +133,26 @@ class GraphStore:
         if self.root is None:
             raise RuntimeError("store was not loaded from disk")
         row = self.windows.iloc[i]
-        ts = np.load(self.root / "roi_timeseries" / f"{row['key']}.npy", mmap_mode="r")
+        path = self.root / "subjects" / str(row["key"]) / "roi_timeseries.npy"     # checkpointed runs
+        if not path.exists():
+            path = self.root / "roi_timeseries" / f"{row['key']}.npy"
+        ts = np.load(path, mmap_mode="r")
         return np.asarray(ts[:, int(row["start_sample"]):int(row["stop_sample"])])
 
     # ---- persistence ----
     def save(self, out_dir: str | Path) -> Path:
+        """Write all files atomically (temp file + rename); returns the directory."""
+        from ..checkpoint import atomic_savez, atomic_write_csv, atomic_write_json
+
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(out_dir / "graphs.npz", **self.arrays, bands=np.array(self.bands),
-                            band_edges=self.band_edges, roi_names=np.array(self.roi_names),
-                            **({"roi_coords": np.asarray(self.roi_coords)} if self.roi_coords is not None else {}),
-                            channels=np.array(self.channels))
-        self.windows.to_csv(out_dir / "windows.csv", index=False)
-        self.subjects.to_csv(out_dir / "subjects.csv", index=False)
-        with open(out_dir / "manifest.json", "w") as f:
-            json.dump(self.manifest, f, indent=2, default=str)
+        atomic_savez(out_dir / "graphs.npz", **self.arrays, bands=np.array(self.bands),
+                     band_edges=self.band_edges, roi_names=np.array(self.roi_names),
+                     **({"roi_coords": np.asarray(self.roi_coords)} if self.roi_coords is not None else {}),
+                     channels=np.array(self.channels))
+        atomic_write_csv(out_dir / "windows.csv", self.windows)
+        atomic_write_csv(out_dir / "subjects.csv", self.subjects)
+        atomic_write_json(out_dir / "manifest.json", self.manifest)
         return out_dir
 
     @classmethod

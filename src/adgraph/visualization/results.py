@@ -34,8 +34,10 @@ def index_results(root: str | Path, duplicates: str = "error") -> pd.DataFrame:
     rows = []
     for man in sorted(Path(root).rglob("manifest.json")):
         d = man.parent
-        if not (d / "metrics_repeats.csv").exists():
-            continue
+        if "_superseded" in d.parts or not (d / "metrics_repeats.csv").exists():
+            continue                                   # superseded (--force) results are never plotted
+        if (d / "_identity.json").exists() and not (d / "final.done.json").exists():
+            continue                                   # interrupted run: final outputs not validated
         m = json.loads(man.read_text())
         v = m["variant_config"]
         g = v.get("graph", {}) if v.get("input") == "graph" else {}

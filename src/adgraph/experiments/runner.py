@@ -15,7 +15,11 @@ Outputs per (variant, setting) directory:
     folds.csv                 subject -> (repeat, fold, side)
     hparams.csv               selected hyperparameters per split + inner-CV scores, n_parameters, fit_seconds
     embeddings.npz            optional (evaluation.save_embeddings): fused graph embeddings of the train and
-                              test windows of every split, each from that split's single fitted model
+                              test windows of every split, each from that split's single fitted model, stored
+                              per model under keys ``r<repeat>_f<fold>__{emb,window_id,key,y,dataset,side}``
+                              (models of different folds may differ in width and are never concatenated)
+    units/, status.csv        checkpoints: one validated unit per outer fold, inner-CV trial and permutation
+    _identity.json, final.done.json   checkpoint identity and completion marker of the final outputs
     summary.json              mean/SD/percentiles, bootstrap CI, window-level metrics, permutation test
     manifest.json             resolved variant config, graph run provenance, git commit, versions
 """
@@ -37,6 +41,9 @@ from ..evaluation.metrics import (aggregate_subjects, binary_metrics, bootstrap_
 from ..evaluation.splits import (CROSS_SETTINGS, SETTINGS, fold_indices, inner_folds, make_splits, setting_subset)
 from ..graphs.dataset import Dataset, build_dataset
 from ..graphs.store import GraphStore
+from ..checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_savez, atomic_write_csv,
+                          atomic_write_json, atomic_write_text, check_unit, stable_hash, supersede, write_marker)
+from ..graphs.store import graph_run_id
 from ..provenance import compute_environment, git_commit, versions
 from .config import apply_hparams, hparam_grid
 from .gate import gate_failures
@@ -90,8 +97,115 @@ def _strata(setting: str) -> tuple[str, ...]:
     return SETTINGS[setting][2]
 
 
-def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, seed: int) -> tuple[dict, list]:
-    """Subject-level inner CV inside the training subjects; returns (best params, score table)."""
+# ====================================================================== checkpointing
+EVAL_ONLY_KEYS = ("n_repeats", "cross_n_seeds", "n_bootstrap", "permutation")
+
+
+def training_hash(v: dict) -> str:
+    """Hash of everything that affects what a fold trains/predicts.
+
+    Evaluation-only settings (number of repeats, bootstrap/permutation counts) and display
+    fields are excluded, so e.g. raising ``n_repeats`` reuses the repeats already computed."""
+    vv = {k: val for k, val in v.items() if k not in ("name", "variant", "settings")}
+    vv["evaluation"] = {k: val for k, val in v["evaluation"].items() if k not in EVAL_ONLY_KEYS}
+    return config_hash(vv)
+
+
+def split_id(train_keys, test_keys) -> str:
+    return stable_hash({"train": sorted(train_keys), "test": sorted(test_keys)})
+
+
+class ExperimentCheckpoint:
+    """Checkpoint directory of one (experiment, variant, setting).
+
+    Units (outer folds, inner-CV trials, permutations) live in ``units/`` and are reused
+    only if their identity matches: training-config hash + graph-run id + setting + split id
+    + repeat + fold + seed (+ trial parameters / permutation index) + code version.
+    """
+
+    def __init__(self, out: Path, identity: dict):
+        self.out, self.identity = out, identity
+        self.units = out / "units"
+        self.status = StatusTable(out / "status.csv")
+
+    @classmethod
+    def open(cls, out: Path, identity: dict, root: Path, resume: bool = True, force: bool = False):
+        if out.exists() and any(out.iterdir()):
+            if force:
+                moved = supersede(out, root)
+                log.warning("--force: previous outputs moved to %s", moved)
+            else:
+                ident_file = out / "_identity.json"
+                if not ident_file.exists():
+                    raise IncompatibleCheckpoint(f"{out} has outputs without a checkpoint identity (older run); "
+                                                 "use force to supersede them")
+                found = json.loads(ident_file.read_text())["identity"]
+                if json.dumps(found, sort_keys=True) != json.dumps(identity, sort_keys=True):
+                    diff = {k: (found.get(k), identity.get(k)) for k in set(found) | set(identity)
+                            if found.get(k) != identity.get(k)}
+                    raise IncompatibleCheckpoint(f"{out} was produced with a different configuration or graph run "
+                                                 f"{diff}; refusing to reuse it (use force to supersede)")
+                if not resume:
+                    raise FileExistsError(f"{out} exists; resume (default) continues it, force supersedes it")
+        out.mkdir(parents=True, exist_ok=True)
+        if not (out / "_identity.json").exists():
+            atomic_write_json(out / "_identity.json", {"identity": identity,
+                                                      "created_at": datetime.now(timezone.utc).isoformat()})
+        return cls(out, identity)
+
+    def unit_identity(self, unit: str, **fields) -> dict:
+        code = {"fold": "experiment", "inner": "inner_trial", "perm": "permutation"}[unit]
+        return {**self.identity, "unit": unit, "unit_code_version": CODE_VERSIONS[code], **fields}
+
+    def _check(self, name: str, ident: dict) -> bool:
+        state, _ = check_unit(self.units, name, ident)
+        if state == "incompatible":
+            raise IncompatibleCheckpoint(f"unit {name} in {self.out} has a different identity; use force")
+        if state == "corrupt":
+            log.warning("unit %s corrupt; recomputing", name)
+            for f in self.units.glob(f"{name}.*"):
+                supersede(f, self.out)
+        return state == "complete"
+
+    # -- outer folds
+    def load_fold(self, name: str, ident: dict):
+        if not self._check(name, ident):
+            return None
+        meta = json.loads((self.units / f"{name}.meta.json").read_text())
+        emb = None
+        if (self.units / f"{name}.emb.npz").exists():
+            z = np.load(self.units / f"{name}.emb.npz", allow_pickle=False)
+            emb = {k: z[k] for k in z.files}
+        return pd.read_csv(self.units / f"{name}.pred.csv"), meta["folds"], meta["hparams"], emb
+
+    def save_fold(self, name, ident, pred: pd.DataFrame, folds: list, hp: dict, emb: dict | None):
+        files = [atomic_write_csv(self.units / f"{name}.pred.csv", pred),
+                 atomic_write_json(self.units / f"{name}.meta.json", {"folds": folds, "hparams": hp})]
+        if emb is not None:
+            files.append(atomic_savez(self.units / f"{name}.emb.npz", **emb))
+        write_marker(self.units, name, ident, files)
+
+    # -- inner-CV trials
+    def load_trial(self, name, ident):
+        return pd.read_csv(self.units / f"{name}.val.csv") if self._check(name, ident) else None
+
+    def save_trial(self, name, ident, val_pred: pd.DataFrame):
+        write_marker(self.units, name, ident, [atomic_write_csv(self.units / f"{name}.val.csv", val_pred)])
+
+    # -- permutations
+    def load_perm(self, name, ident):
+        return json.loads((self.units / f"{name}.json").read_text())["value"] if self._check(name, ident) else None
+
+    def save_perm(self, name, ident, value: float):
+        write_marker(self.units, name, ident, [atomic_write_json(self.units / f"{name}.json", {"value": value})])
+
+
+def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, seed: int,
+                   ckpt: ExperimentCheckpoint | None = None, sp_id: str = "") -> tuple[dict, list]:
+    """Subject-level inner CV inside the training subjects; returns (best params, score table).
+
+    With a checkpoint, every completed (parameter combination, inner fold) trial is cached,
+    so an interrupted search resumes where it stopped."""
     grid = hparam_grid(v)
     if len(grid) == 1:
         return grid[0], []
@@ -104,9 +218,22 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
         vp = apply_hparams(v, params)
         preds = []
         for i, (itr, iva) in enumerate(folds):
-            model = make_model(vp, seed + i).fit(train_view.take(itr, "train"))
             val = train_view.take(iva, "val")
-            preds.append(val.meta.assign(score=model.predict_score(val), y=val.y))
+            name = ident = None
+            if ckpt is not None:
+                inner_id = split_id(train_view.meta["key"].iloc[itr].unique(), val.meta["key"].unique())
+                name = f"inner_{sp_id}_{stable_hash(params, 8)}_i{i}"
+                ident = ckpt.unit_identity("inner", split_id=sp_id, params=params, inner_fold=i,
+                                           inner_split_id=inner_id, seed=seed + i)
+                cached = ckpt.load_trial(name, ident)
+                if cached is not None:
+                    preds.append(cached)
+                    continue
+            model = make_model(vp, seed + i).fit(train_view.take(itr, "train"))
+            out = val.meta[["window_id", "key", "dataset"]].assign(score=model.predict_score(val), y=val.y)
+            if ckpt is not None:
+                ckpt.save_trial(name, ident, out)
+            preds.append(out)
         subj = aggregate_subjects(pd.concat(preds))
         score = binary_metrics(subj["y"], subj["score"], score_threshold(v))[ev["selection_metric"]]
         scores.append({**params, "inner_score": score})
@@ -115,48 +242,97 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
     return grid[best], scores
 
 
-def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None = None,
-                   collect_band_weights: bool = True,
-                   embeddings_out: list | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Outer loop for one setting. Returns window predictions, fold table, hparam table."""
+def _splits(data_meta: pd.DataFrame, v: dict, setting: str, target: str, n_repeats: int | None = None):
     ev = v["evaluation"]
-    sub = setting_subset(data.meta, setting)
-    meta = data.meta.iloc[sub].reset_index(drop=True)
-    cross = setting in CROSS_SETTINGS
-    reps = n_repeats if n_repeats is not None else (ev["cross_n_seeds"] if cross else ev["n_repeats"])
-    splits = make_splits(meta, setting, ev["k"], reps, ev["seed"], data.target, ev.get("scheme", "kfold"))
+    sub = setting_subset(data_meta, setting)
+    meta = data_meta.iloc[sub].reset_index(drop=True)
+    reps = n_repeats if n_repeats is not None else (ev["cross_n_seeds"] if setting in CROSS_SETTINGS
+                                                   else ev["n_repeats"])
+    return sub, meta, make_splits(meta, setting, ev["k"], reps, ev["seed"], target, ev.get("scheme", "kfold"))
+
+
+def fold_unit_name(sp) -> str:
+    return f"fold_r{sp.repeat:03d}_f{sp.fold:02d}"
+
+
+def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None = None,
+                   collect_band_weights: bool = True, embeddings_out: list | None = None,
+                   ckpt: ExperimentCheckpoint | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Outer loop for one setting. Returns window predictions, fold table, hparam table.
+
+    With a checkpoint, each completed outer split is saved immediately and, on restart,
+    loaded instead of retrained (identity: config + graph run + split + repeat + fold + seed)."""
+    ev = v["evaluation"]
+    sub, meta, splits = _splits(data.meta, v, setting, data.target, n_repeats)
     preds, folds, hps = [], [], []
+    if ckpt is not None:
+        ckpt.status.ensure([fold_unit_name(sp) for sp in splits])
     for sp in splits:
         tr, te = fold_indices(meta, sp)
         tr_g, te_g = sub[tr], sub[te]
         seed = int(ev["seed"] + 1000 * sp.repeat + sp.fold)
-        params, scores = select_hparams(data, tr_g, v, setting, seed)
-        t0 = time.perf_counter()
-        model = make_model(apply_hparams(v, params), seed).fit(data.view(tr_g, "train"))
-        fit_seconds = time.perf_counter() - t0
-        test = data.view(te_g, "test")      # created only after fitting
-        out = test.meta[["window_id", "key", "dataset", "subject_id"]].copy()
-        out["y"] = test.y
-        if v["input"] == "graph" and collect_band_weights:
-            score, bw = model.predict_score(test, return_band_weights=True)
-            for i, name in enumerate(data.info["graph_bands"]):
-                out[f"band_weight_{name}"] = bw[:, i]
-        else:
-            score = model.predict_score(test)
-        out["score"] = score
-        out["repeat"], out["fold"] = sp.repeat, sp.fold
+        sp_id = split_id(sp.train_keys, sp.test_keys)
+        name, ident = fold_unit_name(sp), None
+        if ckpt is not None:
+            ident = ckpt.unit_identity("fold", split_id=sp_id, repeat=sp.repeat, fold=sp.fold, seed=seed)
+            cached = ckpt.load_fold(name, ident)
+            if cached is not None:
+                pred_f, fold_rows, hp_row, emb = cached
+                preds.append(pred_f)
+                folds += fold_rows
+                hps.append(hp_row)
+                if embeddings_out is not None and emb is not None:
+                    embeddings_out.append(emb)
+                if ckpt.status.get(name) != "completed":
+                    ckpt.status.set(name, "completed", "validated existing checkpoint")
+                continue
+            ckpt.status.set(name, "running")
+        try:
+            params, scores = select_hparams(data, tr_g, v, setting, seed, ckpt, sp_id)
+            t0 = time.perf_counter()
+            model = make_model(apply_hparams(v, params), seed).fit(data.view(tr_g, "train"))
+            fit_seconds = time.perf_counter() - t0
+            test = data.view(te_g, "test")      # created only after fitting
+            out = test.meta[["window_id", "key", "dataset", "subject_id"]].copy()
+            out["y"] = test.y
+            if v["input"] == "graph" and collect_band_weights:
+                score, bw = model.predict_score(test, return_band_weights=True)
+                for i, bname in enumerate(data.info["graph_bands"]):
+                    out[f"band_weight_{bname}"] = bw[:, i]
+            else:
+                score = model.predict_score(test)
+            out["score"] = score
+            out["repeat"], out["fold"] = sp.repeat, sp.fold
+            fold_rows = ([{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "train"} for k in sp.train_keys]
+                         + [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "test"} for k in sp.test_keys])
+            hp_row = {"repeat": sp.repeat, "fold": sp.fold, "selected": json.dumps(params),
+                      "scores": json.dumps(scores), "n_parameters": model.n_parameters(), "fit_seconds": fit_seconds,
+                      "split_id": sp_id, "seed": seed}
+            emb = None
+            if embeddings_out is not None and hasattr(model, "embed"):
+                parts = []
+                for side, idx in (("train", tr_g), ("test", te_g)):
+                    view = data.view(idx, "test")          # read-only use of an already fitted model
+                    parts.append({"emb": model.embed(view), "window_id": view.meta["window_id"].to_numpy(),
+                                  "key": view.meta["key"].to_numpy(), "y": view.y,
+                                  "dataset": view.meta["dataset"].to_numpy(),
+                                  "side": np.repeat(side, len(idx)), "repeat": np.repeat(sp.repeat, len(idx)),
+                                  "fold": np.repeat(sp.fold, len(idx))})
+                emb = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+                emb["window_id"] = emb["window_id"].astype(str)
+                for k in ("key", "dataset", "side"):
+                    emb[k] = emb[k].astype(str)
+                embeddings_out.append(emb)
+        except Exception as exc:
+            if ckpt is not None:
+                ckpt.status.set(name, "failed", f"{type(exc).__name__}: {exc}"[:500])
+            raise
+        if ckpt is not None:
+            ckpt.save_fold(name, ident, out, fold_rows, hp_row, emb)
+            ckpt.status.set(name, "completed")
         preds.append(out)
-        folds += [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "train"} for k in sp.train_keys]
-        folds += [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "test"} for k in sp.test_keys]
-        hps.append({"repeat": sp.repeat, "fold": sp.fold, "selected": json.dumps(params), "scores": json.dumps(scores),
-                    "n_parameters": model.n_parameters(), "fit_seconds": fit_seconds})
-        if embeddings_out is not None and hasattr(model, "embed"):
-            for side, idx in (("train", tr_g), ("test", te_g)):
-                view = data.view(idx, "test")          # read-only use of an already fitted model
-                embeddings_out.append({"emb": model.embed(view), "window_id": view.meta["window_id"].to_numpy(),
-                                       "key": view.meta["key"].to_numpy(), "side": side,
-                                       "y": view.y, "dataset": view.meta["dataset"].to_numpy(),
-                                       "repeat": sp.repeat, "fold": sp.fold})
+        folds += fold_rows
+        hps.append(hp_row)
     return pd.concat(preds, ignore_index=True), pd.DataFrame(folds), pd.DataFrame(hps)
 
 
@@ -201,7 +377,24 @@ def permute_subject_labels(data: Dataset, rng: np.random.Generator) -> Dataset:
     return Dataset(meta, data.payload, data.kind, data.info, data.target)
 
 
-def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, data: Dataset | None = None) -> dict:
+FINAL_FILES = ("predictions_windows.csv", "predictions_subjects.csv", "metrics_repeats.csv", "folds.csv",
+               "hparams.csv", "summary.json", "manifest.json")
+
+
+def experiment_identity(store: GraphStore, v: dict, setting: str) -> dict:
+    return {"kind": "experiment", "code_version": CODE_VERSIONS["experiment"], "training_config_hash": training_hash(v),
+            "graph_run_id": graph_run_id(store), "setting": setting, "experiment": v["experiment"],
+            "variant": v["variant"]}
+
+
+def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, data: Dataset | None = None,
+                resume: bool = True, force: bool = False) -> dict:
+    """Run (or resume) one variant in one setting; returns the summary.
+
+    Already completed results with the same identity are returned without recomputation;
+    completed outer folds, inner-CV trials and permutations are reused; results produced with a
+    different configuration or graph run are never reused (IncompatibleCheckpoint) unless
+    ``force`` supersedes them (moved to ``_superseded/``, never deleted or overwritten)."""
     ev = v["evaluation"]
     if setting not in SETTINGS:
         raise ValueError(f"unknown setting {setting!r}; choose from {list(SETTINGS)}")
@@ -211,22 +404,27 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
         fails = gate_failures(store)
         if fails and not ev.get("allow_ungated_cross_dataset", False):
             raise RuntimeError("cross-dataset gate not passed (DESIGN.md §7): " + "; ".join(fails))
-    data = data or build_dataset(store, v)
     out = Path(out_dir) / v["experiment"] / v["variant"] / setting
-    out.mkdir(parents=True, exist_ok=False)
+    ck = ExperimentCheckpoint.open(out, experiment_identity(store, v, setting), Path(out_dir), resume, force)
+    final_ident = {**ck.identity, "full_config_hash": config_hash(v)}
+    state, _ = check_unit(out, "final", final_ident)
+    if state == "complete":
+        log.info("%s / %s: completed results found, nothing recomputed", v["name"], setting)
+        return json.loads((out / "summary.json").read_text())
+    if state != "missing":                       # evaluation settings changed: re-evaluate from fold units
+        for f in FINAL_FILES + ("embeddings.npz", "final.done.json"):
+            supersede(out / f, Path(out_dir))
 
+    data = data or build_dataset(store, v)
     emb = [] if (ev.get("save_embeddings", False) and v["input"] == "graph") else None
-    pred, folds, hps = cross_validate(data, v, setting, embeddings_out=emb)
+    pred, folds, hps = cross_validate(data, v, setting, embeddings_out=emb, ckpt=ck)
+    finals = []
     if emb:
-        n = [len(e["window_id"]) for e in emb]
-        np.savez_compressed(out / "embeddings.npz", emb=np.concatenate([e["emb"] for e in emb]).astype(np.float32),
-                            window_id=np.concatenate([e["window_id"] for e in emb]),
-                            key=np.concatenate([e["key"] for e in emb]),
-                            y=np.concatenate([e["y"] for e in emb]),
-                            dataset=np.concatenate([e["dataset"] for e in emb]),
-                            side=np.repeat([e["side"] for e in emb], n),
-                            repeat=np.repeat([e["repeat"] for e in emb], n),
-                            fold=np.repeat([e["fold"] for e in emb], n))
+        per_model = {}
+        for e in emb:
+            prefix = f"r{int(e['repeat'][0]):03d}_f{int(e['fold'][0]):02d}__"
+            per_model.update({prefix + k: e[k] for k in ("emb", "window_id", "key", "y", "dataset", "side")})
+        finals.append(atomic_savez(out / "embeddings.npz", **per_model))
     thr = score_threshold(v)
     subj, per_repeat, summary = evaluate(pred, thr, ev["n_bootstrap"], ev["seed"])
     summary["score"] = {"type": model_score_type(v), "threshold": thr,
@@ -234,38 +432,80 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
 
     perm_cfg = ev.get("permutation", {}) or {}
     if perm_cfg.get("n", 0) > 0:
-        rng = np.random.default_rng(ev["seed"])
         null = []
-        for _ in range(perm_cfg["n"]):
-            p_pred, _, _ = cross_validate(permute_subject_labels(data, rng), v, setting,
-                                          n_repeats=perm_cfg.get("n_repeats", 1), collect_band_weights=False)
-            _, p_rep, _ = evaluate(p_pred, thr, n_boot=0)
-            null.append(p_rep.loc[p_rep["scope"] == "all", "roc_auc"].mean())
+        for p in range(perm_cfg["n"]):
+            name = f"perm_{p:04d}"
+            ident = ck.unit_identity("perm", index=p, n_repeats=perm_cfg.get("n_repeats", 1), seed=ev["seed"])
+            val = ck.load_perm(name, ident)
+            if val is None:
+                rng = np.random.default_rng([ev["seed"], p])          # independent per permutation (resumable)
+                p_pred, _, _ = cross_validate(permute_subject_labels(data, rng), v, setting,
+                                              n_repeats=perm_cfg.get("n_repeats", 1), collect_band_weights=False)
+                _, p_rep, _ = evaluate(p_pred, thr, n_boot=0)
+                val = float(p_rep.loc[p_rep["scope"] == "all", "roc_auc"].mean())
+                ck.save_perm(name, ident, val)
+            null.append(val)
         observed = per_repeat.loc[per_repeat["scope"] == "all", "roc_auc"].mean()
         summary["permutation"] = {"metric": "roc_auc", "observed": observed, "n": len(null),
                                   "p_value": permutation_p_value(observed, np.array(null)), "null": null}
 
-    pred.to_csv(out / "predictions_windows.csv", index=False)
-    subj.to_csv(out / "predictions_subjects.csv", index=False)
-    per_repeat.to_csv(out / "metrics_repeats.csv", index=False)
-    folds.to_csv(out / "folds.csv", index=False)
-    hps.to_csv(out / "hparams.csv", index=False)
-    (out / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
+    finals += [atomic_write_csv(out / "predictions_windows.csv", pred),
+               atomic_write_csv(out / "predictions_subjects.csv", subj),
+               atomic_write_csv(out / "metrics_repeats.csv", per_repeat),
+               atomic_write_csv(out / "folds.csv", folds), atomic_write_csv(out / "hparams.csv", hps),
+               atomic_write_text(out / "summary.json", json.dumps(summary, indent=2, default=float))]
     manifest = {
         "timestamp": datetime.now(timezone.utc).isoformat(), "setting": setting, "variant_config": v,
-        "variant_config_hash": config_hash(v), "score_type": model_score_type(v),
+        "variant_config_hash": config_hash(v), "training_config_hash": training_hash(v),
+        "checkpoint_identity": ck.identity, "score_type": model_score_type(v),
         "score_threshold": score_threshold(v), "data_info": {k: (list(x) if isinstance(x, tuple) else x)
                                                                for k, x in data.info.items()},
-        "graph_run": {"root": str(store.root), "config_hash": store.manifest.get("config_hash"),
-                      "git_commit": store.manifest.get("git_commit")},
+        "graph_run": {"root": str(store.root), "graph_run_id": graph_run_id(store),
+                      "config_hash": store.manifest.get("config_hash"), "git_commit": store.manifest.get("git_commit")},
         "cross_dataset_gate_failures": gate_failures(store) if setting in CROSS_SETTINGS else None,
         "git_commit": git_commit(), "versions": versions(),
         "compute_environment": compute_environment(run_device(v)),   # needed to compare fit_seconds
     }
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
-    log.info("%s / %s: subject AUC %.3f", v["name"], setting,
-             summary["subject_level"]["all"]["roc_auc"]["mean"])
+    finals.append(atomic_write_json(out / "manifest.json", manifest))
+    write_marker(out, "final", final_ident, finals)
+    log.info("%s / %s: subject AUC %.3f", v["name"], setting, summary["subject_level"]["all"]["roc_auc"]["mean"])
     return summary
+
+
+def experiment_status(store: GraphStore, v: dict, setting: str, out_dir: str | Path) -> dict:
+    """Completed / pending / failed outer folds of one variant and setting, without running anything."""
+    from ..graphs.dataset import _meta, target_column
+
+    out = Path(out_dir) / v["experiment"] / v["variant"] / setting
+    target = target_column(v.get("target", "label"))
+    meta = _meta(store, v.get("target", "label"))
+    _, _, splits = _splits(meta, v, setting, target)
+    row = {"experiment": v["experiment"], "variant": v["variant"], "setting": setting, "folds_total": len(splits),
+           "folds_completed": 0, "folds_failed": 0, "inner_trials_cached": 0, "state": "not started"}
+    if not out.exists():
+        return row
+    ident_file = out / "_identity.json"
+    ident = experiment_identity(store, v, setting)
+    if not ident_file.exists() or json.loads(ident_file.read_text())["identity"] != ident:
+        row["state"] = "incompatible"
+        return row
+    ck = ExperimentCheckpoint(out, ident)
+    ev = v["evaluation"]
+    for sp in splits:
+        seed = int(ev["seed"] + 1000 * sp.repeat + sp.fold)
+        uid = ck.unit_identity("fold", split_id=split_id(sp.train_keys, sp.test_keys), repeat=sp.repeat,
+                               fold=sp.fold, seed=seed)
+        state, _ = check_unit(ck.units, fold_unit_name(sp), uid)
+        if state == "complete":
+            row["folds_completed"] += 1
+        elif ck.status.get(fold_unit_name(sp)) == "failed":
+            row["folds_failed"] += 1
+    row["inner_trials_cached"] = len(list(ck.units.glob("inner_*.done.json"))) if ck.units.exists() else 0
+    final_state, _ = check_unit(out, "final", {**ident, "full_config_hash": config_hash(v)})
+    row["state"] = ("completed" if final_state == "complete" else
+                    "failed" if row["folds_failed"] else
+                    "partial" if row["folds_completed"] else "not started")
+    return row
 
 
 def dry_run(store: GraphStore, variants: list[dict], settings: list[str]) -> pd.DataFrame:
