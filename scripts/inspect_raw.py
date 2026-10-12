@@ -13,12 +13,15 @@ import pandas as pd
 
 from adgraph.config import load_paths, load_yaml
 from adgraph.io.eeg import inspect_headers, list_recordings
+from adgraph.storage import check_persistent
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--config", default="configs/pipeline.yaml")
 parser.add_argument("--out", required=True, help="directory for the header report (in Drive)")
+parser.add_argument("--allow-ephemeral-storage", action="store_true", help="permit --out outside the mounted Drive")
 args = parser.parse_args()
+check_persistent({"--out": args.out}, allow_ephemeral=args.allow_ephemeral_storage)
 
 paths, cfg = load_paths(args.paths), load_yaml(args.config)
 recs = pd.concat([list_recordings(paths["dataset1"]["eeg_dir"], "D1"),

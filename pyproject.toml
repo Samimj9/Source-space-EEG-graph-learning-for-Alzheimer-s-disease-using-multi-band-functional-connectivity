@@ -21,7 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 gnn = ["torch>=2.2"]   # preinstalled in Colab
 umap = ["umap-learn"]
-test = ["pytest", "edfio"]
+test = ["pytest", "edfio==0.4.18"]   # suite must run with zero dependency skips
 
 [tool.setuptools.packages.find]
 where = ["src"]

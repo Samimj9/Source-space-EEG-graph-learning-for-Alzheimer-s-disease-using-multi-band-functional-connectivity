@@ -42,9 +42,11 @@ from ..evaluation.splits import (CROSS_SETTINGS, SETTINGS, fold_indices, inner_f
 from ..graphs.dataset import Dataset, build_dataset
 from ..graphs.store import GraphStore
 from ..checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_savez, atomic_write_csv,
-                          atomic_write_json, atomic_write_text, check_unit, stable_hash, supersede, write_marker)
+                          atomic_write_json, atomic_write_text, check_unit, code_identity, identity_diff, stable_hash,
+                          supersede, write_marker)
 from ..graphs.store import graph_run_id
-from ..provenance import compute_environment, git_commit, versions
+from ..provenance import compute_environment, git_commit, git_dirty, versions
+from ..storage import check_persistent
 from .config import apply_hparams, hparam_grid
 from .gate import gate_failures
 
@@ -141,10 +143,9 @@ class ExperimentCheckpoint:
                                                  "use force to supersede them")
                 found = json.loads(ident_file.read_text())["identity"]
                 if json.dumps(found, sort_keys=True) != json.dumps(identity, sort_keys=True):
-                    diff = {k: (found.get(k), identity.get(k)) for k in set(found) | set(identity)
-                            if found.get(k) != identity.get(k)}
-                    raise IncompatibleCheckpoint(f"{out} was produced with a different configuration or graph run "
-                                                 f"{diff}; refusing to reuse it (use force to supersede)")
+                    diff = {k: (found.get(k), identity.get(k)) for k in identity_diff(found, identity)}
+                    raise IncompatibleCheckpoint(f"{out} was produced with a different configuration, graph run or "
+                                                 f"code {diff}; refusing to reuse it (use force to supersede)")
                 if not resume:
                     raise FileExistsError(f"{out} exists; resume (default) continues it, force supersedes it")
         out.mkdir(parents=True, exist_ok=True)
@@ -382,20 +383,25 @@ FINAL_FILES = ("predictions_windows.csv", "predictions_subjects.csv", "metrics_r
 
 
 def experiment_identity(store: GraphStore, v: dict, setting: str) -> dict:
+    """Identity shared by all units of one variant/setting; ``code`` = git commit + source hash + libraries."""
     return {"kind": "experiment", "code_version": CODE_VERSIONS["experiment"], "training_config_hash": training_hash(v),
             "graph_run_id": graph_run_id(store), "setting": setting, "experiment": v["experiment"],
-            "variant": v["variant"]}
+            "variant": v["variant"], "code": code_identity("experiment")}
 
 
 def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, data: Dataset | None = None,
-                resume: bool = True, force: bool = False) -> dict:
+                resume: bool = True, force: bool = False, allow_ephemeral: bool = False) -> dict:
     """Run (or resume) one variant in one setting; returns the summary.
 
     Already completed results with the same identity are returned without recomputation;
     completed outer folds, inner-CV trials and permutations are reused; results produced with a
     different configuration or graph run are never reused (IncompatibleCheckpoint) unless
-    ``force`` supersedes them (moved to ``_superseded/``, never deleted or overwritten)."""
+    ``force`` supersedes them (moved to ``_superseded/``, never deleted or overwritten).
+    For real (non-synthetic) graph runs ``out_dir`` must be persistent storage (mounted Drive
+    in Colab), else ``EphemeralStorageError`` unless ``allow_ephemeral``."""
     ev = v["evaluation"]
+    if not store.manifest.get("synthetic"):
+        check_persistent({"experiment output root": out_dir}, allow_ephemeral=allow_ephemeral)
     if setting not in SETTINGS:
         raise ValueError(f"unknown setting {setting!r}; choose from {list(SETTINGS)}")
     if v.get("target", "label") == "dataset" and setting != "pooled":
@@ -463,7 +469,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
         "graph_run": {"root": str(store.root), "graph_run_id": graph_run_id(store),
                       "config_hash": store.manifest.get("config_hash"), "git_commit": store.manifest.get("git_commit")},
         "cross_dataset_gate_failures": gate_failures(store) if setting in CROSS_SETTINGS else None,
-        "git_commit": git_commit(), "versions": versions(),
+        "git_commit": git_commit(), "git_dirty": git_dirty(), "versions": versions(),
         "compute_environment": compute_environment(run_device(v)),   # needed to compare fit_seconds
     }
     finals.append(atomic_write_json(out / "manifest.json", manifest))
@@ -481,13 +487,16 @@ def experiment_status(store: GraphStore, v: dict, setting: str, out_dir: str | P
     meta = _meta(store, v.get("target", "label"))
     _, _, splits = _splits(meta, v, setting, target)
     row = {"experiment": v["experiment"], "variant": v["variant"], "setting": setting, "folds_total": len(splits),
-           "folds_completed": 0, "folds_failed": 0, "inner_trials_cached": 0, "state": "not started"}
+           "folds_completed": 0, "folds_failed": 0, "inner_trials_cached": 0, "state": "not started",
+           "changed": ""}
     if not out.exists():
         return row
     ident_file = out / "_identity.json"
     ident = experiment_identity(store, v, setting)
     if not ident_file.exists() or json.loads(ident_file.read_text())["identity"] != ident:
         row["state"] = "incompatible"
+        row["changed"] = (",".join(identity_diff(json.loads(ident_file.read_text())["identity"], ident))
+                          if ident_file.exists() else "no identity file")
         return row
     ck = ExperimentCheckpoint(out, ident)
     ev = v["evaluation"]

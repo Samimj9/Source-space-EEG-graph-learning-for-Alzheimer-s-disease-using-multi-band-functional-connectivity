@@ -63,6 +63,7 @@ synthetic data.
 29. [Frozen main-paper figure set](#29-frozen-main-paper-figure-set)
 30. [Comparable timing and single-model embeddings](#30-comparable-timing-and-single-model-embeddings)
 31. [Checkpointing and resume](#31-checkpointing-and-resume)
+32. [Pre-real-run reliability safeguards](#32-pre-real-run-reliability-safeguards)
 
 ---
 
@@ -1557,8 +1558,9 @@ synthetic data.
   the same seeds (tested).
 - Caveats:
   - Input identity uses file size and mtime, not a content hash. An edited file with
-    unchanged size and mtime would not be detected.
+    unchanged size and mtime would not be detected. *(Resolved by entry 32.)*
   - `CODE_VERSIONS` must be bumped by hand when a change alters what a unit computes.
+    *(Resolved by entry 32.)*
   - Failed subjects are retried automatically on every run until they succeed.
 
 **Code / config**
@@ -1574,6 +1576,137 @@ synthetic data.
 **Approval status**
 - Author-specified (resumability requirements, 2026-10-12). Implementation details
   approved in principle.
+
+---
+
+## 32. Pre-real-run reliability safeguards
+
+**Previous design** (entry 31)
+- **Storage.** Output locations were not checked, and the notebook's smoke test wrote to
+  `/content/smoke`.
+- **Code.** Unit identities depended on code only through the manual `CODE_VERSIONS`
+  labels.
+- **Input files.** Recordings were identified by path, size and mtime.
+- **Dependencies.**
+  - `edfio` was an unpinned test dependency.
+  - Tests that need `edfio` or `torch` used `pytest.importorskip`, so a missing package
+    produced a green run with skips. This happened once after a container reset: 6 graph
+    tests were skipped.
+
+**Problem discovered**
+- **Storage.** In Colab only the mounted Drive survives a disconnect. A checkpoint
+  written elsewhere defeats resumption. A path under `/content/drive` written while Drive
+  is not mounted silently lands on the VM disk.
+- **Code.** Forgetting to bump `CODE_VERSIONS` after a numerical change would silently
+  reuse stale scientific results.
+- **Input files.** Path, size and mtime do not identify content. An EDF replaced in place
+  can keep its size, and a re-mounted Drive changes paths without changing content.
+- **Dependencies.** A suite that passes with skipped graph-construction tests does not
+  validate the real-run environment.
+
+**Scientific / engineering reason**
+- A cached result may be reused only if it is the result the current code would compute
+  from the current data. Both "the current code" and "the current data" must be checked
+  automatically, not by convention.
+
+**Final implementation**
+- **Persistent storage** (`src/adgraph/storage.py`):
+  - A location is ephemeral if it is under `/content` but not under `/content/drive`.
+  - It is also ephemeral if it is under `/content/drive` while that is not a mount point.
+  - In a Colab runtime, any location outside `/content/drive` is ephemeral.
+  - These locations are checked:
+    - `pipeline.run`: run directory, operator cache, fsaverage `subjects_dir` and input
+      hash cache;
+    - `run_variant`: the output root, for non-synthetic stores;
+    - the CLIs (`build_graphs`, `run_experiment`, `make_figures`, `inspect_raw`): their
+      output paths.
+  - An ephemeral location raises `EphemeralStorageError` before anything is written.
+    `--allow-ephemeral-storage` downgrades this to a warning.
+  - Synthetic runs are exempt.
+  - The notebook smoke test now writes to Drive (`graphs_v3_<hash>_limit1/`).
+- **Automatic code fingerprint** (`checkpoint.code_identity(scope)`):
+  - It contains:
+    - the git commit;
+    - SHA-256 over the source files of the package parts that determine the computation
+      (`CODE_SCOPES`: operator, graph, experiment; visualization is excluded, so figure
+      edits never invalidate results);
+    - the versions of the numerical libraries (`SCOPE_LIBRARIES`).
+  - It is included in the identities of:
+    - the operator;
+    - subject units;
+    - the graph assembly, and therefore `graph_run_id`;
+    - experiment directories and all their units.
+  - The source hash also catches uncommitted edits, and it works without git.
+  - `CODE_VERSIONS` stays as a documentation label only.
+  - `--status` reports which identity fields changed (`changed: code / input / metadata`).
+- **Raw-data fingerprint** (`io/fingerprint.py`):
+  - Subject identity uses the EDF's SHA-256 instead of path and mtime. It also includes a
+    hash of the subject's metadata row (label, age, sex, MMSE, ACE-R, comment), so a
+    corrected sheet recomputes only the affected subject.
+  - Participant sheets and the electrode layout file are hashed into the assembly identity
+    and the manifest (`auxiliary_inputs`).
+  - The manifest lists each input's SHA-256.
+  - Hashes are cached in `<cache_dir>/input_sha256.json`:
+    - keyed by absolute path and validated by size and `mtime_ns`;
+    - written after each newly hashed file;
+    - re-read in full with `--rehash-inputs`.
+- **Dependencies:**
+  - `edfio==0.4.18` is pinned in `requirements.txt` and in the `pyproject` test extra.
+  - `provenance.verify_environment()` checks every exact pin before a real run (CLIs).
+  - The pytest plugin `tests/dependency_guard.py` makes any "could not import" skip fail
+    the session.
+  - The notebooks run `pytest -q -rs` before the smoke test.
+- **Resuming across commits.** `run_identity.json` and `--status` record the commit. The
+  notebooks have a `COMMIT` variable that pins the checkout for resuming.
+
+**Alternatives considered**
+- **Source hash only, without the git commit.** This would let commits that touch only
+  documentation keep the cache. Not adopted: the author asked for the commit in the
+  identity. The cost is that any new commit invalidates checkpoints, which is why the
+  notebooks offer commit pinning.
+- **Hashing the whole repository.** Rejected: notebook, test and documentation edits would
+  invalidate results; the commit already covers them.
+- **Re-hashing every input file on every resume.** Rejected: it reads the whole dataset
+  over the Drive mount each time.
+- **Hard-failing on a dirty working tree.** Not adopted: the source hash already captures
+  the edits. `git_dirty` is recorded in manifests and `--status`.
+
+**Effect on interpretation**
+- None on results.
+- Any reused unit was produced by byte-identical relevant source, the same commit, the same
+  numerical library versions and byte-identical input content.
+- Remaining limitations:
+  - **Hash cache.** A file edited in place with unchanged size and nanosecond mtime would be
+    served from the hash cache. `--rehash-inputs` closes this.
+  - **New commits.** Any new commit triggers recomputation. Resume with the run's commit.
+  - **Libraries.** Library versions outside `SCOPE_LIBRARIES` (and the GPU/driver) are
+    recorded in `compute_environment` but are not part of the identity.
+
+**Code / config**
+- `src/adgraph/storage.py`, `src/adgraph/io/fingerprint.py`
+- `src/adgraph/checkpoint.py` (`code_identity`, `CODE_SCOPES`, `identity_diff`)
+- `src/adgraph/provenance.py` (`source_fingerprint`, `git_dirty`, `verify_environment`)
+- `src/adgraph/pipeline.py`, `src/adgraph/experiments/runner.py`, `scripts/*.py`
+- `requirements.txt`, `pyproject.toml`, `tests/dependency_guard.py`, notebooks 01–03
+
+**Validating tests**
+- `tests/test_reliability.py` (synthetic only):
+  - storage classification;
+  - refusal before writing (library, experiment, CLI);
+  - source edits within and outside the scope;
+  - a code, commit or library change recomputes graph units without bumping
+    `CODE_VERSIONS`;
+  - a code change is refused in experiments and recomputed under `--force`;
+  - the hash cache (including the documented size/mtime limit and `--rehash-inputs`);
+  - a content change recomputes only that subject;
+  - moved data is not recomputed; a metadata change recomputes only that subject;
+  - hashes are cached across resumes;
+  - pin checks;
+  - a dependency skip fails the suite.
+
+**Approval status**
+- Author-specified (reliability requirements before the first real-data run, 2026-10-12).
+  Implementation details approved in principle.
 
 ---
 

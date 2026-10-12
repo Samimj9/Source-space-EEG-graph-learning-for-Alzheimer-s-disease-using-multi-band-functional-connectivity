@@ -2,7 +2,7 @@
 
     python scripts/make_figures.py --config configs/figures/paper.yaml \
         --results /content/drive/MyDrive/AD-LEB/processed/experiments \
-        --graphs  /content/drive/MyDrive/AD-LEB/processed/graphs_v3_<stamp>_<hash> \
+        --graphs  /content/drive/MyDrive/AD-LEB/processed/graphs_v3_<config hash> \
         [--stats stats.csv] --out /content/drive/MyDrive/AD-LEB/processed/figures
 
     # framework demo on synthetic inputs (watermarked "SYNTHETIC DATA – NOT RESULTS"):
@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from adgraph.graphs.store import GraphStore
+from adgraph.storage import check_persistent
 from adgraph.visualization.figures import make_figures
 
 parser = argparse.ArgumentParser()
@@ -31,7 +32,10 @@ parser.add_argument("--only", nargs="+", help="figure ids to generate")
 parser.add_argument("--on-missing", choices=["skip", "error"], default="skip")
 parser.add_argument("--synthetic-demo", action="store_true", help="build synthetic inputs and plot them (watermarked)")
 parser.add_argument("--out", required=True)
+parser.add_argument("--allow-ephemeral-storage", action="store_true", help="permit --out outside the mounted Drive")
 args = parser.parse_args()
+if not args.synthetic_demo:
+    check_persistent({"--out": args.out}, allow_ephemeral=args.allow_ephemeral_storage)
 
 config = yaml.safe_load(Path(args.config).read_text())
 out = Path(args.out) / f"figures_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"

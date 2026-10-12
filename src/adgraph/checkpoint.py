@@ -13,8 +13,11 @@ Payload files are written first and the marker last, all with write-to-temp + fs
 ``os.replace``. An interrupted unit therefore never has a valid marker and is never
 mistaken for completed; a truncated/corrupted payload fails the checksum.
 
-``CODE_VERSIONS`` must be bumped whenever the computation a unit performs changes in a
-way that alters its results; old units then become *incompatible* and are not reused.
+Every unit identity also carries an automatic **code identity** (``code_identity``): the
+git commit, a SHA-256 of the source files that determine the computation (which also
+catches uncommitted edits) and the versions of the numerical libraries. Any code change
+therefore makes old units *incompatible*, whether or not anyone bumped ``CODE_VERSIONS``;
+those manual labels remain for documentation only.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from . import provenance
 from .provenance import git_commit
 
 CODE_VERSIONS = {
@@ -40,6 +44,20 @@ CODE_VERSIONS = {
     "experiment": "experiment-1",      # outer-fold training/prediction, evaluation
     "inner_trial": "inner-trial-1",    # one hyperparameter combination on one inner fold
     "permutation": "permutation-1",
+}
+
+# Package parts (relative to src/adgraph) whose source determines each kind of computation.
+CODE_SCOPES = {
+    "operator": ("config.py", "pipeline.py", "io", "source"),
+    "graph": ("config.py", "pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
+              "graphs/store.py"),
+    "experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features"),
+}
+# Numerical libraries whose version can change results of each kind of computation.
+SCOPE_LIBRARIES = {
+    "operator": ("numpy", "scipy", "mne"),
+    "graph": ("numpy", "scipy", "pandas", "mne"),
+    "experiment": ("numpy", "scipy", "pandas", "sklearn", "torch"),
 }
 
 STATES = ("pending", "running", "completed", "failed")
@@ -52,6 +70,21 @@ class IncompatibleCheckpoint(RuntimeError):
 # ----------------------------------------------------------------- hashing
 def stable_hash(obj, n: int = 16) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:n]
+
+
+def code_identity(scope: str) -> dict:
+    """Automatic code fingerprint of a computation: git commit + source hash + library versions.
+
+    Looked up through ``provenance`` at call time (tests patch it there)."""
+    return {"git_commit": provenance.git_commit(),
+            "source_sha256": provenance.source_fingerprint(CODE_SCOPES[scope]),
+            "libraries": provenance.versions(SCOPE_LIBRARIES[scope])}
+
+
+def identity_diff(found: dict | None, expected: dict) -> list[str]:
+    """Top-level identity keys that differ (to explain why a unit is incompatible)."""
+    found = found or {}
+    return sorted(k for k in set(found) | set(expected) if _norm(found.get(k)) != _norm(expected.get(k)))
 
 
 def file_sha256(path: str | Path) -> str:

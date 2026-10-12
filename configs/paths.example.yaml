@@ -11,6 +11,6 @@ dataset2:
 
 electrode_layout: "{drive_root}/electrodes_positions_32.loc"
 
-# All pipeline outputs (timestamped, never overwritten)
+# All outputs, checkpoints and caches: must be on the mounted Drive (never /content); never overwritten
 processed_dir: "{drive_root}/processed"
 cache_dir: "{drive_root}/processed/cache"

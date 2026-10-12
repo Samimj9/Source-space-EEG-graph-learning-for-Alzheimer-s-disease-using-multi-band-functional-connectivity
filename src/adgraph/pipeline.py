@@ -5,8 +5,9 @@ bad channels, average reference) -> continuous ROI signals (shared operator W)
 -> continuous band filtering + Hilbert -> segmentation into 20 s / 50 % windows
 -> artifact rejection -> per-window PLV, ciPLV, source PSD, sensor PSD.
 
-Outputs follow the schema in ``adgraph.graphs.store`` and are written to a new,
-timestamped directory; nothing is overwritten.
+Outputs follow the schema in ``adgraph.graphs.store`` and are written, resumably, to a
+directory keyed by the config hash; nothing is overwritten. Checkpoint identities carry
+the input files' SHA-256 and an automatic code fingerprint (see ``adgraph.checkpoint``).
 """
 
 from __future__ import annotations
@@ -24,12 +25,15 @@ from .connectivity.plv import band_analytic, phase_sync
 from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
+from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
 from .preprocessing.clean import preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
-                         atomic_write_csv, atomic_write_json, check_unit, stable_hash, supersede, write_marker)
-from .provenance import git_commit, versions
+                         atomic_write_csv, atomic_write_json, check_unit, code_identity, identity_diff, stable_hash,
+                         supersede, write_marker)
+from .provenance import git_commit, git_dirty, versions
+from .storage import check_persistent
 from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
 
 log = logging.getLogger(__name__)
@@ -135,8 +139,10 @@ def graph_run_dir(out_root: str | Path, cfg: dict, limit: int | None = None) -> 
     return Path(out_root) / (f"graphs_v{cfg['version']}_{config_hash(cfg)}" + (f"_limit{limit}" if limit else ""))
 
 
-def build_registry(paths: dict, limit: int | None = None):
-    """Recordings joined to participant metadata (all subjects used as provided)."""
+def build_registry(paths: dict, limit: int | None = None, hashes: InputHashes | None = None):
+    """Recordings joined to participant metadata (all subjects used as provided).
+
+    With ``hashes``, a ``sha256`` column holds each used recording's content hash."""
     recs, meta = [], []
     for ds in DATASETS:
         recs.append(list_recordings(paths[f"dataset{ds[1]}"]["eeg_dir"], ds))
@@ -149,7 +155,19 @@ def build_registry(paths: dict, limit: int | None = None):
                 .sort_values(["dataset", "subject_id"]).reset_index(drop=True))
     if limit:
         registry = registry.groupby("dataset", group_keys=False).head(limit).reset_index(drop=True)
+    if hashes is not None:
+        registry["sha256"] = [hashes.sha256(p) for p in registry["path"]]
     return registry, recs, no_meta, no_rec
+
+
+def hash_auxiliary_inputs(paths: dict, hashes: InputHashes) -> dict:
+    """Content hashes of the participant sheets and electrode layout (those that exist)."""
+    return {name: {"path": str(p), "sha256": hashes.sha256(p)}
+            for name, p in auxiliary_inputs(paths).items() if Path(p).exists()}
+
+
+def default_hash_cache(run_dir: Path) -> Path:
+    return run_dir.parent / "_input_hashes.json"
 
 
 # ---------------------------------------------------------------------- shared operator
@@ -159,7 +177,8 @@ def operator_identity(cfg: dict) -> dict:
 
     return {"kind": "operator", "code_version": CODE_VERSIONS["operator"], "source": cfg["source"],
             "channels": common_channels(cfg), "montage": cfg["channels"]["montage"],
-            "reference": cfg["preprocessing"]["reference"], "mne": mne.__version__}
+            "reference": cfg["preprocessing"]["reference"], "mne": mne.__version__,
+            "code": code_identity("operator")}
 
 
 def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, force: bool = False) -> dict:
@@ -200,12 +219,23 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
 
 
 # ---------------------------------------------------------------------- per-subject units
+METADATA_FIELDS = ("label", "y", "age", "sex", "mmse", "acer", "comment")
+
+
 def subject_identity(cfg: dict, rec, operator_id: str) -> dict:
-    """A subject's output is reusable only for the same config, code version, operator and input file."""
+    """A subject's output is reusable only for the same config, code, operator, EEG content and metadata.
+
+    The EEG file enters by its SHA-256 (not path/size/mtime), so moving the Drive mount does
+    not invalidate it but any change of content does; the subject's metadata row enters by
+    hash, so a corrected label or age recomputes that subject."""
+    sha = getattr(rec, "sha256", None)
+    if not sha:
+        raise ValueError(f"{rec.key}: no input content hash; build the registry with InputHashes")
     return {"kind": "graph_subject", "code_version": CODE_VERSIONS["graph_subject"], "config_hash": config_hash(cfg),
             "operator_id": operator_id, "key": rec.key,
-            "input": {"path": str(rec.path), "size_bytes": int(rec.size_bytes),
-                      "mtime": float(getattr(rec, "mtime", 0.0) or 0.0)}}
+            "input": {"sha256": sha, "size_bytes": int(rec.size_bytes)},
+            "metadata": stable_hash({k: getattr(rec, k, None) for k in METADATA_FIELDS}),
+            "code": code_identity("graph")}
 
 
 def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict, np.ndarray]:
@@ -258,7 +288,9 @@ def subject_states(run_dir: Path, registry: pd.DataFrame, cfg: dict, operator_id
     rows = []
     for rec in registry.itertuples():
         unit_dir = run_dir / "subjects" / rec.key
-        state, _ = check_unit(unit_dir, "subject", subject_identity(cfg, rec, operator_id))
+        expected = subject_identity(cfg, rec, operator_id)
+        state, marker = check_unit(unit_dir, "subject", expected)
+        reason = ",".join(identity_diff(marker.get("identity"), expected)) if state == "incompatible" else ""
         table = status.get(rec.key)
         if state == "complete":
             shown = "completed"
@@ -271,34 +303,38 @@ def subject_states(run_dir: Path, registry: pd.DataFrame, cfg: dict, operator_id
         else:
             shown = "pending"
         rows.append({"key": rec.key, "dataset": rec.dataset, "state": shown, "checkpoint": state,
-                     "message": (json.loads((unit_dir / "failed.json").read_text()).get("status", "")
+                     "changed": reason, "message": (json.loads((unit_dir / "failed.json").read_text()).get("status", "")
                                  if (unit_dir / "failed.json").exists() else "")})
     return pd.DataFrame(rows)
 
 
 def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = None,
-           run_dir: str | Path | None = None, operator_cache: str | Path | None = None) -> dict:
-    """What is completed / pending / failed for this configuration, without computing anything."""
+           run_dir: str | Path | None = None, operator_cache: str | Path | None = None,
+           input_hash_cache: str | Path | None = None) -> dict:
+    """What is completed / pending / failed for this configuration, without computing anything.
+
+    (Input files not yet in the hash cache are hashed: identities depend on their content.)"""
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
-    registry, *_ = build_registry(paths, limit)
+    registry, *_ = build_registry(paths, limit, InputHashes(input_hash_cache or default_hash_cache(run_dir)))
     ident = operator_identity(cfg)
     op_id = stable_hash(ident)
     cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
     op_state, _ = check_unit(cache, f"operator_{op_id}", ident)
     subj = subject_states(run_dir, registry, cfg, op_id) if run_dir.exists() else \
         pd.DataFrame({"key": registry["key"], "dataset": registry["dataset"], "state": "pending",
-                      "checkpoint": "missing", "message": ""})
+                      "checkpoint": "missing", "changed": "", "message": ""})
     asm = "missing"
     if (run_dir / "assembly.done.json").exists():
         asm = "complete" if (run_dir / "graphs.npz").exists() else "corrupt"
     return {"run_dir": str(run_dir), "config_hash": config_hash(cfg), "operator_id": op_id,
+            "git_commit": git_commit(), "git_dirty": git_dirty(),
             "operator_cache": op_state, "subjects": subj, "assembly": asm,
             "counts": subj["state"].value_counts().to_dict()}
 
 
 # ---------------------------------------------------------------------- assembly
 def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dict, op: dict,
-             no_meta: list, no_rec: list, limit: int | None, keys_failed: dict) -> Path:
+             no_meta: list, no_rec: list, limit: int | None, keys_failed: dict, aux_inputs: dict | None = None) -> Path:
     """Concatenate completed subject units into the cohort store (skipped if already assembled)."""
     units = {}
     for rec in registry.itertuples():
@@ -307,7 +343,8 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
                           else {"failed": keys_failed.get(rec.key, "missing")})
     ident = {"kind": "graph_assembly", "code_version": CODE_VERSIONS["graph_assembly"],
              "config_hash": config_hash(cfg), "operator_id": op["operator_id"], "units": units,
-             "subset_limit": limit}
+             "subset_limit": limit, "auxiliary_inputs": {k: v["sha256"] for k, v in (aux_inputs or {}).items()},
+             "code": code_identity("graph")}
     state, _ = check_unit(run_dir, "assembly", ident)
     if state == "complete":
         log.info("cohort already assembled for these subject units; nothing to do")
@@ -345,8 +382,10 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
     manifest = {
         "graph_run_id": stable_hash(ident), "assembled_at": datetime.now(timezone.utc).isoformat(),
         "config_hash": config_hash(cfg), "code_versions": CODE_VERSIONS, "git_commit": git_commit(),
-        "versions": versions(), "config": cfg,
-        "inputs": recs[["key", "path", "size_bytes"]].to_dict("records"),
+        "git_dirty": git_dirty(), "code": ident["code"], "versions": versions(), "config": cfg,
+        "inputs": registry[["key", "path", "size_bytes"] + (["sha256"] if "sha256" in registry else [])]
+        .to_dict("records"),
+        "auxiliary_inputs": aux_inputs or {},
         "registry": {"recordings_without_metadata": no_meta, "metadata_without_recording": no_rec,
                      "subset_limit": limit},
         "source_operator": {"operator_id": op["operator_id"], "from_cache": op.get("from_cache", False),
@@ -403,7 +442,8 @@ def latest_complete_graph_run(processed_dir: str | Path) -> Path:
 # ---------------------------------------------------------------------- driver
 def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, limit: int | None = None,
         resume: bool = True, force: bool = False, run_dir: str | Path | None = None,
-        operator_cache: str | Path | None = None) -> Path:
+        operator_cache: str | Path | None = None, input_hash_cache: str | Path | None = None,
+        rehash_inputs: bool = False, allow_ephemeral: bool = False) -> Path:
     """Build graphs for all D1 and D2 resting-state recordings, resumably.
 
     * Each subject is a checkpointed unit (``subjects/<key>/``), saved as soon as it finishes.
@@ -412,10 +452,19 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
       corrupted or incompatible units are recomputed; failed subjects are retried.
     * ``force`` starts a fresh run directory (``..._force<stamp>``) and rebuilds the operator;
       existing outputs are never overwritten.
+    * Input recordings are identified by SHA-256 (cached in ``input_hash_cache``; ``rehash_inputs``
+      re-reads every file), code by ``code_identity`` (git commit + source hash + libraries).
+    * The run directory, operator cache, fsaverage directory and hash cache must be persistent
+      storage (mounted Drive in Colab), else ``EphemeralStorageError`` unless ``allow_ephemeral``.
     """
     pp = cfg["preprocessing"]
     check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
+    operator_cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
+    input_hash_cache = Path(input_hash_cache) if input_hash_cache else default_hash_cache(run_dir)
+    check_persistent({"graph run directory": run_dir, "operator cache": operator_cache,
+                      "fsaverage subjects_dir": subjects_dir, "input hash cache": input_hash_cache},
+                     allow_ephemeral=allow_ephemeral)
     if force and run_dir.exists():
         run_dir = run_dir.with_name(run_dir.name + "_force" + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"))
     if run_dir.exists() and not resume:
@@ -428,10 +477,14 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
             raise IncompatibleCheckpoint(f"{run_dir} belongs to a different configuration")
     else:
         atomic_write_json(ident_path, {"identity": ident, "created_at": datetime.now(timezone.utc).isoformat(),
-                                       "config": cfg})
+                                       "git_commit": git_commit(), "config": cfg})   # commit: to resume, pin it
 
-    registry, recs, no_meta, no_rec = build_registry(paths, limit)
-    op = get_operator(cfg, subjects_dir, operator_cache or run_dir.parent / "_operator_cache", force)
+    hashes = InputHashes(input_hash_cache, rehash=rehash_inputs)
+    registry, recs, no_meta, no_rec = build_registry(paths, limit, hashes)
+    aux = hash_auxiliary_inputs(paths, hashes)
+    log.info("input content hashes: %d files read, %d from cache", hashes.n_hashed,
+             len(registry) + len(aux) - hashes.n_hashed)
+    op = get_operator(cfg, subjects_dir, operator_cache, force)
     table = StatusTable(run_dir / "status.csv")
     table.ensure(registry["key"].tolist())
     save_ts = cfg["output"].get("save_roi_timeseries", False)
@@ -439,14 +492,16 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     for rec in registry.itertuples():
         unit_dir = run_dir / "subjects" / rec.key
         sident = subject_identity(cfg, rec, op["operator_id"])
-        state, _ = check_unit(unit_dir, "subject", sident)
+        state, marker = check_unit(unit_dir, "subject", sident)
         if state == "complete":
             if table.get(rec.key) != "completed":
                 table.set(rec.key, "completed", "validated existing checkpoint")
             log.info("%s: completed checkpoint found, skipped", rec.key)
             continue
         if state in ("incompatible", "corrupt"):
-            log.warning("%s: %s checkpoint, recomputing", rec.key, state)
+            why = (f" (changed: {', '.join(identity_diff(marker.get('identity'), sident))})"
+                   if state == "incompatible" else "")
+            log.warning("%s: %s checkpoint%s, recomputing", rec.key, state, why)
             supersede(unit_dir, run_dir)
         table.set(rec.key, "running")
         try:
@@ -461,4 +516,4 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
             continue
         save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None)
         table.set(rec.key, "completed")
-    return assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed)
+    return assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)

@@ -247,7 +247,7 @@ committed.
 
 | File | Content |
 |---|---|
-| `_identity.json` | experiment identity: training-config hash, `graph_run_id`, setting, code version |
+| `_identity.json` | experiment identity: training-config hash, `graph_run_id`, setting, code version, automatic code fingerprint (git commit + source SHA-256 + library versions) |
 | `units/fold_r<rrr>_f<ff>.*` + `.done.json` | one outer fold: predictions, fold table, hparam row, optional embeddings |
 | `units/inner_*` | one inner-CV trial (parameter set × inner fold) |
 | `units/perm_*` | one permutation |
@@ -256,6 +256,11 @@ committed.
 
 On restart, the same command loads validated units and computes only what is missing.
 `--status` reports progress, and `--force` moves the directory to `<out>/_superseded/`.
+Results produced by different code (another commit, edited source or other library versions)
+are never reused. They raise `IncompatibleCheckpoint`, and `--status` shows `changed: code`.
+To resume after new commits were pushed, check out the run's commit. For real graph runs
+`--out` must be on the mounted Drive; ephemeral Colab storage is refused (methodology log
+entry 32).
 
 ## 6. Commands (to be run later in Colab, on real graphs)
 

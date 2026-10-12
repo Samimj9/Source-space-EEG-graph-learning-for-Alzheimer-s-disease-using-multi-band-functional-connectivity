@@ -1,5 +1,8 @@
 import pytest
 
+from dependency_guard import (pytest_collectreport, pytest_runtest_logreport,  # noqa: F401
+                              pytest_sessionfinish, pytest_terminal_summary)
+
 from adgraph.synthetic import make_synthetic_store
 
 

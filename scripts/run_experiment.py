@@ -16,6 +16,9 @@ Results go to <out>/<experiment>/<variant>/<setting>/. Completed outer folds, in
 and permutations are checkpointed there; rerunning the same command continues unfinished work
 (--resume, default). Results from a different configuration or graph run are never reused:
 the run stops with IncompatibleCheckpoint unless --force moves them to <out>/_superseded/.
+Checkpoints are tied to the code (git commit + source hash): resume with the same commit.
+For real graph runs --out must be on the mounted Google Drive (refused otherwise, unless
+--allow-ephemeral-storage) and the pinned environment (requirements.txt) is verified.
 """
 
 import argparse
@@ -28,6 +31,7 @@ from adgraph.experiments.config import expand_variants, load_experiment, set_dot
 from adgraph.experiments.runner import dry_run, experiment_status, run_variant
 from adgraph.graphs.dataset import build_dataset
 from adgraph.graphs.store import GraphStore
+from adgraph.provenance import verify_environment
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", required=True)
@@ -47,6 +51,8 @@ mode.add_argument("--no-resume", dest="resume", action="store_false",
 mode.add_argument("--force", action="store_true",
                   help="recompute intentionally; existing outputs are moved to <out>/_superseded/")
 parser.add_argument("--status", action="store_true", help="show completed/partial/failed work and exit")
+parser.add_argument("--allow-ephemeral-storage", action="store_true",
+                    help="permit --out outside the mounted Drive for a real run (outputs are lost on disconnect)")
 args = parser.parse_args()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -80,8 +86,11 @@ if args.status:
     rows = [experiment_status(store, v, s, args.out) for v in variants for s in settings]
     print(pd.DataFrame(rows).to_string())
     raise SystemExit
+if not args.synthetic:
+    verify_environment()
 for v in variants:
     data = None
     for s in settings:
-        summary = run_variant(store, v, s, args.out, data=data, resume=args.resume, force=args.force)
+        summary = run_variant(store, v, s, args.out, data=data, resume=args.resume, force=args.force,
+                              allow_ephemeral=args.allow_ephemeral_storage)
 print(f"outputs under: {args.out}")

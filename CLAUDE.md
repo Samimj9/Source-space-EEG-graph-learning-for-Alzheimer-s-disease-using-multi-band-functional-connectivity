@@ -196,7 +196,7 @@ by dataset and config hash.
   - PLV is primary and |ciPLV| is the robustness analysis.
   - Changing any of these needs a logged reason.
 
-## Checkpointing and resume (see methodology log entry 31)
+## Checkpointing and resume (see methodology log entries 31–32)
 
 - **Mechanism.** Every unit of work is checkpointed with atomic writes and a
   validated completion marker: identity + SHA-256 of payload files
@@ -226,9 +226,31 @@ by dataset and config hash.
   - `--force` recomputes intentionally: a fresh directory, or old outputs
     moved to `_superseded/`.
   - `--no-resume` refuses an existing directory.
-- **Code versions.** Bump the matching entry in `CODE_VERSIONS`
-  (`checkpoint.py`) whenever a change alters what a unit computes; old units
-  then become incompatible.
+- **Code fingerprint (automatic).** Every identity carries `code_identity`:
+  - the git commit;
+  - a SHA-256 of the source files that determine the computation (this also
+    catches uncommitted edits);
+  - the versions of the numerical libraries.
+
+  Any new commit therefore invalidates graph units, which are recomputed
+  automatically, and experiment directories, which raise
+  `IncompatibleCheckpoint` until `--force`. To resume an interrupted run,
+  pin the run's commit (`COMMIT` in the notebooks). `CODE_VERSIONS` remains
+  as a documentation label only; forgetting to bump it cannot cause reuse.
+- **Input fingerprint.** EDF recordings are identified by their content
+  SHA-256, not by path or mtime, so moving the Drive mount does not
+  invalidate them. Each subject's identity also hashes its metadata row.
+  Participant sheets and the layout file are hashed into the assembly
+  identity and the manifest. Hashes are cached in
+  `<cache_dir>/input_sha256.json`, keyed by path + size + mtime;
+  `--rehash-inputs` ignores the cache.
+- **Persistent storage.** Real runs refuse any output, checkpoint or cache
+  location that is not on the mounted Google Drive, including `/content`,
+  other VM paths in Colab, and `/content/drive` when Drive is not mounted.
+  The override is `--allow-ephemeral-storage`. Synthetic runs are exempt.
+- **Environment.** Real-run CLIs verify the exact pins in
+  `requirements.txt` (`mne`, `edfio`). In `pytest`, a skip caused by a
+  missing dependency fails the session (`tests/dependency_guard.py`).
 - **Figures** only read final, validated experiment outputs and never train.
   Superseded and unfinished results are ignored.
 
