@@ -1,0 +1,14 @@
+# Experiment 5: multi-band source-space GNN. Four band graphs are kept separate, encoded with
+# shared or band-specific weights, and fused. Learned fusion (gate / attention) = candidate model.
+# Node features: source PSD of the matching band.
+extends: gnn_base.yaml
+experiment: exp5_multiband
+graph:
+  band_mode: multi
+node_features:
+  components: [psd]
+  psd_bands: matched
+sweep:
+  graph.connectivity: [plv, ciplv]
+  model.shared_encoder: [true, false]
+  model.fusion: [mean, concat, gate, attention]

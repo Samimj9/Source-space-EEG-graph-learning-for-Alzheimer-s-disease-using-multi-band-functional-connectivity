@@ -1,0 +1,7 @@
+# DESIGN.md §5 comparator: LR / linear SVM on vectorized upper-triangle connectivity
+# (68 ROIs -> 2278 edges x 4 bands), PLV and ciPLV as separate variants.
+extends: classical_base.yaml
+experiment: baseline_conn_classical
+sweep:
+  features.source: [plv, ciplv]
+  model.name: [logreg, svm]

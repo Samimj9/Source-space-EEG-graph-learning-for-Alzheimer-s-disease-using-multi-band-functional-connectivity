@@ -14,10 +14,12 @@ dependencies = [
     "pyyaml",
     "openpyxl",
     "mne>=1.6",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+gnn = ["torch>=2.2"]   # preinstalled in Colab
+test = ["pytest", "edfio"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

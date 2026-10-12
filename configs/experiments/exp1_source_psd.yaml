@@ -1,0 +1,8 @@
+# Experiment 1: source-space PSD without graph learning.
+# Input: 68 ROIs x 4 bands x psd_kinds. Models: LR, SVM.
+extends: classical_base.yaml
+experiment: exp1_source_psd
+features:
+  source: source
+sweep:
+  model.name: [logreg, svm]

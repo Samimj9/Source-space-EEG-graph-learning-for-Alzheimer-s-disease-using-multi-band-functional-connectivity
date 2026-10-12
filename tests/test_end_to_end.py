@@ -43,9 +43,14 @@ def test_pipeline_on_synthetic_edf(tmp_path, dataset, unit):
     W = np.random.default_rng(1).standard_normal((68, 30))
     res = process_recording(raw, W, CFG)
     n = res["n_windows_kept"]
-    assert res["n_windows_total"] == 5 and 1 <= n <= 5    # (150 - 2*10 - 40) / 20 + 1
-    assert res["plv"].shape == (n, 4, 68, 68) and res["power"].shape == (n, 4, 68)
+    assert res["n_windows_total"] == 12 and 1 <= n <= 12  # (150 - 2*10 - 20) / 10 + 1
+    assert res["plv"].shape == res["ciplv"].shape == (n, 4, 68, 68)
+    for k in ("abs", "log", "rel"):
+        assert res[f"psd_{k}"].shape == (n, 4, 68) and res[f"sensor_psd_{k}"].shape == (n, 4, 30)
     assert np.allclose(res["plv"], res["plv"].transpose(0, 1, 3, 2), atol=1e-6)
+    assert ((res["stop_sample"] - res["start_sample"]) == 5000).all()
+    assert np.allclose(np.log10(res["psd_abs"]), res["psd_log"], atol=1e-4)
+    assert (res["psd_rel"].sum(axis=1) <= 1 + 1e-5).all()       # 4–30 Hz is a part of 1–45 Hz
 
 
 def test_wrong_unit_scale_is_caught(tmp_path):
@@ -87,15 +92,19 @@ def test_run_writes_outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(pl, "verify_operator", lambda *a, **k: 0.0)
 
     out = pl.run(paths, CFG, tmp_path / "out", tmp_path / "subjects")
-    npz = np.load(out / "connectivity.npz")
-    windows = pd.read_csv(out / "windows.csv")
-    subjects = pd.read_csv(out / "subjects.csv")
-    manifest = json.loads((out / "manifest.json").read_text())
+    from adgraph.graphs.store import GraphStore
+
+    store = GraphStore.load(out)
+    windows, subjects, manifest, npz = store.windows, store.subjects, store.manifest, store.arrays
 
     assert subjects["key"].tolist() == ["D1-1", "D1-2", "D2-2", "D2-17"]
     assert (subjects["status"] == "ok").all()
-    assert npz["plv"].shape[0] == npz["ciplv"].shape[0] == npz["power"].shape[0] == len(windows)
-    assert npz["plv"].shape[1:] == (4, 68, 68) and npz["bands"].tolist() == ["theta", "alpha1", "alpha2", "beta"]
+    assert npz["plv"].shape[0] == npz["ciplv"].shape[0] == npz["psd_rel"].shape[0] == len(windows)
+    assert npz["plv"].shape[1:] == (4, 68, 68) and store.bands == ["theta", "alpha1", "alpha2", "beta"]
+    assert npz["sensor_psd_log"].shape[1:] == (4, 30)
+    assert windows["window_id"].is_unique and windows["window_id"].str.match(r"D[12]-\d+-w\d{4}$").all()
+    assert {"qc_frac_channels_over_threshold", "qc_max_ptp_uv", "subject_n_bad_channels"} <= set(windows.columns)
+    assert manifest["segmentation"] == {"window_samples": 5000, "step_samples": 2500}
     assert np.allclose(windows.groupby("key")["sample_weight"].sum(), 1.0)
     assert manifest["registry"]["metadata_without_recording"] == ["D2-99"]
     assert manifest["source_operator"]["shared_across_datasets"] is True

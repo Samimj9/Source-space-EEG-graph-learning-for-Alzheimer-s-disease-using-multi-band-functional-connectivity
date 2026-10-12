@@ -1,6 +1,6 @@
-# Graph-construction pipeline, v2 (harmonized D1/D2). Every value here is a
+# Graph-construction pipeline, v3 (harmonized D1/D2; 20 s / 50 % windows; PSD features). Every value here is a
 # methods decision; changes must be logged in docs/methods_decisions.md.
-version: 2
+version: 3
 
 channels:
   # Order and names from AD-LEB/electrodes_positions_32.loc (both datasets record these 32).
@@ -32,9 +32,12 @@ preprocessing:
   reference: average            # as projection, over the common 30-channel set
 
 windowing:
-  window_s: 40.0
-  step_s: 20.0
-  edge_trim_s: 10.0
+  # FROZEN primary segmentation, identical for D1 and D2: 20 s windows, 50 % overlap.
+  # At 250 Hz: 5000-sample windows, 2500-sample step. Filtering is applied to the
+  # continuous signal before segmentation. Other lengths stay configurable.
+  window_s: 20.0
+  step_s: 10.0
+  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (filter edges, settling)
   rejection:
     mad_k: 5.0                  # threshold = median + k * MAD of this subject's peak-to-peak values
     max_bad_channel_fraction: 0.15
@@ -60,7 +63,25 @@ connectivity:
     alpha1: [8.0, 10.0]
     alpha2: [10.0, 13.0]
     beta: [13.0, 30.0]
-  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = leakage-robust sensitivity
-  node_power: true              # log10 band power per ROI per window (candidate node features)
+  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = leakage-robust sensitivity, never merged
+
+psd:
+  # Band power for the same bands as connectivity, per window, for the 68 ROIs and
+  # (sensor: true) for the 30 electrodes (Experiment 0). See adgraph/features/psd.py.
+  method: welch                 # welch | multitaper | periodogram
+  welch:
+    segment_s: 2.0              # 0.5 Hz resolution
+    overlap: 0.5
+    window: hann
+    average: mean
+  multitaper:
+    bandwidth_hz: 1.0
+  periodogram:
+    window: hann
+  relative_range: [1.0, 45.0]   # denominator of relative power
+  sensor: true
+
+output:
+  save_roi_timeseries: false    # true: roi_timeseries/<key>.npy (continuous, float32) per subject
 
 seed: 0

@@ -1,0 +1,8 @@
+# Experiment 0: conventional sensor-space spectral baseline (inspired by Paper 2).
+# Input: electrode-level PSD (30 channels x 4 bands x psd_kinds). Models: LR, SVM.
+extends: classical_base.yaml
+experiment: exp0_sensor_psd
+features:
+  source: sensor
+sweep:
+  model.name: [logreg, svm]

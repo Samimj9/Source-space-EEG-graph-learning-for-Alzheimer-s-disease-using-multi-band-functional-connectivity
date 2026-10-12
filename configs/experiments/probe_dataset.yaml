@@ -1,0 +1,9 @@
+# Dataset-identity probe (DESIGN.md §6): predict D1 vs D2 from the same inputs, pooled setting only.
+# Default input: source PSD (Experiment 1 features). For a GNN probe, run any GNN config with
+#   --override target=dataset --settings pooled
+extends: classical_base.yaml
+experiment: probe_dataset
+target: dataset
+settings: [pooled]
+features:
+  source: source

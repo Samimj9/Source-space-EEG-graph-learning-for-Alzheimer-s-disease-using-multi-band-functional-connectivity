@@ -1,0 +1,13 @@
+# Experiment 3: source connectivity edges + source PSD node features (single band graphs).
+# node = cortical ROI, node feature = local spectral activity (all 4 bands), edge = connectivity.
+extends: gnn_base.yaml
+experiment: exp3_conn_psd
+graph:
+  band_mode: single
+node_features:
+  components: [psd]
+  psd_bands: all
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[theta], [alpha1], [alpha2], [beta]]
+  model.encoder: [gcn, gat, graphsage]

@@ -5,7 +5,13 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.0 (2026-10-12)**. No classification has been run.
+Status: **frozen v1.1 (2026-10-12)**. No classification has been run.
+
+Changelog:
+
+- **v1.1:** primary segmentation frozen at 20 s windows with 50 % overlap (both
+  datasets). Experiment set 0–6 fixed (§10). The code for every setting exists,
+  but nothing has been run on real data.
 
 ---
 
@@ -24,8 +30,10 @@ A subject is excluded only by the pre-specified pipeline rule (fewer than 5
 clean windows after artifact rejection). Any such exclusion is listed in the
 run manifest and in the results tables.
 
-**Unit of analysis.** The model sees one multi-band graph per 40 s window, but
-the **subject** is the unit of inference. The subject key is
+**Unit of analysis.** The model sees one sample per **20 s window**. Windows
+overlap by 50 % (5000-sample windows, 2500-sample step at 250 Hz), with the
+same rule for D1 and D2. All filtering happens on the continuous signal before
+segmentation. The **subject** is the unit of inference. The subject key is
 `(dataset, subject_id)`, e.g. `D1-3`, `D2-3`.
 
 ---
@@ -170,11 +178,14 @@ Each metric is computed as follows:
 3. **Classical ML on the same connectivity:** an L2-regularized logistic
    regression and a linear SVM on vectorized upper-triangle PLV (68 ROIs × 4
    bands), with standardization fitted on training data.
+   (`baseline_conn_classical.yaml`; ciPLV is a separate variant.)
 4. **Single-band GNN vs. multi-band GNN,** the ablation that supports the
-   paper's multi-band claim.
+   paper's multi-band claim (Experiments 2/3 vs. 4/5).
 5. **Age-adjusted sensitivity analysis,** S2 in particular. Edge features are
    residualized on age with a regression fitted on training subjects only, and
-   the model is retrained.
+   the model is retrained. *Not implemented yet.*
+
+The age-only baseline is `baseline_age.yaml`.
 
 ---
 
@@ -213,7 +224,7 @@ manifest. Until then, S4 results are not generated.
 
 ### 7.1 Pipeline identity ("must")
 
-| Item | Requirement | Pipeline v2 (`configs/pipeline.yaml`) | Verified by |
+| Item | Requirement | Pipeline v3 (`configs/pipeline.yaml`) | Verified by |
 |---|---|---|---|
 | Channel set | Identical channel names and count entering source modelling for D1 and D2 | ✅ 30 channels in both datasets (M1/M2 dropped), canonical order | loader raises on a missing channel; channel order is asserted against the operator |
 | Electrode positions | Same montage source for both | ✅ `standard_1020` by name (MNE ≥1.13 calls it `colin27_1020`, with identical positions) | |
@@ -221,16 +232,17 @@ manifest. Until then, S4 results are not generated.
 | Bad channels | Same detection and handling rule for both | ✅ the same automatic rule, plus interpolation | per-subject list in `subjects.csv` |
 | Units | Amplitudes verified in volts for both | ✅ the D1 rescale, plus a plausibility check for both datasets | `median_std_uv` in `subjects.csv`, to be compared between D1 and D2 |
 | Resampling / filtering | Same target rate (250 Hz), same filter design and parameters | ✅ | |
-| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ | |
+| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ 20 s / 50 % overlap for both | `manifest.segmentation` |
 | Forward model | Same template, source space, BEM and **same sensor set** | ✅ **one** forward model shared by both datasets | `manifest.source_operator.shared_across_datasets` |
 | Inverse | Same method, `loose`, `depth`, `λ²` and noise covariance | ✅ ad hoc covariance, `pick_ori='normal'`, all recorded | runtime check against the full inverse (`verification_rel_error`) |
-| ROIs | Same parcellation, ROI order and extraction mode | ✅ | `roi_names` in the manifest and `connectivity.npz` |
+| ROIs | Same parcellation, ROI order and extraction mode | ✅ | `roi_names` in the manifest and `graphs.npz` |
 | Bands | Identical band edges and the same band-pass/Hilbert implementation | ✅ | |
 | Graph construction | Same estimator, window length, sparsification, node features and edge normalization | ✅ at build time (dense PLV/ciPLV and band power). Sparsification and node features are fixed at the model stage and applied identically to both datasets | model config |
 | Provenance | Both datasets processed by the same code commit and config hash in one run | ✅ a single `run()` covers D1 and D2 | `git_commit`, `config_hash` in the manifest |
 
-**Gate status:** the 7.1 items are satisfied *by design* in pipeline v2. The
-gate is formally passed once a full v2 run has completed, with:
+**Gate status:** the 7.1 items are satisfied *by design* since pipeline v2
+(v3 adds 20 s windows and PSD features). The gate is formally passed once a full
+v3 run has completed, with:
 
 - `verification_rel_error` < 1e-6
 - no subject in error
@@ -300,7 +312,9 @@ single-band ablation supports the multi-band claim.
 
 ## 9. Outputs per run
 
-Saved to Drive under `processed/eval/<setting>_<timestamp>/`, never committed:
+Saved to Drive under
+`processed/experiments/<experiment>_<timestamp>/<variant>/<setting>/`, never
+committed. The file list is in `docs/experiments.md` §5:
 
 - run manifest (config, config hash, commit, seeds, software versions)
 - subject→fold assignment
@@ -309,3 +323,30 @@ Saved to Drive under `processed/eval/<setting>_<timestamp>/`, never committed:
 - permutation null distribution
 
 Aggregate tables only (no per-subject rows) go to `results/tables/`.
+
+---
+
+## 10. Experiments
+
+Full details (inputs, tensor shapes, configs, leakage architecture) are in
+`docs/experiments.md`.
+
+| Exp | Question | Input | Models |
+|---|---|---|---|
+| 0 | Conventional sensor-space spectral baseline (Paper 2) | electrode PSD | LR, SVM |
+| 1 | Does source localization alone help? | 68-ROI source PSD | LR, SVM |
+| 2 | Value of source connectivity alone | single-band PLV / ciPLV graph, constant node feature | GCN, GAT, GraphSAGE |
+| 3 | Connectivity + local spectral activity | single-band graph, ROI PSD node features | GCN, GAT, GraphSAGE |
+| 4 | Simple graph baseline | band-averaged graph, ROI PSD node features | GNN |
+| 5 | Multi-band GNN (candidate: learned fusion) | 4 band graphs, matched-band PSD | GNN, shared/band-specific encoders, mean/concat/gate/attention fusion |
+| 6 | Richest model, with ablations | 4 band graphs, [PSD, strength] per band | GNN + attention fusion; ablations: no PSD, no strength, no learned fusion, each band dropped |
+
+Conventions:
+
+- PLV is primary in every experiment. ciPLV is run as a separate, parallel
+  sensitivity analysis and is never merged with PLV.
+- All experiments use the same subject-level splits (same seeds) in each
+  setting, so paired comparisons (§4.2) are valid.
+- The primary comparison (§2) is Experiment 5 or 6 (learned fusion) against
+  Experiments 0, 1 and 4, the age-only baseline, and the classical-connectivity
+  baseline, in S1 and S2.

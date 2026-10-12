@@ -1,0 +1,13 @@
+# Experiment 2: source connectivity + GNN with minimal (constant) node features.
+# One graph per run (single band); every band, both connectivity measures and all three
+# encoders are separate variants. Tests the value of connectivity alone.
+extends: gnn_base.yaml
+experiment: exp2_conn_minimal
+graph:
+  band_mode: single
+node_features:
+  components: [constant]
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[theta], [alpha1], [alpha2], [beta]]
+  model.encoder: [gcn, gat, graphsage]

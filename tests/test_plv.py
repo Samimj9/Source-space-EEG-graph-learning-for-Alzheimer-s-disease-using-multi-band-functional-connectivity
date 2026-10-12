@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import hilbert
 
-from adgraph.connectivity.phase import band_analytic, log_power, phase_sync
+from adgraph.connectivity.plv import band_analytic, phase_sync
 
 
 def _analytic(sig):
@@ -31,4 +31,3 @@ def test_band_analytic_isolates_band():
     mid = slice(5 * sf, 25 * sf)
     assert np.allclose(np.abs(theta[0, mid]), 1, atol=0.05)
     assert np.allclose(np.abs(beta[0, mid]), 1, atol=0.05)
-    assert log_power(theta[:, mid]).shape == (1,)

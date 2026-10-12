@@ -1,0 +1,38 @@
+extends: base.yaml
+input: graph
+graph:
+  connectivity: plv              # plv (primary) | ciplv (sensitivity analysis); never mixed
+  bands: [theta, alpha1, alpha2, beta]
+  band_mode: multi               # single | mean | multi
+node_features:
+  components: [constant]         # subset of constant | psd | strength | identity
+  psd_kinds: [log, rel]
+  psd_bands: matched             # matched: band graph k gets PSD of band k | all: every graph gets all bands
+  scaling: node                  # z-score per (graph, ROI, feature) on training windows | global | none
+sparsify:
+  method: none                   # none | topk (per graph, stateless) | quantile (fitted on training windows)
+model:
+  encoder: gcn                   # gcn | gat | graphsage
+  hidden: 32
+  n_layers: 2
+  dropout: 0.3
+  shared_encoder: true           # multi-band: one encoder for all bands, or one per band
+  fusion: mean                   # mean | concat | gate | attention
+  readout: mean_max              # mean | max | sum | mean_max
+  mlp_hidden: 32
+  encoder_kwargs:                # ignored by encoders that do not use them
+    heads: 4                     # gat
+    edge_in_message: true        # gat
+    aggr: sum                    # graphsage: sum | mean | max
+training:
+  lr: 0.001
+  weight_decay: 0.0001
+  epochs: 60
+  batch_size: 32
+  early_stopping:                # validation subjects are drawn from the training subjects only
+    enabled: false
+    patience: 15
+    val_subject_fraction: 0.2
+hparams:
+  model.hidden: [16, 32]
+  training.weight_decay: [0.0001, 0.001]

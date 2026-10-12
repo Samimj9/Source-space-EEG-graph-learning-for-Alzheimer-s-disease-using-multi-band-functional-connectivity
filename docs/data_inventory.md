@@ -58,7 +58,7 @@ subscores, `Data Quality, Comments`. `Id` looks like `2_842019`
    "AD". The analysis needs an age-controlled check (age-only baseline,
    age-matched subset, or regressing out age), and the paper should discuss it.
 4. **Mastoid asymmetry (v1 only).** Pipeline v1 dropped M1/M2 in D1 (30 ch)
-   but kept them in D2 (32 ch). Pipeline v2 fixes this: both datasets use the
+   but kept them in D2 (32 ch). Pipeline v2 (and later) fixes this: both datasets use the
    same 30 channels and one shared forward model (methods log #15–16).
 5. **No digitized electrodes.** Coregistration uses the standard 10-20
    template on fsaverage.
@@ -69,5 +69,5 @@ subscores, `Data Quality, Comments`. `Id` looks like `2_842019`
    window-level accuracy will be inflated.
 8. **Per-subject quality notes** (bad channels, eye blinks, movement) are in
    the `Comments` column. That column gives only counts, not channel names.
-   Pipeline v2 therefore detects bad channels automatically with one rule for
-   both datasets and interpolates them (methods log #19).
+   Pipelines v2 and later therefore detect bad channels automatically with one rule for
+   both datasets and interpolate them (methods log #19).

@@ -1,0 +1,18 @@
+# Shared evaluation protocol for every experiment (DESIGN.md §3-4). Frozen: change only with a
+# logged reason in docs/methods_decisions.md.
+target: label                    # label (AD vs HC) | dataset (dataset-identity probe, pooled only)
+settings: [within_D1, within_D2, pooled, cross_D1_to_D2, cross_D2_to_D1]
+evaluation:
+  scheme: kfold                  # kfold | loso (supplementary sensitivity analysis)
+  k: 5                           # outer stratified subject folds
+  n_repeats: 20                  # seeds 0..19
+  inner_k: 4                     # subject-level inner CV for hyperparameter selection
+  seed: 0
+  threshold: 0.5                 # fixed; never tuned on test subjects
+  selection_metric: roc_auc      # subject-level, inner CV
+  n_bootstrap: 2000              # subjects resampled
+  cross_n_seeds: 1               # cross-dataset: one train-all/test-all split (model seeds only)
+  allow_ungated_cross_dataset: false
+  permutation:
+    n: 0                         # subject-label permutations (each reruns the CV); e.g. 200-1000
+    n_repeats: 1                 # CV repeats per permutation

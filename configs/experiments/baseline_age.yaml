@@ -1,0 +1,7 @@
+# Age-only baseline (DESIGN.md §5): logistic regression on age.
+extends: classical_base.yaml
+experiment: baseline_age
+features:
+  source: age
+model:
+  name: logreg

@@ -31,7 +31,3 @@ def phase_sync(analytic: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     np.fill_diagonal(ciplv, 0.0)
     return plv, np.clip(ciplv, 0.0, 1.0)
 
-
-def log_power(analytic: np.ndarray) -> np.ndarray:
-    """log10 of mean instantaneous power per row."""
-    return np.log10(np.mean(np.abs(analytic) ** 2, axis=-1))

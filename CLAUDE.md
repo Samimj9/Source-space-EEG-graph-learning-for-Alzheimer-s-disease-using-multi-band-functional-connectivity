@@ -81,15 +81,17 @@ e.g. `D1-3`, `D2-3`.
 
 ```
 DESIGN.md           Frozen evaluation design (settings, splits, metrics, cross-dataset gate).
-configs/            YAML configs (pipeline params, paths template). Committed.
+configs/            YAML configs: pipeline.yaml, paths template, experiments/. Committed.
 src/adgraph/        Importable Python package (all reusable logic lives here).
   io/               loading EDF + participant metadata, subject registry
   preprocessing/    filtering, resampling, referencing, montage, windowing, rejection
   source/           forward model, inverse, parcellation
-  connectivity/     band-limited PLV and other metrics
-  graphs/           graph construction, thresholding, dataset objects
-  models/           GNNs and classical baselines
-  evaluation/       subject-grouped CV, metrics, statistics
+  features/         PSD band power
+  connectivity/     band-limited PLV and ciPLV
+  graphs/           store schema (store.py), experiment inputs and DataViews (dataset.py)
+  models/           LR/SVM (classical.py), dense GCN/GAT/GraphSAGE, multi-band fusion, trainer
+  evaluation/       subject-level splits, metrics, statistics
+  experiments/      config loading/variants, cross-dataset gate, runner
 notebooks/          Thin Colab notebooks: mount Drive, install, call src/. Numbered by stage.
 scripts/            CLI entry points mirroring the notebooks (for reproducibility).
 tests/              Unit tests on synthetic data only (no real EEG in tests).
@@ -118,16 +120,36 @@ pointing at `/content/drive/MyDrive/AD-LEB`). Cache expensive artifacts
 (forward models, source time courses) in Drive under `processed/cache/`, keyed
 by dataset and config hash.
 
-## Graph construction (pipeline v2)
+## Graph construction (pipeline v3)
 
 - Parameters: `configs/pipeline.yaml`. Code: `src/adgraph/pipeline.py`.
   Colab driver: `notebooks/01_build_graphs.ipynb`.
 - Order: `scripts/inspect_raw.py` (header check), then
   `scripts/build_graphs.py --limit 1` (smoke test), then the full
   `scripts/build_graphs.py`.
-- Each run writes `processed/graphs_v2_<UTC stamp>_<config hash>/`
-  containing `connectivity.npz`, `windows.csv`, `subjects.csv` and
-  `manifest.json`. Row *i* of `windows.csv` matches index *i* of the arrays.
+- **Frozen primary segmentation:** 20 s windows, 50 % overlap (5000 / 2500
+  samples at 250 Hz), same for both datasets, cut after all filtering of the
+  continuous signal.
+- Each run writes `processed/graphs_v3_<UTC stamp>_<config hash>/` with
+  `graphs.npz`, `windows.csv`, `subjects.csv` and `manifest.json`. The schema is
+  in `src/adgraph/graphs/store.py`, and row *i* of `windows.csv` matches index
+  *i* of the arrays.
+- PLV is primary and ciPLV is the sensitivity analysis. They are stored and
+  evaluated separately and never merged.
+
+## Experiments
+
+- Configs: `configs/experiments/` (Exp 0–6 plus baselines). Runner:
+  `scripts/run_experiment.py`. Details: `docs/experiments.md`.
+- Keep graph construction and experiments separate. The graph-run directory
+  is the only interface between them.
+- Leakage rules are enforced in code:
+  - Stateless per-window features go in `graphs/dataset.py`.
+  - Anything fitted lives inside an estimator, whose `fit` accepts only a
+    `train` `DataView`.
+  - Never fit a scaler, selector or threshold outside a model.
+- **Do not run experiments or the pipeline on real data unless the user asks.**
+  `--synthetic` and `pytest` are always fine.
 - Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed).
 
 ## Conventions
