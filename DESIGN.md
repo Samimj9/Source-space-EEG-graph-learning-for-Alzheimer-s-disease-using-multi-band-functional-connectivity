@@ -213,21 +213,31 @@ manifest. Until then, S4 results are not generated.
 
 ### 7.1 Pipeline identity ("must")
 
-| Item | Requirement | Current state (manifest 2026-09-12) |
-|---|---|---|
-| Channel set | Identical channel names and count entering source modelling for D1 and D2 | ❌ D1 has 30 channels (M1/M2 dropped) and D2 has 32 (M1/M2 kept). This must be harmonized to a common set. |
-| Electrode positions | Same montage source (`standard_1020` by name) for both | ✅ |
-| Reference | Average reference computed over the same common channel set | ⚠ It is average, but over different sets, so this follows from fixing the channel set. |
-| Bad channels | Same detection and handling rule (e.g. interpolate listed bad channels, or none) for both | ❓ The rule is not defined yet. |
-| Units | Amplitudes verified in volts for both (D1 ×1e-6 fix verified by comparing amplitude/PSD ranges with D2) | ⚠ The fix is applied but not cross-checked against D2. |
-| Resampling / filtering | Same target rate (250 Hz), same filter design and parameters | ✅ |
-| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ |
-| Forward model | Same template (fsaverage), source space (ico-5), BEM, and the **same sensor set**. Ideally one forward model is shared by both datasets. | ❌ There are two forward models on different sensor sets. |
-| Inverse | Same method, `loose`, `depth`, `λ²` and **noise-covariance** choice | ⚠ The noise covariance is not recorded in the manifest. |
-| ROIs | Same parcellation (aparc, 68), same ROI order, same extraction mode (`mean_flip`) | ✅ |
-| Bands | Identical band edges and the same band-pass/Hilbert implementation | ✅ |
-| Graph construction | Same PLV estimator, same window length (PLV bias depends on sample count), same sparsification/threshold rule, same node features, same edge normalization | ✅ PLV and window length; the threshold and node features are still to be fixed. |
-| Provenance | Both datasets processed by the same code commit and the same config hash in one pipeline run | ❓ |
+| Item | Requirement | Pipeline v2 (`configs/pipeline.yaml`) | Verified by |
+|---|---|---|---|
+| Channel set | Identical channel names and count entering source modelling for D1 and D2 | ✅ 30 channels in both datasets (M1/M2 dropped), canonical order | loader raises on a missing channel; channel order is asserted against the operator |
+| Electrode positions | Same montage source for both | ✅ `standard_1020` by name (MNE ≥1.13 calls it `colin27_1020`, with identical positions) | |
+| Reference | Average reference computed over the same common channel set | ✅ | |
+| Bad channels | Same detection and handling rule for both | ✅ the same automatic rule, plus interpolation | per-subject list in `subjects.csv` |
+| Units | Amplitudes verified in volts for both | ✅ the D1 rescale, plus a plausibility check for both datasets | `median_std_uv` in `subjects.csv`, to be compared between D1 and D2 |
+| Resampling / filtering | Same target rate (250 Hz), same filter design and parameters | ✅ | |
+| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ | |
+| Forward model | Same template, source space, BEM and **same sensor set** | ✅ **one** forward model shared by both datasets | `manifest.source_operator.shared_across_datasets` |
+| Inverse | Same method, `loose`, `depth`, `λ²` and noise covariance | ✅ ad hoc covariance, `pick_ori='normal'`, all recorded | runtime check against the full inverse (`verification_rel_error`) |
+| ROIs | Same parcellation, ROI order and extraction mode | ✅ | `roi_names` in the manifest and `connectivity.npz` |
+| Bands | Identical band edges and the same band-pass/Hilbert implementation | ✅ | |
+| Graph construction | Same estimator, window length, sparsification, node features and edge normalization | ✅ at build time (dense PLV/ciPLV and band power). Sparsification and node features are fixed at the model stage and applied identically to both datasets | model config |
+| Provenance | Both datasets processed by the same code commit and config hash in one run | ✅ a single `run()` covers D1 and D2 | `git_commit`, `config_hash` in the manifest |
+
+**Gate status:** the 7.1 items are satisfied *by design* in pipeline v2. The
+gate is formally passed once a full v2 run has completed, with:
+
+- `verification_rel_error` < 1e-6
+- no subject in error
+- `median_std_uv` ranges of D1 and D2 that overlap
+
+Graph sets from pipeline v1 (`processed/*_20260912_*`, `*_20260915_*`) do not
+pass the gate and are not used.
 
 ### 7.2 Comparability checks (must be run and reported; they inform interpretation)
 

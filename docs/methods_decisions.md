@@ -5,7 +5,8 @@ deviations from the reference papers ("Paper 1" = source-space pipeline
 reference; "Paper 2" = the publication of Dataset 2; full citations TBD).
 Add an entry whenever a parameter changes.
 
-Seeded from `processed/run_manifest_20260912_162006.json`.
+Rows 1–11 are seeded from `processed/run_manifest_20260912_162006.json` (pipeline v1, code not in this repo).
+Pipeline v2 (`configs/pipeline.yaml`, `src/adgraph/pipeline.py`) supersedes the graph sets from v1; rows 15–23 record what changed.
 
 | # | Stage | Decision | Reference choice | Reason | Status |
 |---|---|---|---|---|---|
@@ -13,7 +14,7 @@ Seeded from `processed/run_manifest_20260912_162006.json`.
 | 2 | Preprocessing | Average reference | not specified in Paper 1 | | adopted |
 | 3 | Preprocessing | `standard_1020` montage, matched by channel name | landmark-based coregistration | no digitization available | adopted (limitation) |
 | 4 | Preprocessing | D1 EDF ×1e-6 rescale | n/a | headers mislabel µV as V | adopted |
-| 5 | Preprocessing | Drop M1/M2 in D1 only | | | **open**: asymmetric with D2 |
+| 5 | Preprocessing | Drop M1/M2 in D1 only | | | superseded by #15 |
 | 6 | Windowing | 40 s windows, 20 s step, 10 s edge trim; keep subject if ≥5 windows | | | adopted |
 | 7 | Rejection | Per-subject adaptive threshold: median + 5·MAD of peak-to-peak; reject window if >15 % of channels exceed it | fixed ±80 µV | the fixed threshold did not transfer to this data | adopted |
 | 8 | Source | fsaverage, ico-5 (20 484 vertices), 3-layer BEM 5120 | ICBM152 / Brainstorm | MNE-Python toolchain | adopted |
@@ -23,5 +24,12 @@ Seeded from `processed/run_manifest_20260912_162006.json`.
 | 12 | Data | Use all 43 subjects and recordings as provided; no duplicate-based exclusion | n/a | project decision (2026-10-12) | adopted |
 | 13 | Evaluation | Subject-grouped CV, subject-level metrics primary | | windows are not independent | adopted |
 | 14 | Evaluation | Frozen evaluation design v1.0: S1/S2 within-dataset (primary), S3 pooled (secondary), S4 cross-dataset (gated). Repeated 5-fold ×20 with nested 4-fold, subject level. See `DESIGN.md` | | pre-registration before classification | adopted |
-| 15 | Harmonization | Common channel set and shared forward model for D1/D2 (required by the `DESIGN.md` §7 gate) | | needed for cross-dataset testing | **open** |
-| 16 | Preprocessing | Bad-channel handling rule; noise-covariance choice recorded in manifest | | needed for the §7 gate | **open** |
+| 15 | Harmonization (v2) | Drop M1/M2 in **both** datasets → identical 30-channel set (order from `electrodes_positions_32.loc`); average reference over those 30 | | mastoids sit at the edge of the template head model and were kept in D2 only; identical sensor sets are required by the `DESIGN.md` §7 gate | adopted |
+| 16 | Source (v2) | **One** forward model, inverse operator and ROI extraction shared by D1 and D2, collapsed into a single 68×30 sensor→ROI matrix and verified at runtime against MNE's full inverse | separate forward model per dataset (v1) | removes a dataset-specific processing difference; needed for the gate | adopted |
+| 17 | Source (v2) | Noise covariance: ad hoc diagonal (`mne.make_ad_hoc_cov`) | not recorded (v1) | resting state has no baseline/empty-room data | adopted |
+| 18 | Source (v2) | `pick_ori='normal'`: signed normal component of the loose-orientation solution | not recorded (v1) | the default (`None`) returns the unsigned norm, which destroys the phase needed for PLV and makes `mean_flip` meaningless | adopted |
+| 19 | Preprocessing (v2) | Bad channels: same automatic rule for both datasets (flat, robust-z of log std > 5, 90th-pct neighbour correlation < 0.4 on 1–45 Hz), spherical-spline interpolation **before** re-referencing; no subject excluded | not handled (v1); sheets give only bad-channel counts, not names | the comment column cannot be used, so the rule must be data-driven and identical | adopted |
+| 20 | Preprocessing (v2) | Units: D1 ×1e-6 kept, plus an automatic plausibility check (median channel std must be 0.1–200 µV after filtering) for both datasets | fixed rescale only (v1) | guards against unit errors in either dataset | adopted |
+| 21 | Connectivity (v2) | Band filtering + Hilbert applied to the **continuous** ROI signals, then windows are cut | unspecified (v1) | avoids filter edge effects at every window boundary | adopted |
+| 22 | Connectivity (v2) | ciPLV (corrected imaginary PLV) stored next to PLV; PLV stays primary | PLV only | source leakage inflates zero-lag PLV; ciPLV is the leakage-robust sensitivity analysis | adopted (sensitivity) |
+| 23 | Graphs (v2) | Stored per window: dense PLV and ciPLV (4 bands × 68 × 68, no self-loops) and log10 ROI band power (candidate node features); no thresholding at build time | | sparsification and node features are model-stage choices, made inside training folds | adopted |

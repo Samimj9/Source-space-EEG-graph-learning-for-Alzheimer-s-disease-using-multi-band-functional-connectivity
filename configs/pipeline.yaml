@@ -1,0 +1,66 @@
+# Graph-construction pipeline, v2 (harmonized D1/D2). Every value here is a
+# methods decision; changes must be logged in docs/methods_decisions.md.
+version: 2
+
+channels:
+  # Order and names from AD-LEB/electrodes_positions_32.loc (both datasets record these 32).
+  recorded: [Fp1, Fpz, Fp2, F7, F3, Fz, F4, F8, FC5, FC1, FC2, FC6, M1, T7, C3, Cz,
+             C4, T8, M2, CP5, CP1, CP2, CP6, P7, P3, Pz, P4, P8, POz, O1, Oz, O2]
+  # Mastoids are dropped in BOTH datasets -> identical 30-channel sensor set.
+  drop: [M1, M2]
+  montage: standard_1020
+
+units:
+  # Expected per-channel robust amplitude (median of channel std, volts) after scaling.
+  # Outside this range the loader raises instead of guessing.
+  plausible_std_v: [1.0e-7, 2.0e-4]
+  scale:            # multiplier applied to raw values read by MNE
+    D1: 1.0e-6      # EDF header says V, values are uV
+    D2: 1.0
+
+preprocessing:
+  sfreq: 250
+  l_freq: 0.1
+  h_freq: 45.0
+  bad_channels:
+    # Same automatic rule for both datasets (computed on the 1-45 Hz signal):
+    flat_std_v: 1.0e-7          # std below this -> flat
+    robust_z_log_std: 5.0       # |robust z| of log(std) above this -> noisy/dead
+    min_neighbor_corr: 0.4      # 90th percentile |corr| with other channels below this -> uncorrelated
+    max_fraction_warn: 0.2      # warn (do not exclude) if more channels are flagged
+  interpolate_bads: true        # spherical spline, before re-referencing
+  reference: average            # as projection, over the common 30-channel set
+
+windowing:
+  window_s: 40.0
+  step_s: 20.0
+  edge_trim_s: 10.0
+  rejection:
+    mad_k: 5.0                  # threshold = median + k * MAD of this subject's peak-to-peak values
+    max_bad_channel_fraction: 0.15
+  min_windows: 5                # pipeline rule; subjects below are reported, not silently dropped
+
+source:
+  subject: fsaverage
+  spacing: ico5
+  bem: fsaverage-5120-5120-5120-bem-sol.fif
+  mindist_mm: 5.0
+  noise_cov: ad_hoc             # diagonal, no baseline available in resting state
+  method: MNE
+  loose: 0.2
+  depth: 0.8
+  lambda2: 0.1111111111111111   # 1 / SNR^2, SNR = 3
+  pick_ori: normal              # signed normal component: keeps phase for PLV
+  parcellation: aparc           # Desikan-Killiany, 68 cortical ROIs
+  roi_mode: mean_flip
+
+connectivity:
+  bands:
+    theta: [4.0, 8.0]
+    alpha1: [8.0, 10.0]
+    alpha2: [10.0, 13.0]
+    beta: [13.0, 30.0]
+  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = leakage-robust sensitivity
+  node_power: true              # log10 band power per ROI per window (candidate node features)
+
+seed: 0

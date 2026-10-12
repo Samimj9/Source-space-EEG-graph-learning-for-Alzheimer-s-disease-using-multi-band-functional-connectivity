@@ -9,7 +9,7 @@ file records structure, counts and issues only.
 | Dataset | Folder | Files | Format | Channels (per manifest) | Used |
 |---|---|---|---|---|---|
 | D1 (2017) | `EEGs/Dataset 1 (2017)/` | 20 (`sub1`–`sub20.edf`) | EDF, ~24–39 MB | 32 incl. M1/M2 → 30 after mastoid drop | yes |
-| D2 (2019) resting | `EEGs/Dataset 2 (2019)/RestingState/` | 23 (`<id>_<DDMYYYY>_1.edf`) | EDF, ~20–37 MB | 32 incl. M1/M2 | yes |
+| D2 (2019) resting | `EEGs/Dataset 2 (2019)/RestingState/` | 23 (`<id>_<DDMYYYY>_1.edf`) | EDF, ~20–37 MB | 32 incl. M1/M2 → 30 after mastoid drop (v2) | yes |
 | D2 (2019) picture naming | `.../PictureNaming/` | `<id>_<date>_2.gdf` | GDF, ~170 MB | n/a | no |
 | D2 (2019) button press | `.../ButtonPress/` | `<id>_<date>_3.gdf` | GDF, ~50–80 MB | n/a | no |
 
@@ -57,9 +57,9 @@ subscores, `Data Quality, Comments`. `Id` looks like `2_842019`
    is about 80 (range 66–92). Age-related EEG slowing could be classified as
    "AD". The analysis needs an age-controlled check (age-only baseline,
    age-matched subset, or regressing out age), and the paper should discuss it.
-4. **Mastoid asymmetry.** M1/M2 are dropped in D1 (30 ch) but kept in D2
-   (32 ch), so the forward models differ between datasets. That is
-   documented but not fixed, and it matters for any pooled D1+D2 model.
+4. **Mastoid asymmetry (v1 only).** Pipeline v1 dropped M1/M2 in D1 (30 ch)
+   but kept them in D2 (32 ch). Pipeline v2 fixes this: both datasets use the
+   same 30 channels and one shared forward model (methods log #15–16).
 5. **No digitized electrodes.** Coregistration uses the standard 10-20
    template on fsaverage.
 6. **D1 unit bug.** The EDF headers say V when the values are µV. This is
@@ -68,5 +68,6 @@ subscores, `Data Quality, Comments`. `Id` looks like `2_842019`
    subject-level CV with confidence intervals is mandatory, and any
    window-level accuracy will be inflated.
 8. **Per-subject quality notes** (bad channels, eye blinks, movement) are in
-   the `Comments` column. Decide whether bad channels get interpolated before
-   source modeling. Currently they are not handled explicitly.
+   the `Comments` column. That column gives only counts, not channel names.
+   Pipeline v2 therefore detects bad channels automatically with one rule for
+   both datasets and interpolates them (methods log #19).

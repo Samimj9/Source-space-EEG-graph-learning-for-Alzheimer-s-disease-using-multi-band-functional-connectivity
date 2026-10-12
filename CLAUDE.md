@@ -118,11 +118,23 @@ pointing at `/content/drive/MyDrive/AD-LEB`). Cache expensive artifacts
 (forward models, source time courses) in Drive under `processed/cache/`, keyed
 by dataset and config hash.
 
+## Graph construction (pipeline v2)
+
+- Parameters: `configs/pipeline.yaml`. Code: `src/adgraph/pipeline.py`.
+  Colab driver: `notebooks/01_build_graphs.ipynb`.
+- Order: `scripts/inspect_raw.py` (header check), then
+  `scripts/build_graphs.py --limit 1` (smoke test), then the full
+  `scripts/build_graphs.py`.
+- Each run writes `processed/graphs_v2_<UTC stamp>_<config hash>/`
+  containing `connectivity.npz`, `windows.csv`, `subjects.csv` and
+  `manifest.json`. Row *i* of `windows.csv` matches index *i* of the arrays.
+- Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed).
+
 ## Conventions
 
 - Python 3.10+ (Colab default). Core stack: `mne`, `numpy`, `scipy`, `pandas`,
-  `scikit-learn`, `torch`, `torch_geometric`. Pin versions in `requirements.txt`
-  once the environment is fixed.
+  `scikit-learn`, `torch`, `torch_geometric`. `mne` is pinned in
+  `requirements.txt` (forward/inverse results must not drift).
 - Set and log random seeds (numpy, torch, python) for every run.
 - Units: keep EEG in volts inside MNE objects. Dataset 1 EDFs are mislabeled
   (values are µV but header says V): rescale ×1e-6 on load and log it.
