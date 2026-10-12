@@ -8,6 +8,7 @@ neural networks.
 
 - Project rules and layout: [`CLAUDE.md`](CLAUDE.md)
 - Datasets and known issues: [`docs/data_inventory.md`](docs/data_inventory.md)
+- Evaluation design (frozen): [`DESIGN.md`](DESIGN.md)
 - Methodological choices: [`docs/methods_decisions.md`](docs/methods_decisions.md)
 
 Data are not distributed with this repository. The pipeline runs in Google

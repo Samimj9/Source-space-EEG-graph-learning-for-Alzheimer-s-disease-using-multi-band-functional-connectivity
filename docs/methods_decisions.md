@@ -20,5 +20,8 @@ Seeded from `processed/run_manifest_20260912_162006.json`.
 | 9 | Source | MNE inverse, loose 0.2, depth 0.8, λ² = 1/9 | | | adopted |
 | 10 | Source | Desikan-Killiany (aparc), 68 ROIs, `mean_flip` | | | adopted |
 | 11 | Connectivity | PLV, theta 4–8, alpha1 8–10, alpha2 10–13, beta 13–30 Hz | | | adopted |
-| 12 | Data | D1 duplicate/mislabelled files | n/a | see `data_inventory.md` §1 | **open: blocking** |
+| 12 | Data | Use all 43 subjects and recordings as provided; no duplicate-based exclusion | n/a | project decision (2026-10-12) | adopted |
 | 13 | Evaluation | Subject-grouped CV, subject-level metrics primary | | windows are not independent | adopted |
+| 14 | Evaluation | Frozen evaluation design v1.0: S1/S2 within-dataset (primary), S3 pooled (secondary), S4 cross-dataset (gated). Repeated 5-fold ×20 with nested 4-fold, subject level. See `DESIGN.md` | | pre-registration before classification | adopted |
+| 15 | Harmonization | Common channel set and shared forward model for D1/D2 (required by the `DESIGN.md` §7 gate) | | needed for cross-dataset testing | **open** |
+| 16 | Preprocessing | Bad-channel handling rule; noise-covariance choice recorded in manifest | | needed for the §7 gate | **open** |

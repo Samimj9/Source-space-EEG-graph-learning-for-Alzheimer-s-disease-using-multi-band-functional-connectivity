@@ -36,9 +36,10 @@ code, configs, docs and small summary tables only.
    feature selection must be grouped by `(dataset, subject_id)`. Report
    subject-level metrics (aggregate window predictions per subject) as the
    primary result; window-level metrics are secondary.
-4. **Resolve the Dataset 1 duplicate-file problem before any classification
-   claim** (see `docs/data_inventory.md`). Two confirmed duplicate pairs carry
-   *opposite* labels.
+4. **Use all subjects and recordings as provided.** Don't exclude subjects
+   or run duplicate-file analyses. The only exclusion is the pre-specified
+   pipeline rule (fewer than 5 clean windows). Evaluation follows
+   `DESIGN.md`, which is frozen. Change it only with a logged reason.
 5. **Every deviation from the reference papers is recorded** in
    `docs/methods_decisions.md` with the reason. The existing run manifest
    already lists several; keep that log the single source of truth.
@@ -79,6 +80,7 @@ e.g. `D1-3`, `D2-3`.
 ## Repository layout
 
 ```
+DESIGN.md           Frozen evaluation design (settings, splits, metrics, cross-dataset gate).
 configs/            YAML configs (pipeline params, paths template). Committed.
 src/adgraph/        Importable Python package (all reusable logic lives here).
   io/               loading EDF + participant metadata, subject registry

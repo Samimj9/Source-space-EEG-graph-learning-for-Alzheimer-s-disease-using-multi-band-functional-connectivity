@@ -47,16 +47,9 @@ subscores, `Data Quality, Comments`. `Id` looks like `2_842019`
 
 ## Known issues (must be resolved or explicitly handled)
 
-1. **D1 duplicate recordings with conflicting labels (blocking).** The
-   manifest reports duplicate-content files. Fingerprint-confirmed:
-   `sub1`(AD, MMSE 21) = `sub2`(HC, MMSE 27) and `sub13`(HC, MMSE 30) =
-   `sub17`(AD, MMSE 9). Same byte size, not yet confirmed:
-   `sub3`(AD)/`sub10`(HC) and `sub9`(AD)/`sub14`(HC). Every pair crosses the
-   AD/HC boundary, so the same signal carries both labels. The manifest says
-   "5 pairs" but names only 4. `sub6`/`sub7`/`sub8` also share one byte size,
-   though identical EDF size can simply mean identical duration and channel
-   count. Next steps: hash the signal arrays of all D1 files, then ask the
-   data owner which label is correct, or exclude the affected subjects.
+1. **Cohort decision.** All subjects and recordings are used as provided.
+   There is no exclusion based on file-content similarity (project decision,
+   2026-10-12).
 2. **D1 `sub18` age = 7.** This is almost certainly a data-entry error and
    needs confirmation from the data owner. Until then, don't use age as a
    covariate for this subject.
