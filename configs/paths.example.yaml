@@ -1,0 +1,16 @@
+# Copy to configs/paths.yaml (gitignored) and adjust. In Colab, Drive is mounted at /content/drive.
+drive_root: /content/drive/MyDrive/AD-LEB
+
+dataset1:
+  eeg_dir: "{drive_root}/EEGs/Dataset 1 (2017)"
+  participants: "{drive_root}/Info participants/Info Participants_2017.xlsx"
+
+dataset2:
+  eeg_dir: "{drive_root}/EEGs/Dataset 2 (2019)/RestingState"
+  participants: "{drive_root}/Info participants/Info Participants_2019.xlsx"
+
+electrode_layout: "{drive_root}/electrodes_positions_32.loc"
+
+# All pipeline outputs (timestamped, never overwritten)
+processed_dir: "{drive_root}/processed"
+cache_dir: "{drive_root}/processed/cache"

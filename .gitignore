@@ -1,0 +1,62 @@
+# ---- Data: never commit (lives in Google Drive) ----
+*.edf
+*.bdf
+*.gdf
+*.set
+*.fdt
+*.fif
+*.fif.gz
+*.vhdr
+*.vmrk
+*.eeg
+*.loc
+*.xlsx
+*.xls
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.mat
+*.pt
+*.pth
+*.ckpt
+data/
+processed/
+cache/
+mne_data/
+subjects_dir/
+
+# Per-subject CSVs are data; aggregate tables go in results/tables/ explicitly
+*.csv
+!results/tables/*.csv
+
+# Local path config (copy from configs/paths.example.yaml)
+configs/paths.yaml
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---- Experiment tracking / logs ----
+runs/
+wandb/
+lightning_logs/
+mlruns/
+*.log
+
+# ---- OS / editors ----
+.DS_Store
+.idea/
+.vscode/
