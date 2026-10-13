@@ -55,7 +55,8 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 ├── graphs_v3_<config hash>/        graph run used by the experiments
 │   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
-│   │                               (failed.json: the error of a failed subject)
+│   │                               qc_channels.csv qc_windows.csv (failed.json: the error of a failed subject)
+│   ├── inspection_<time>/          read-only per-subject QC figures (notebook 01, step 4b)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
 │   │                               (only when every subject succeeded and the cohort is not empty)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)

@@ -253,6 +253,18 @@ display(Image(str(sorted(Path(OUT, 'diagnostics').glob('amplitude_*/amplitude.pn
         md("## 4. Smoke test: first subject of each dataset\nWritten to Drive as `graphs_v3_<hash>_limit1/`; "
            "it is never used for analysis."),
         code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --limit 1")'),
+        md("## 4b. Inspect the smoke-test subjects (read-only)\nPreprocessing QC (unit safeguard, amplitude "
+           "on the analysed interval, bad channels), every candidate window kept or rejected and why, ROI and "
+           "sensor band power, mean PLV and |ciPLV| per band. Review these before the full build (step 5). "
+           "Diagnostics, not paper figures (methodology log entry 39)."),
+        code("""sh("python scripts/inspect_graph_subjects.py --paths configs/paths.yaml --limit 1")
+from pathlib import Path
+from IPython.display import Image, display
+from adgraph.config import load_yaml
+from adgraph.pipeline import graph_run_dir
+smoke = graph_run_dir(OUT, load_yaml('configs/pipeline.yaml'), 1)
+for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
+    display(Image(str(png)))"""),
         md("## 5. Full graph construction (resumable)\nProgress is saved per subject. If the runtime stops, "
            "*Run all* again."),
         code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --status")\n'
@@ -279,8 +291,9 @@ if mem is not None:
           f"(machine total {mem['mem_total_mb'].max():.0f} MB; lowest available {mem['mem_available_before_mb'].min():.0f} MB)")
 s = pd.read_csv(run / 'subjects.csv')
 from IPython.display import display
-display(s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels',
-                       'n_windows_kept', 'n_windows_total', 'channel_naming', 'qc_spatial_rho', 'seconds',
+display(s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'gross_robust_std_uv', 'median_std_uv',
+                       'median_robust_std_uv', 'n_bad_channels', 'n_windows_kept', 'n_windows_total',
+                       'qc_edge_window_ptp_ratio', 'channel_naming', 'qc_spatial_rho', 'seconds',
                        'mem_peak_mb', 'status'] if c in s]])
 if 'qc_spatial_rho' in s:   # channel-mapping QC: nearby electrodes correlate more (clearly negative expected)
     print('distance vs |correlation| rho per recording: median', round(s['qc_spatial_rho'].median(), 2),
@@ -364,7 +377,8 @@ DRIVE_LAYOUT = """\
 ├── graphs_v3_<config hash>/        graph run used by the experiments
 │   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
-│   │                               (failed.json: the error of a failed subject)
+│   │                               qc_channels.csv qc_windows.csv (failed.json: the error of a failed subject)
+│   ├── inspection_<time>/          read-only per-subject QC figures (notebook 01, step 4b)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
 │   │                               (only when every subject succeeded and the cohort is not empty)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)

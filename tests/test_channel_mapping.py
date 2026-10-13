@@ -156,8 +156,9 @@ def _write_edf(path, names, sf, unit, seconds=60, data=None):
     import edfio
 
     rng = np.random.default_rng(0)
-    if data is None:
-        data = rng.standard_normal((len(names), sf * seconds)) * 10.0
+    if data is None:   # 10 µV std per channel, correlated like scalp EEG (independent channels would all be bad)
+        common = rng.standard_normal(sf * seconds)
+        data = (0.8 * common + 0.6 * rng.standard_normal((len(names), sf * seconds))) * 10.0
     signals = [edfio.EdfSignal(x, sampling_frequency=sf, label=n, physical_dimension=unit,
                                physical_range=(-20000, 20000)) for x, n in zip(data, names)]
     edfio.Edf(signals).write(path)

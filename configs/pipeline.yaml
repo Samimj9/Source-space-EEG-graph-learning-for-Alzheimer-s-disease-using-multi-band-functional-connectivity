@@ -11,9 +11,14 @@ channels:
   montage: standard_1020
 
 units:
-  # Expected per-channel robust amplitude (median of channel std, volts) after scaling.
-  # Outside this range the loader raises instead of guessing.
+  # Two independent amplitude checks in preprocess() (methodology log entries 38-39); outside a range the
+  # recording fails instead of being rescaled or passed:
+  # Plausibility: median over channels of the std of the ANALYSED interval (edge trim removed) of the final
+  # 0.1-45 Hz, interpolated, average-referenced signal (volts). Range unchanged since v2.
   plausible_std_v: [1.0e-7, 2.0e-4]
+  # Unit safeguard: median over channels of the robust std (1.4826 MAD) of the WHOLE 0.1-45 Hz recording (volts).
+  # One decade beyond physiological EEG on each side; a 10^3 or 10^6 unit-scale error falls outside.
+  gross_robust_std_v: [1.0e-7, 1.0e-3]
   scale:            # multiplier applied to raw values read by MNE
     D1: 1.0e-6      # EDF header says V, values are uV
     D2: 1.0

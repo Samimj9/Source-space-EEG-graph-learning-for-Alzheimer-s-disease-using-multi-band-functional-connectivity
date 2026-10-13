@@ -3,35 +3,48 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from ..io.eeg import robust_channel_std
 
 
-def detect_bad_channels(data: np.ndarray, ch_names: list[str], rules: dict) -> dict[str, str]:
-    """Flag flat, outlying-amplitude and uncorrelated channels. Returns ``{channel: reason}``."""
+def channel_metrics(data: np.ndarray, rules: dict) -> pd.DataFrame:
+    """Per-channel quantities behind the bad-channel rules, and the rule each channel fails.
+
+    ``std`` (V); ``robust_std`` = 1.4826 MAD (V); ``log_std_z`` = robust z of log(std) among the
+    non-flat channels; ``neighbor_corr_p90`` = 90th percentile |correlation| with the other
+    non-flat channels; ``bad_reason`` = first failed rule (flat, amplitude, low correlation) or ''."""
     std = np.std(data, axis=1)
-    bads: dict[str, str] = {}
-
-    for i in np.flatnonzero(std < rules["flat_std_v"]):
-        bads[ch_names[i]] = "flat"
-
-    ok = std >= rules["flat_std_v"]
+    flat = std < rules["flat_std_v"]
+    ok = ~flat
+    z = np.full(len(std), np.nan)
+    neighbor = np.full(len(std), np.nan)
     log_std = np.log(std[ok])
-    mad = np.median(np.abs(log_std - np.median(log_std))) * 1.4826
+    mad = np.median(np.abs(log_std - np.median(log_std))) * 1.4826 if ok.any() else 0.0
     if mad > 0:
-        z = (log_std - np.median(log_std)) / mad
-        for i, zi in zip(np.flatnonzero(ok), z):
-            if abs(zi) > rules["robust_z_log_std"]:
-                bads.setdefault(ch_names[i], f"amplitude z={zi:.1f}")
-
+        z[ok] = (log_std - np.median(log_std)) / mad
     if ok.sum() > 2:
-        idx = np.flatnonzero(ok)
-        corr = np.abs(np.corrcoef(data[idx]))
+        corr = np.abs(np.corrcoef(data[ok]))
         np.fill_diagonal(corr, np.nan)
-        neighbor = np.nanpercentile(corr, 90, axis=1)
-        for i, c in zip(idx, neighbor):
-            if c < rules["min_neighbor_corr"]:
-                bads.setdefault(ch_names[i], f"low correlation {c:.2f}")
+        neighbor[ok] = np.nanpercentile(corr, 90, axis=1)
+    reason = np.where(flat, "flat", "").astype(object)
+    for i in np.flatnonzero(ok):
+        if abs(z[i]) > rules["robust_z_log_std"]:
+            reason[i] = f"amplitude z={z[i]:.1f}"
+        elif neighbor[i] < rules["min_neighbor_corr"]:
+            reason[i] = f"low correlation {neighbor[i]:.2f}"
+    med = np.median(data, axis=1, keepdims=True)
+    return pd.DataFrame({"std": std, "robust_std": 1.4826 * np.median(np.abs(data - med), axis=1),
+                         "log_std_z": z, "neighbor_corr_p90": neighbor, "bad_reason": reason})
+
+
+def detect_bad_channels(data: np.ndarray, ch_names: list[str], rules: dict) -> dict[str, str]:
+    """Flag flat, outlying-amplitude and uncorrelated channels. Returns ``{channel: reason}``
+    (flat channels first, then amplitude, then correlation, each in channel order)."""
+    reasons = channel_metrics(data, rules)["bad_reason"].tolist()
+    bads: dict[str, str] = {}
+    for kind in ("flat", "amplitude", "low correlation"):
+        bads.update({ch: r for ch, r in zip(ch_names, reasons) if r.startswith(kind)})
     return bads
 
 
@@ -43,30 +56,69 @@ def resample_and_bandpass(raw, cfg: dict):
     return raw
 
 
+def bandpass_half_length(cfg: dict) -> int:
+    """Half length (samples at ``preprocessing.sfreq``) of the 0.1-45 Hz FIR used by
+    ``resample_and_bandpass``: how far a transient can spread through that filter."""
+    import mne
+
+    pp = cfg["preprocessing"]
+    h = mne.filter.create_filter(None, pp["sfreq"], pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
+    return len(h) // 2
+
+
+def analysed_interval(n_samples: int, sfreq: float, cfg: dict) -> slice:
+    """Samples that can enter windows: the recording without ``windowing.edge_trim_s`` at each
+    end (the same rounding as ``window_starts``)."""
+    trim = int(round(cfg["windowing"]["edge_trim_s"] * sfreq))
+    if n_samples - 2 * trim < 1:
+        raise ValueError(f"recording of {n_samples / sfreq:.1f} s is not longer than twice the edge trim "
+                         f"({cfg['windowing']['edge_trim_s']} s)")
+    return slice(trim, n_samples - trim)
+
+
+def robust_std(data: np.ndarray) -> np.ndarray:
+    """Per-channel 1.4826 x median absolute deviation (V); insensitive to brief large transients."""
+    med = np.median(data, axis=1, keepdims=True)
+    return 1.4826 * np.median(np.abs(data - med), axis=1)
+
+
 def preprocess(raw, cfg: dict) -> tuple[object, dict]:
-    """Resample, band-pass, check units, interpolate bad channels, average reference.
+    """Resample, band-pass, unit safeguard, bad channels, interpolation, average reference,
+    amplitude plausibility (methodology log entry 39).
 
-    The amplitude check (``units.plausible_std_v``) is applied to the median over channels of
-    the per-channel std of the resampled 0.1-45 Hz signal, in the recording reference (before
-    bad-channel handling and the average reference). ``scripts/diagnose_amplitude.py`` reports
-    the same quantity and its breakdown for a real recording.
+    1. Resample to 250 Hz and band-pass 0.1-45 Hz (the continuous signal that is analysed).
+    2. **Unit safeguard** (``units.gross_robust_std_v``): median over channels of the robust std
+       (1.4826 MAD) of the whole 0.1-45 Hz recording. MAD ignores brief edge transients; the
+       range only separates physiological EEG from 10^3 / 10^6 unit-scale errors.
+    3. **Bad channels** on the analysed interval (edge trim removed) of the 1 Hz high-passed
+       signal: the rules see only data that can enter windows. Interpolated (spherical spline).
+    4. Average reference (projection, applied; required by the inverse operator).
+    5. **Amplitude plausibility** (``units.plausible_std_v``): median over channels of the std of
+       the analysed interval of the final signal (0.1-45 Hz, interpolated, average reference),
+       i.e. the signal the windows are cut from.
 
-    The average reference is added as a projection and applied, so the data and
-    ``raw.info`` both carry it (required by the inverse operator).
+    Window rejection (``process_recording``) is unchanged. ``qc["channels"]`` holds the
+    per-channel quantities; ``bad_channels_whole_recording`` (QC only) what step 3 would flag
+    on the whole recording.
     """
     pp = cfg["preprocessing"]
     resample_and_bandpass(raw, cfg)
+    data = raw.get_data()
+    iv = analysed_interval(data.shape[1], raw.info["sfreq"], cfg)
 
-    med_std = robust_channel_std(raw.get_data())
-    lo, hi = cfg["units"]["plausible_std_v"]
-    if not lo <= med_std <= hi:
-        raise ValueError(f"median channel std {med_std:.3g} V outside plausible range [{lo}, {hi}] "
-                         "(resampled 0.1-45 Hz signal, recording reference): check the unit scale; "
-                         "run scripts/diagnose_amplitude.py for the breakdown")
+    gross = float(np.median(robust_std(data)))
+    glo, ghi = cfg["units"]["gross_robust_std_v"]
+    if not glo <= gross <= ghi:
+        raise ValueError(f"unit safeguard failed: robust median channel std {gross:.3g} V outside [{glo}, {ghi}] V "
+                         "(whole 0.1-45 Hz recording): the EDF unit scale is wrong by orders of magnitude; "
+                         "run scripts/diagnose_amplitude.py")
 
-    detect_on = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error").get_data()
-    bads = detect_bad_channels(detect_on, raw.ch_names, pp["bad_channels"])
-    frac = len(bads) / len(raw.ch_names)
+    hp = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error").get_data()
+    rules = pp["bad_channels"]
+    metrics = channel_metrics(hp[:, iv], rules)
+    bads = detect_bad_channels(hp[:, iv], raw.ch_names, rules)
+    bads_whole = detect_bad_channels(hp, raw.ch_names, rules)          # QC only: edges included
+    del hp
     raw.info["bads"] = list(bads)
     if bads and pp["interpolate_bads"]:
         raw.interpolate_bads(reset_bads=True, verbose="error")
@@ -74,10 +126,38 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     raw.set_eeg_reference(pp["reference"], projection=True, verbose="error")
     raw.apply_proj(verbose="error")
 
+    final = raw.get_data()[:, iv]
+    final_std, final_robust = final.std(axis=1), robust_std(final)
+    med_std = float(np.median(final_std))
+    lo, hi = cfg["units"]["plausible_std_v"]
+    if not lo <= med_std <= hi:
+        raise ValueError(f"median channel std {med_std:.3g} V outside plausible range [{lo}, {hi}] (analysed "
+                         "interval, 0.1-45 Hz, average reference): run scripts/diagnose_amplitude.py")
+
+    channels = pd.DataFrame({
+        "channel": raw.ch_names,
+        "std_uv": np.std(data[:, iv], axis=1) * 1e6,          # analysed interval, 0.1-45 Hz, recording reference
+        "robust_std_uv": robust_std(data[:, iv]) * 1e6,
+        "whole_recording_std_uv": np.std(data, axis=1) * 1e6,
+        "hp1_std_uv": metrics["std"].to_numpy() * 1e6,         # what the bad-channel rules see
+        "log_std_z": metrics["log_std_z"].to_numpy(),
+        "neighbor_corr_p90": metrics["neighbor_corr_p90"].to_numpy(),
+        "bad_reason": [bads.get(c, "") for c in raw.ch_names],
+        "bad_reason_whole_recording": [bads_whole.get(c, "") for c in raw.ch_names],
+        "interpolated": [c in bads and bool(pp["interpolate_bads"]) for c in raw.ch_names],
+        "final_std_uv": final_std * 1e6,                       # after interpolation + average reference
+        "final_robust_std_uv": final_robust * 1e6,
+    })
     qc = {
-        "median_std_uv": med_std * 1e6,
+        "median_std_uv": med_std * 1e6,                        # the plausibility statistic (step 5)
+        "median_robust_std_uv": float(np.median(final_robust)) * 1e6,
+        "gross_robust_std_uv": gross * 1e6,                    # the unit safeguard statistic (step 2)
+        "whole_recording_std_uv": robust_channel_std(data) * 1e6,   # former check statistic (QC only)
+        "analysed_interval_s": [iv.start / raw.info["sfreq"], iv.stop / raw.info["sfreq"]],
         "bad_channels": bads,
         "n_bad_channels": len(bads),
-        "bad_fraction_warning": frac > pp["bad_channels"]["max_fraction_warn"],
+        "bad_fraction_warning": len(bads) / len(raw.ch_names) > rules["max_fraction_warn"],
+        "bad_channels_whole_recording": bads_whole,
+        "channels": channels,
     }
     return raw, qc

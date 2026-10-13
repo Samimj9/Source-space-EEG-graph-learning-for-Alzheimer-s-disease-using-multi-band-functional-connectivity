@@ -2342,6 +2342,126 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 39. Amplitude QC on the analysed interval, unit safeguard, bad channels on the analysed interval
+
+**Evidence (author's run of `scripts/diagnose_amplitude.py`, commit `128ed95`, real data)**
+
+| Measurement | D1-1 | D2-2 |
+|---|---:|---:|
+| Former check value (whole recording, recording reference) | 221.1 µV | 322.5 µV |
+| Same without the first/last 10 s | 17.5 µV | 20.2 µV |
+| Robust std at that stage | 11.7 µV | 15.8 µV |
+| Power below 1 Hz | 95 % | 92 % |
+| Largest 20 s block std | 1030 µV (start) | 825.8 µV (end) |
+
+- Units are correct: the robust and edge-trimmed values are ordinary EEG amplitudes in both
+  datasets.
+- The failures came from a very large transient at the start of D1-1 and at the end of D2-2,
+  inside the 10 s that windowing discards.
+- The former statistic (plain std over the whole recording) was dominated by those edges, so
+  the check measured data that is never analysed.
+
+**Correction (author-approved 2026-10-13)** — `preprocessing/clean.py` `preprocess`, in order:
+1. Resample to 250 Hz and band-pass 0.1–45 Hz: **unchanged**. The analysed signal stays
+   0.1–45 Hz.
+2. **Unit safeguard** (new, `units.gross_robust_std_v` = [1e-7, 1e-3] V):
+   - statistic: median over channels of the robust std (1.4826 × MAD) of the **whole**
+     0.1–45 Hz recording;
+   - MAD is barely moved by transients that occupy a small fraction of the samples;
+   - the range is one decade beyond physiological scalp EEG on each side. A 10³ or 10⁶ scale
+     error of typical EEG (10 µV → 10 mV, 10 V, 10 nV or 10 pV) falls outside, about two decades
+     from either bound;
+   - it is evaluated first, before bad-channel detection, whose flat-channel rule uses an
+     absolute threshold;
+   - it does not depend on the edge trim or the reference.
+3. **Bad-channel detection on the analysed interval**:
+   - the 1 Hz high-pass is applied to the continuous signal first, so its 1.65 s half-length
+     stays inside the trim; the samples are then cut to the edge-trimmed interval;
+   - the rules and thresholds are unchanged: flat, robust z of log std > 5, 90th-percentile
+     neighbour |correlation| < 0.4; spherical-spline interpolation;
+   - reason: in a synthetic test, a transient confined to the discarded first 3 s flagged a
+     channel. Its interpolation changed PLV by up to 0.19 and log10 PSD by up to 0.36 in
+     **every** retained window, so data that is never analysed was deciding the
+     interpolation;
+   - the author chose this option. What whole-recording detection would have flagged is
+     still recorded (`bad_channels_whole_recording`, QC only).
+4. Average reference: **unchanged**.
+5. **Amplitude plausibility** (`units.plausible_std_v`, range **unchanged**, 0.1–200 µV):
+   - statistic: median over channels of the std of the **analysed interval of the final
+     signal**, i.e. 0.1–45 Hz, interpolated, average reference: the signal the windows are cut
+     from;
+   - genuinely noisy recordings still fail (tested with ~500 µV over the analysed interval);
+   - a recording where interpolation leaves no signal (e.g. every channel flagged) now fails
+     here instead of passing silently.
+
+**Window rejection: unchanged and fully active**
+- Adaptive peak-to-peak threshold (median + 5 MAD per subject); reject a window when more than
+  15 % of its channels exceed it.
+- Every candidate window is now saved in `subjects/<key>/qc_windows.csv`: kept/rejected,
+  channels over threshold, max/median ptp, threshold, decision, and whether it lies within the
+  band-pass reach of the discarded edges.
+
+**Edge leakage through filtering (item 6 of the author's request)**
+- The 0.1–45 Hz FIR (MNE firwin, `l_freq` 0.1 Hz with a 0.1 Hz transition) is **33 s long,
+  half-length 16.5 s**. This exceeds the 10 s trim, so transients in the discarded edges leak up
+  to 16.5 s into the analysed interval: in the first and last two windows.
+- The leak is the high-pass complement, i.e. content **below ~0.1 Hz**. Synthetic tests:
+  - **sensor signal**: unchanged in the middle of the recording (< 1e-9 V);
+  - **edge windows**: the leak adds slow offsets. The unchanged adaptive rejection removed the
+    two edge windows that the leak made abnormal (3× the ptp of the others);
+  - **kept windows**: ptp ratio vs the middle windows < 1.5 (`qc_edge_window_ptp_ratio` in
+    `subjects.csv`; warning above 2);
+  - **PSD features** (source, sensor, absolute, relative) of retained windows: unchanged
+    (< 1e-4).
+- **PLV/|ciPLV|** of retained windows change by ≤ 0.0025 for 3 mV transients (about 300× the
+  EEG). The change decays with distance from the edges (about 1.5e-4 in the middle).
+  - Cause: the existing connectivity design. The analytic signal is computed over the whole
+    continuous band-passed ROI signal (entry 34), and the Hilbert kernel decays as 1/t, so an
+    edge transient slightly shifts phases everywhere.
+  - The sensor data and the PSD do not change.
+  - Not changed here (PLV/ciPLV definitions are frozen). Open item 12.
+- The amplitude plausibility value includes the leaked slow offsets of the edge windows, so it
+  rises when edge transients are present. That is measured, not hidden.
+
+**Line noise (item 7)**
+- The diagnostic's former `line50_ratio` was computed on the **unfiltered** recording at its
+  original rate, so it was meaningful but did not say so.
+- The 0.1–45 Hz FIR attenuates 50 Hz by only **−4.5 dB** (−6 dB at 50.6 Hz; 60 Hz −58 dB), so
+  50 Hz mains largely remains in the signal seen by the amplitude checks, bad-channel rules and
+  window rejection.
+- It is outside every feature (bands ≤ 30 Hz with 1 Hz transitions; relative-power denominator
+  [1, 45) Hz).
+- The diagnostic now reports 50/60 Hz RMS before and after the band-pass, plus the filter's gain
+  (`line_noise`, `LINE NOISE` evidence line). No pipeline change.
+
+**QC outputs added (no change to features)**
+- `subjects.csv`: `gross_robust_std_uv`, `median_std_uv` (now the analysed-interval,
+  average-referenced plausibility statistic), `median_robust_std_uv`, `whole_recording_std_uv`
+  (former statistic, QC only), `bad_channels_whole_recording`, `n_windows_rejected`,
+  `qc_edge_window_ptp_ratio`.
+- `subjects/<key>/qc_channels.csv`, per channel:
+  - std and robust std on the analysed interval, in the recording reference;
+  - whole-recording std;
+  - std after the 1 Hz high-pass and its robust z;
+  - neighbour correlation;
+  - bad reason, and the bad reason whole-recording detection would give;
+  - interpolated flag;
+  - final std and robust std.
+- `scripts/inspect_graph_subjects.py` and Notebook 01 step 4b give a read-only per-subject
+  inspection: QC tables, a window timeline, ROI and sensor band power, mean PLV/|ciPLV| per band.
+- The cross-dataset gate's amplitude-overlap check (DESIGN.md §7) now compares the new
+  `median_std_uv`.
+
+**Effect on checkpoints**
+- `configs/pipeline.yaml` gains `units.gross_robust_std_v`, so the config hash and the run
+  directory change.
+- Earlier smoke-test directories stay untouched and are never selected (smoke tests are
+  excluded, and empty cohorts are refused).
+- The new commit changes `code_identity`, so the operator is rebuilt once.
+- Unchanged and reused: fsaverage (`cache/subjects`) and the input SHA-256 cache.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -2366,7 +2486,9 @@ AD-LEB EDF, which are 20–39 MB)
    conservative. Match them (e.g. compare repeat 0, or use equal repeats) before enabling it.
 10. No module produces the corrected, subject-level statistics file that figures can show
     significance from (`docs/figures.md`). All figures are currently descriptive.
-11. Preprocessing amplitude check (entry 38): first real recordings give 221 µV (D1-1) and
-    322 µV (D2-2), above the 200 µV limit. Decide, from `scripts/diagnose_amplitude.py` output,
-    between a unit error, revising the check's stage or limit, and treating the recordings as
-    noisy. Full graph construction waits for this.
+11. ~~Preprocessing amplitude check~~: resolved in entry 39 (edge transients; check moved to
+    the analysed interval, unit safeguard added, bad channels on the analysed interval).
+12. Hilbert transform over the whole continuous ROI signal (entry 39): edge transients shift
+    PLV/|ciPLV| of retained windows slightly (≤ 0.0025 for 3 mV transients, decaying with
+    distance). Decide after the smoke-test inspection whether this needs a change (e.g. analytic
+    signal computed on the analysed interval only); frozen definitions are unchanged until then.

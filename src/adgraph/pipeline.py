@@ -29,7 +29,7 @@ from .io.eeg import list_recordings, load_raw, make_montage
 from .io.layout import check_layout, spatial_consistency
 from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
-from .preprocessing.clean import preprocess
+from .preprocessing.clean import bandpass_half_length, preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
                          atomic_write_csv, atomic_write_json, check_unit, cleanup_temp_files, code_identity,
@@ -138,12 +138,30 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
         out.update({f"{prefix}_{k}": v for k, v in feats.items()})
 
     thr_exceed = (ptp > thr).mean(axis=1) if len(starts) else np.empty(0)
+    # every candidate window, kept or rejected (QC table saved with the subject). Windows within
+    # the 0.1-45 Hz filter's half length of the discarded edges can carry slow (< l_freq) leakage
+    # from edge transients; they are marked so their amplitude can be compared with the others.
+    reach = bandpass_half_length(cfg)
+    trim = int(round(wcfg["edge_trim_s"] * sfreq))
+    near = (starts < trim + reach) | (starts + win_len > data.shape[1] - trim - reach)
+    max_frac = wcfg["rejection"]["max_bad_channel_fraction"]
+    qc_windows = pd.DataFrame({
+        "window_index": np.arange(len(starts)), "start_sample": starts, "tmin": starts / sfreq,
+        "tmax": (starts + win_len) / sfreq, "kept": keep,
+        "n_channels_over_threshold": (ptp > thr).sum(axis=1) if len(starts) else np.empty(0, int),
+        "frac_channels_over_threshold": thr_exceed,
+        "max_ptp_uv": ptp.max(axis=1) * 1e6 if len(starts) else np.empty(0),
+        "median_ptp_uv": np.median(ptp, axis=1) * 1e6 if len(starts) else np.empty(0),
+        "threshold_uv": thr * 1e6, "within_edge_filter_reach": near,
+        "decision": np.where(keep, "kept", f"rejected: > {max_frac:.0%} of channels above threshold"),
+    })
     out.update({
         "window_index": kept_idx, "start_sample": kept, "stop_sample": kept + win_len,
         "tmin": kept / sfreq, "tmax": (kept + win_len) / sfreq,
         "qc_frac_channels_over_threshold": thr_exceed[kept_idx] if len(starts) else np.empty(0),
         "qc_max_ptp_uv": ptp[kept_idx].max(axis=1) * 1e6 if n_w else np.empty(0),
         "n_windows_total": len(starts), "n_windows_kept": n_w, "rejection_threshold_uv": thr * 1e6,
+        "qc_windows": qc_windows,
         # continuous ROI signals only when they will be saved (otherwise a needless full copy)
         "roi_timeseries": roi.astype(np.float32) if cfg["output"].get("save_roi_timeseries", False) else None,
     })
@@ -275,8 +293,22 @@ def subject_identity(cfg: dict, rec, operator_id: str) -> dict:
             "code": code_identity("graph")}
 
 
-def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict, np.ndarray]:
-    """Full per-subject computation: load, preprocess, ROI signals, windows, PSD, connectivity."""
+def edge_window_ptp_ratio(qc_windows: pd.DataFrame) -> float:
+    """Largest median peak-to-peak among KEPT windows within the band-pass reach of the discarded
+    edges, over the median of the other kept windows (NaN if either group is empty). Near 1: no
+    edge leakage in the retained data; clearly above 1: inspect those windows."""
+    k = qc_windows[qc_windows["kept"]]
+    near, far = k.loc[k["within_edge_filter_reach"], "median_ptp_uv"], k.loc[~k["within_edge_filter_reach"],
+                                                                              "median_ptp_uv"]
+    return float(near.max() / far.median()) if len(near) and len(far) else float("nan")
+
+
+def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict, np.ndarray, dict]:
+    """Full per-subject computation: load, preprocess, ROI signals, windows, PSD, connectivity.
+
+    Returns ``(arrays, windows, subject_row, roi_timeseries, qc_tables)``; ``qc_tables`` holds
+    ``qc_channels`` (per-channel amplitudes and bad-channel decisions) and ``qc_windows`` (every
+    candidate window, kept or rejected, and why), saved with the subject checkpoint."""
     row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
                                          "mmse", "acer", "comment", "path", "size_bytes")}
     progress.set(stage="loading EDF")
@@ -302,7 +334,16 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                    "bad_channels": json.dumps(pp_qc["bad_channels"]),
                    "bad_fraction_warning": pp_qc["bad_fraction_warning"],
                    "unrecognised_channels": ",".join(load_qc["unrecognised_channels"]),
-                   "channel_naming": load_qc["channel_naming"], "qc_spatial_rho": rho, "status": status}
+                   "channel_naming": load_qc["channel_naming"], "qc_spatial_rho": rho,
+                   "median_robust_std_uv": pp_qc["median_robust_std_uv"],
+                   "gross_robust_std_uv": pp_qc["gross_robust_std_uv"],
+                   "whole_recording_std_uv": pp_qc["whole_recording_std_uv"],
+                   "bad_channels_whole_recording": json.dumps(pp_qc["bad_channels_whole_recording"]),
+                   "n_windows_rejected": res["n_windows_total"] - n,
+                   "qc_edge_window_ptp_ratio": edge_window_ptp_ratio(res["qc_windows"]), "status": status}
+    if subject_row["qc_edge_window_ptp_ratio"] > 2:
+        log.warning("%s: kept windows near the recording edges have %.1fx the peak-to-peak of the others; "
+                    "inspect qc_windows.csv", rec.key, subject_row["qc_edge_window_ptp_ratio"])
     arrays = {k: res[k] for k in DATA_ARRAY_KEYS if k in res}
     win_rows = [{
         "window_id": window_id(rec.key, int(res["window_index"][w])), "key": rec.key,
@@ -316,14 +357,16 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
     windows = pd.DataFrame(win_rows, columns=list(WINDOW_COLUMNS) if not win_rows else None)
     log.info("%s: %d/%d windows, %d bad channels, %s channel labels, spatial rho %.2f", rec.key, n,
              res["n_windows_total"], pp_qc["n_bad_channels"], load_qc["channel_naming"], rho)
-    return arrays, windows, subject_row, res["roi_timeseries"]
+    qc_tables = {"qc_channels": pp_qc["channels"], "qc_windows": res["qc_windows"]}
+    return arrays, windows, subject_row, res["roi_timeseries"], qc_tables
 
 
 def save_subject(unit_dir: Path, identity: dict, arrays: dict, windows: pd.DataFrame, subject_row: dict,
-                 roi_ts: np.ndarray | None) -> None:
+                 roi_ts: np.ndarray | None, qc_tables: dict | None = None) -> None:
     """Payload files first (atomic), completion marker last."""
     files = [atomic_savez(unit_dir / "arrays.npz", **arrays), atomic_write_csv(unit_dir / "windows.csv", windows),
              atomic_write_json(unit_dir / "subject.json", subject_row)]
+    files += [atomic_write_csv(unit_dir / f"{name}.csv", table) for name, table in (qc_tables or {}).items()]
     if roi_ts is not None:
         files.append(atomic_save_npy(unit_dir / "roi_timeseries.npy", roi_ts.astype(np.float32)))
     (unit_dir / "failed.json").unlink(missing_ok=True)
@@ -662,7 +705,7 @@ def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_t
         t_start = time.perf_counter()
         try:
             with MemoryTracker() as m:            # one subject in memory at a time; released below
-                arrays, windows, subject_row, roi_ts = process_subject(rec, cfg, op)
+                arrays, windows, subject_row, roi_ts, qc_tables = process_subject(rec, cfg, op)
         except Exception as exc:  # recorded, never silent; KeyboardInterrupt etc. propagate
             log.exception("%s failed", rec.key)
             row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
@@ -677,12 +720,12 @@ def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_t
         mem = {**m.record(), "seconds": round(time.perf_counter() - t_start, 1)}
         subject_row.update(mem)                   # runtime + memory QC in subjects.csv
         bar.set(stage="saving checkpoint to Drive")
-        save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None)
+        save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None, qc_tables)
         table.set(rec.key, "completed")
         mem_log.add(rec.key, "completed", mem)
         log.info("%s: %s s, peak memory %s MB (available before: %s MB)", rec.key, mem["seconds"],
                  mem["mem_peak_mb"], mem["mem_available_before_mb"])
-        del arrays, windows, subject_row, roi_ts  # release this subject before the next one
+        del arrays, windows, subject_row, roi_ts, qc_tables   # release this subject before the next one
         bar.advance()
         counts("done")
     bar.set(subject=None, dataset=None, stage=None)

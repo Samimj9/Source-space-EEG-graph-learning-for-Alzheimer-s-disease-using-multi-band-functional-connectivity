@@ -51,8 +51,11 @@ def test_stages_units_and_agreement_with_preprocess(tmp_path):
     assert 10 < s["median_std_uv"]["scaled"] < 16                    # sqrt(10^2 + 10^2/2) = 12.2 µV
     raw, _ = load_raw(p, "D1", CFG)
     _, qc = preprocess(raw, CFG)
-    assert np.isclose(s["median_std_uv"]["qc"], qc["median_std_uv"], rtol=1e-9)
-    assert s["qc_check"]["passes"]
+    ck = s["checks"]                                                 # the pipeline's own checks, same values
+    assert np.isclose(ck["plausibility"]["value_uv"], qc["median_std_uv"], rtol=1e-9)
+    assert np.isclose(ck["unit_safeguard"]["value_uv"], qc["gross_robust_std_uv"], rtol=1e-9)
+    assert ck["plausibility"]["passes"] and ck["unit_safeguard"]["passes"] and s["former_check"]["passes"]
+    assert len(ck["channels"]) == 30 and ck["bad_channels"] == {}
     assert any(e.startswith("UNITS: 1-45 Hz average-referenced std") and "no evidence" in e for e in s["evidence"])
     used = r["header"][r["header"]["electrode"] != ""]
     assert len(used) == 32 and used["electrode"].tolist() == CFG["channels"]["recorded"]
@@ -71,7 +74,8 @@ def test_unit_error_is_identified(tmp_path):
     """µV values labelled 'V' but treated as correctly labelled (no rescale) -> 10^6 too large."""
     p = _write(tmp_path / "x.edf", D2, 1024, "V", _eeg(1024))
     s = amplitude_report(p, "D2", CFG)["summary"]
-    assert not s["qc_check"]["passes"]
+    assert not s["former_check"]["passes"] and not s["checks"]["unit_safeguard"]["passes"]
+    assert not s["checks"]["plausibility"]["passes"] and "unit safeguard" in s["checks"]["plausibility"]["error"]
     assert any(e.startswith("UNITS:") and "OUTSIDE" in e for e in s["evidence"])
 
 
@@ -80,7 +84,8 @@ def test_drift_and_common_mode_are_identified_not_units(tmp_path):
     while the 1-45 Hz average-referenced EEG is ordinary."""
     p = _write(tmp_path / "sub1.edf", D1, 1000, "V", _eeg(1000, drift_uv=500.0, dc_uv=3000.0))
     s = amplitude_report(p, "D1", CFG)["summary"]
-    assert not s["qc_check"]["passes"] and s["median_std_uv"]["qc"] > 200
+    assert not s["former_check"]["passes"] and s["median_std_uv"]["qc"] > 200
+    assert s["checks"]["unit_safeguard"]["passes"] and s["checks"]["plausibility"]["passes"]
     assert s["median_std_uv"]["car_hp1"] < 16
     assert s["median_band_fraction_qc"]["0.1-1"] > 0.5 and s["common_mode_fraction"]["qc"] > 0.5
     ev = " ".join(s["evidence"])
@@ -97,6 +102,21 @@ def test_clipping_and_edges_are_reported(tmp_path):
     assert s["channels_clipping"] == ["F7"] and s["max_clip_fraction"] > 1e-3      # E04 -> F7
     assert s["qc_trimmed_median_std_uv"] < s["median_std_uv"]["qc"]
     assert any(e.startswith("EDGES:") for e in s["evidence"])
+    assert s["checks"]["plausibility"]["passes"]                   # transient only in the discarded edge
+
+
+def test_line_noise_is_reported_before_and_after_the_bandpass(tmp_path):
+    """50 Hz survives the 0.1-45 Hz FIR at about -4.5 dB; 60 Hz is removed."""
+    x = _eeg(1000)
+    t = np.arange(x.shape[1]) / 1000
+    x += 20 * np.sin(2 * np.pi * 50 * t)                          # 14.1 µV RMS mains on every channel
+    s = amplitude_report(_write(tmp_path / "sub1.edf", D1, 1000, "V", x), "D1", CFG)["summary"]
+    ln = s["line_noise"]["50Hz"]
+    assert 12 < ln["median_rms_uv_raw"] < 16
+    assert -5.0 < ln["bandpass_gain_db"] < -4.0 and s["line_noise"]["60Hz"]["bandpass_gain_db"] < -50
+    assert np.isclose(ln["median_rms_uv_bandpassed"] / ln["median_rms_uv_raw"], 10 ** (ln["bandpass_gain_db"] / 20),
+                      rtol=0.15)
+    assert any(e.startswith("LINE NOISE 50 Hz") for e in s["evidence"])
 
 
 def test_cli_writes_only_a_new_diagnostics_folder(tmp_path):

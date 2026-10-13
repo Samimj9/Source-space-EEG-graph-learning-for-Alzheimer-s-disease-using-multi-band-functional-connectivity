@@ -37,7 +37,8 @@ def test_pipeline_on_synthetic_edf(tmp_path, dataset, unit):
     raw, load_qc = load_raw(path, dataset, CFG)
     assert raw.ch_names == common_channels(CFG) and load_qc["unrecognised_channels"] == ["ECG"]
     raw, qc = preprocess(raw, CFG)
-    assert raw.info["sfreq"] == 250 and 5 < qc["median_std_uv"] < 20
+    # analysed interval after average reference: the shared 10 Hz sine is removed, ~4 µV of filtered noise remains
+    assert raw.info["sfreq"] == 250 and 2 < qc["median_std_uv"] < 20 and 5 < qc["gross_robust_std_uv"] < 20
     assert list(qc["bad_channels"]) == ["F3"]  # index 4 of the recorded list
 
     W = np.random.default_rng(1).standard_normal((68, 30))
@@ -58,7 +59,7 @@ def test_wrong_unit_scale_is_caught(tmp_path):
     path = tmp_path / "rec.edf"
     _write_edf(path, names, "uV")                # correct header, but treated as D1 -> rescaled twice
     raw, _ = load_raw(path, "D1", CFG)
-    with pytest.raises(ValueError, match="plausible range"):
+    with pytest.raises(ValueError, match="unit safeguard"):     # 10^-6 too small: caught before anything else
         preprocess(raw, CFG)
 
 

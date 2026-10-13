@@ -74,8 +74,18 @@ for rec in recs.itertuples():
     print("\nmedian over channels, per stage (µV):")
     print(pd.DataFrame({"std": s["median_std_uv"], "robust_std": s["median_robust_std_uv"]}).T.round(2)
           .to_string())
-    print(f"\namplitude check: {s['qc_check']['value_v']:.3g} V vs plausible {s['qc_check']['plausible_v']} -> "
-          f"{'PASS' if s['qc_check']['passes'] else 'FAIL'}")
+    fc, ck = s["former_check"], s["checks"]
+    print(f"\nformer check (whole recording, recording reference): {fc['value_v'] * 1e6:.1f} µV -> "
+          f"{'PASS' if fc['passes'] else 'FAIL'}")
+    print(f"unit safeguard (pipeline): {ck['unit_safeguard']['value_uv']:.2f} µV in {ck['unit_safeguard']['range_uv']} "
+          f"µV -> {'PASS' if ck['unit_safeguard']['passes'] else 'FAIL'}")
+    pl = ck["plausibility"]
+    print("plausibility (pipeline, analysed interval, average reference): "
+          + (f"{pl['value_uv']:.2f} µV (robust {pl['robust_value_uv']:.2f}) in {pl['range_uv']} µV -> PASS"
+             if pl["passes"] else f"FAIL: {pl.get('error')}"))
+    if "channels" in ck:
+        print("\nper-channel QC as the pipeline computes it (analysed interval):")
+        print(pd.DataFrame(ck["channels"]).set_index("channel").round(2).to_string())
     ch = r["channels"].pivot(index="channel", columns="stage", values="std_uv")[list(STAGES)]
     print("\nper-channel std (µV) by stage:")
     print(ch.round(1).to_string())
@@ -109,8 +119,8 @@ if not args.no_figure:
         ch = ch.loc[r["channels"]["channel"].unique()]
         for st in STAGES[1:]:
             row[0].plot(range(len(ch)), ch[st], marker="o", ms=3, label=st)
-        lo, hi = r["summary"]["qc_check"]["plausible_v"]
-        row[0].axhline(hi * 1e6, color="k", ls="--", lw=0.8, label="check upper limit")
+        lo, hi = r["summary"]["former_check"]["plausible_v"]
+        row[0].axhline(hi * 1e6, color="k", ls="--", lw=0.8, label="plausibility upper limit")
         row[0].set_yscale("log")
         row[0].set_xticks(range(len(ch)), ch.index, rotation=90, fontsize=7)
         row[0].set_ylabel("channel std (µV)")

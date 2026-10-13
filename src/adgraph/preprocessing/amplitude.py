@@ -9,11 +9,21 @@ stage       signal
 ==========  ======================================================================
 ``mne``     as read by MNE (header physical units converted to volts), no dataset scale
 ``scaled``  after the dataset scale (``units.scale``): what ``load_raw`` returns
-``qc``      resampled + 0.1-45 Hz band-pass, recording reference: what the check sees
+``qc``      resampled + 0.1-45 Hz band-pass, recording reference (the former check's signal)
 ``hp1``     ``qc`` + 1 Hz high-pass (the signal used for bad-channel detection)
 ``car``     ``qc`` + average reference over the 30 channels (no interpolation)
 ``car_hp1`` ``hp1`` + average reference
 ==========  ======================================================================
+
+The two checks preprocessing applies since methodology log entry 39 (unit safeguard on the
+whole recording, plausibility on the analysed interval of the final signal) are evaluated by
+running ``preprocess`` itself on a copy (``summary["checks"]``).
+
+Line noise is reported twice: on the unfiltered recording at its original rate (``*_raw``) and
+after the pipeline's 0.1-45 Hz band-pass at 250 Hz (``*_bandpassed``). That FIR attenuates 50 Hz
+by only ~4.5 dB (-6 dB at 50.6 Hz; 60 Hz by ~58 dB), so 50 Hz mains is largely still present in
+the signal the amplitude checks, bad-channel rules and window rejection see. The features do not
+contain it (bands <= 30 Hz; relative-power denominator 1-45 Hz).
 
 Nothing here changes the pipeline or the files; the EDF is only read. All amplitudes are
 reported in microvolts (µV) unless a column says otherwise.
@@ -65,6 +75,28 @@ def band_fractions(data_v: np.ndarray, sfreq: float) -> pd.DataFrame:
     out["alpha_peak_hz"] = f[a][np.argmax(p[:, a], axis=1)]
     out["alpha_peak_asd_uv_per_rthz"] = np.sqrt(p[:, a].max(1))
     return pd.DataFrame(out)
+
+
+def line_noise_rms(data_v: np.ndarray, sfreq: float, line_hz: float) -> np.ndarray:
+    """Per-channel RMS (µV) in ``line_hz`` ± 1 Hz (NaN if above Nyquist)."""
+    from scipy.signal import welch
+
+    if line_hz + 2 >= sfreq / 2:
+        return np.full(len(data_v), np.nan)
+    f, p = welch(np.asarray(data_v, float) * 1e6, fs=sfreq, nperseg=int(min(data_v.shape[1], 4 * sfreq)), axis=1)
+    sel = (f >= line_hz - 1) & (f <= line_hz + 1)
+    return np.sqrt(p[:, sel].sum(1) * (f[1] - f[0]))
+
+
+def bandpass_gain_db(cfg: dict, freq: float) -> float:
+    """Gain (dB) of the pipeline's 0.1-45 Hz FIR at ``freq``."""
+    import mne
+    from scipy.signal import freqz
+
+    pp = cfg["preprocessing"]
+    h = mne.filter.create_filter(None, pp["sfreq"], pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
+    _, resp = freqz(h, worN=[freq], fs=pp["sfreq"])
+    return float(20 * np.log10(np.abs(resp[0])))
 
 
 def line_noise_ratio(data_v: np.ndarray, sfreq: float, line_hz: float) -> np.ndarray:
@@ -148,6 +180,7 @@ def amplitude_report(path, dataset: str, cfg: dict) -> dict:
     for name, r in (("car", qc), ("car_hp1", hp1)):
         c = r.copy().set_eeg_reference("average", projection=True, verbose="error").apply_proj(verbose="error")
         stages[name] = (c.get_data(), c.info["sfreq"])
+    checks = pipeline_checks(raw.copy(), cfg)
     del raw, qc, hp1
 
     per_stage = []
@@ -164,8 +197,10 @@ def amplitude_report(path, dataset: str, cfg: dict) -> dict:
     bands.insert(0, "channel", ch)
     clip = clipping_fraction(scaled, header, ch, scale)
     bands["clip_fraction"] = clip
-    bands["line50_ratio"] = line_noise_ratio(scaled, sf0, 50.0)
-    bands["line60_ratio"] = line_noise_ratio(scaled, sf0, 60.0)
+    for hz in (50, 60):       # raw: unfiltered, original rate; bandpassed: what the QC steps see
+        bands[f"line{hz}_ratio_raw"] = line_noise_ratio(scaled, sf0, float(hz))
+        bands[f"line{hz}_rms_uv_raw"] = line_noise_rms(scaled, sf0, float(hz))
+        bands[f"line{hz}_rms_uv_bandpassed"] = line_noise_rms(d_qc, sf_qc, float(hz))
     bands["flat_fraction"] = (np.diff(scaled, axis=1) == 0).mean(1)
 
     nb = len(block_std(d_qc, sf_qc))
@@ -188,8 +223,10 @@ def amplitude_report(path, dataset: str, cfg: dict) -> dict:
         "median_robust_std_uv": {s: float(med.loc[s, "robust_std_uv"]) for s in STAGES},
         "qc_trimmed_median_std_uv": float(np.median(d_qc[:, trim:d_qc.shape[1] - trim].std(1)) * 1e6),
         "edge_trim_s": cfg["windowing"]["edge_trim_s"],
-        "qc_check": {"value_v": float(med.loc["qc", "std_uv"]) * 1e-6, "plausible_v": [lo, hi],
-                     "passes": bool(lo <= med.loc["qc", "std_uv"] * 1e-6 <= hi)},
+        "former_check": {"value_v": float(med.loc["qc", "std_uv"]) * 1e-6, "plausible_v": [lo, hi],
+                         "passes": bool(lo <= med.loc["qc", "std_uv"] * 1e-6 <= hi),
+                         "note": "whole recording, recording reference (before log entry 39)"},
+        "checks": checks,
         "median_abs_dc_offset_uv": float(np.median(np.abs(channels.loc[channels.stage == "scaled", "mean_uv"]))),
         "median_abs_trend_uv_per_min": float(np.median(np.abs(
             channels.loc[channels.stage == "scaled", "trend_uv_per_min"]))),
@@ -202,12 +239,46 @@ def amplitude_report(path, dataset: str, cfg: dict) -> dict:
                                         for q in (10, 50, 90, 100)} if len(blocks) else {},
         "max_clip_fraction": float(clip.max()),
         "channels_clipping": [c for c, f in zip(ch, clip) if f > CLIP_FRACTION],
-        "median_line50_ratio": float(np.nanmedian(bands["line50_ratio"])) if np.isfinite(bands["line50_ratio"]).any()
-        else None,
+        "line_noise": {f"{hz}Hz": {
+            "median_rms_uv_raw": _nanmedian(bands[f"line{hz}_rms_uv_raw"]),
+            "median_rms_uv_bandpassed": _nanmedian(bands[f"line{hz}_rms_uv_bandpassed"]),
+            "median_ratio_to_35_45Hz_raw": _nanmedian(bands[f"line{hz}_ratio_raw"]),
+            "bandpass_gain_db": bandpass_gain_db(cfg, float(hz))} for hz in (50, 60)},
         "median_flat_fraction": float(bands["flat_fraction"].median()),
     }
     summary["evidence"] = interpret(summary)
     return {"header": header, "channels": channels, "spectral": bands, "blocks": blocks, "summary": summary}
+
+
+def _nanmedian(x) -> float | None:
+    x = np.asarray(x, float)
+    return float(np.nanmedian(x)) if np.isfinite(x).any() else None
+
+
+def pipeline_checks(raw, cfg: dict) -> dict:
+    """Run ``preprocess`` (on a copy of the loaded recording) and report its two amplitude checks,
+    bad channels and per-channel table; a failing check is reported, not raised."""
+    from .clean import preprocess, resample_and_bandpass, robust_std
+
+    glo, ghi = cfg["units"]["gross_robust_std_v"]
+    lo, hi = cfg["units"]["plausible_std_v"]
+    gross = float(np.median(robust_std(resample_and_bandpass(raw.copy(), cfg).get_data())))
+    out = {"unit_safeguard": {"value_uv": gross * 1e6, "range_uv": [round(glo * 1e6, 6), round(ghi * 1e6, 6)],
+                              "passes": bool(glo <= gross <= ghi),
+                              "statistic": "median robust std (1.4826 MAD), whole 0.1-45 Hz recording"},
+           "plausibility": {"range_uv": [round(lo * 1e6, 6), round(hi * 1e6, 6)],
+                            "statistic": "median std, analysed interval, 0.1-45 Hz, interpolated, average reference"}}
+    try:
+        _, qc = preprocess(raw, cfg)
+    except ValueError as exc:
+        out["plausibility"].update({"passes": False, "error": str(exc)})
+        return out
+    out["plausibility"].update({"value_uv": qc["median_std_uv"], "robust_value_uv": qc["median_robust_std_uv"],
+                                "passes": True})
+    out["bad_channels"] = qc["bad_channels"]
+    out["bad_channels_whole_recording"] = qc["bad_channels_whole_recording"]
+    out["channels"] = qc["channels"].round(4).to_dict("records")
+    return out
 
 
 def interpret(s: dict) -> list[str]:
@@ -217,7 +288,7 @@ def interpret(s: dict) -> list[str]:
     m = s["median_std_uv"]
     car = m["car_hp1"]
     lo_t, hi_t = TYPICAL_CAR_STD_UV
-    out.append(f"QC stage (0.1-45 Hz, recording reference): median channel std {m['qc']:.1f} µV; "
+    out.append(f"Former check stage (whole recording, 0.1-45 Hz, recording reference): median channel std {m['qc']:.1f} µV; "
                f"after 1 Hz high-pass {m['hp1']:.1f} µV; average reference {m['car']:.1f} µV; "
                f"both {car:.1f} µV.")
     if lo_t <= car <= hi_t:
@@ -237,10 +308,10 @@ def interpret(s: dict) -> list[str]:
         if cm["qc"] >= COMMON_MODE_FRACTION:
             causes.append(f"a common-mode/reference signal ({cm['qc']:.0%} of the channel variance is shared "
                           "by all channels and removed by the average reference)")
-        out.append(f"STAGE: the QC value is {m['qc'] / car:.1f}x the 1-45 Hz average-referenced std; the excess is "
+        out.append(f"STAGE: the former check value is {m['qc'] / car:.1f}x the 1-45 Hz average-referenced std; the excess is "
                    + (" and ".join(causes) if causes else "not explained by drift or common mode alone") + ".")
     else:
-        out.append("STAGE: the QC value is within 2x the 1-45 Hz average-referenced std; the check stage does "
+        out.append("STAGE: the former check value is within 2x the 1-45 Hz average-referenced std; the check stage does "
                    "not inflate the amplitude.")
     out.append(f"EDGES: QC-stage median std without the first/last {s['edge_trim_s']:g} s (the part that is "
                f"windowed) is {s['qc_trimmed_median_std_uv']:.1f} µV vs {m['qc']:.1f} µV on the whole recording"
@@ -252,6 +323,20 @@ def interpret(s: dict) -> list[str]:
     out.append(f"ARTIFACTS: std / robust std = {ratio:.2f} (> {HEAVY_TAIL_RATIO} indicates large transients); "
                + (f"20 s block std p50 {blocks['p50']:.1f} µV, p90 {blocks['p90']:.1f} µV, max {blocks['p100']:.1f} µV"
                   f" (max/median {tail:.1f})." if blocks else "too short for blocks."))
+    c = s["checks"]
+    u, pl = c["unit_safeguard"], c["plausibility"]
+    out.append(f"UNIT SAFEGUARD (pipeline): {u['value_uv']:.1f} µV in [{u['range_uv'][0]:g}, {u['range_uv'][1]:g}] µV -> "
+               + ("pass." if u["passes"] else "FAIL."))
+    out.append("PLAUSIBILITY (pipeline): " + (
+        f"{pl['value_uv']:.1f} µV (robust {pl['robust_value_uv']:.1f} µV) in [{pl['range_uv'][0]:g}, "
+        f"{pl['range_uv'][1]:g}] µV -> pass; bad channels {c['bad_channels'] or 'none'} (whole recording would "
+        f"flag {c['bad_channels_whole_recording'] or 'none'})." if pl["passes"] else f"FAIL: {pl.get('error')}"))
+    ln = s["line_noise"]["50Hz"]
+    if ln["median_rms_uv_raw"] is not None:
+        out.append(f"LINE NOISE 50 Hz: {ln['median_rms_uv_raw']:.2f} µV RMS unfiltered; "
+                   f"{ln['median_rms_uv_bandpassed']:.2f} µV after the 0.1-45 Hz band-pass (gain at 50 Hz "
+                   f"{ln['bandpass_gain_db']:.1f} dB): present in the signal the QC steps see, outside every "
+                   "feature band (<= 30 Hz; relative-power denominator 1-45 Hz).")
     out.append(f"CLIPPING: max fraction of samples at the EDF physical limits {s['max_clip_fraction']:.2g}"
                + (f" in {s['channels_clipping']}" if s["channels_clipping"] else " (none above 0.1 %)") + ".")
     out.append(f"DRIFT: median |DC offset| {s['median_abs_dc_offset_uv']:.0f} µV, median |linear trend| "

@@ -296,9 +296,13 @@ with *Runtime → Run all* and needs no editing.
 - Set and log random seeds (numpy, torch, python) for every run.
 - Units: keep EEG in volts inside MNE objects. Dataset 1 EDFs are mislabeled
   (values are µV but header says V): rescale ×1e-6 on load and log it.
-- Amplitude check (`units.plausible_std_v`): on failure, run `scripts/diagnose_amplitude.py`
-  (read-only) and decide from its evidence; never widen the range or rescale to get past it
-  (methodology log entry 38, open item 11).
+- Amplitude checks (methodology log entries 38-39): a unit safeguard (`units.gross_robust_std_v`,
+  robust std of the whole recording) and the plausibility check (`units.plausible_std_v`, std of
+  the analysed interval after interpolation and average reference). Bad channels are detected on
+  the analysed interval. On failure, run `scripts/diagnose_amplitude.py` (read-only) and decide
+  from its evidence; never widen a range or rescale to get past it.
+- Before approving a full graph build, inspect the smoke test (`scripts/inspect_graph_subjects.py`,
+  Notebook 01 step 4b).
 - A graph run with any failed subject, or with no graphs, is not assembled
   (`GraphRunIncomplete`); experiments refuse empty, partial or smoke-test runs.
 - Channels: the EDFs label channels by number only (D1 `EEG E01`–`E32` at 1000 Hz, D2
