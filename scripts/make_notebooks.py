@@ -236,7 +236,10 @@ A GPU is not needed for this notebook."""),
         md("## 2. Synthetic test suite (no EEG)\nMust pass with zero dependency-related skips. Skipped "
            "automatically if it already passed for this code."),
         code("from adgraph.colab import run_tests_once\nrun_tests_once(OUT)"),
-        md("## 3. EDF header check (reads no signal)"),
+        md("## 3. EDF header check (reads no signal)\nFirst verifies the electrode layout "
+           "(`AD-LEB/electrodes_positions_32.loc`) against `channels.recorded`: the EDFs label channels "
+           "by number only (D1 `EEG E01`-`E32`, D2 `Misc ExG1`-`ExG32`), and channel *k* is electrode *k* "
+           "of that file. Then every recording must have the 30 channels used (M1/M2 dropped)."),
         code("""sh(f"python scripts/inspect_raw.py --paths configs/paths.yaml --out '{OUT}' --strict")"""),
         md("## 4. Smoke test: first subject of each dataset\nWritten to Drive as `graphs_v3_<hash>_limit1/`; "
            "it is never used for analysis."),
@@ -268,7 +271,11 @@ if mem is not None:
 s = pd.read_csv(run / 'subjects.csv')
 from IPython.display import display
 display(s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels',
-                       'n_windows_kept', 'n_windows_total', 'seconds', 'mem_peak_mb', 'status'] if c in s]])
+                       'n_windows_kept', 'n_windows_total', 'channel_naming', 'qc_spatial_rho', 'seconds',
+                       'mem_peak_mb', 'status'] if c in s]])
+if 'qc_spatial_rho' in s:   # channel-mapping QC: nearby electrodes correlate more (clearly negative expected)
+    print('distance vs |correlation| rho per recording: median', round(s['qc_spatial_rho'].median(), 2),
+          '| not clearly negative (> -0.1):', s.loc[s['qc_spatial_rho'] > -0.1, 'key'].tolist() or 'none')
 errors = s[s['status'].astype(str).str.startswith('error')]
 if len(errors):   # below_min_windows is the pre-specified exclusion, not an error
     raise RuntimeError(f"{len(errors)} recording(s) failed: {errors[['key', 'status']].to_dict('records')}. "

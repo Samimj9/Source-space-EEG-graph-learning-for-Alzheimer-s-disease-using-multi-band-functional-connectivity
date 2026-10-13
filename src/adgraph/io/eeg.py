@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .layout import indexed_number
 from .participants import subject_key
 
 # File-name patterns of the resting-state recordings.
@@ -42,16 +43,45 @@ def normalize_channel_name(name: str, valid: list[str]) -> str | None:
     return lookup.get(s.lower())
 
 
+class ChannelMappingError(ValueError):
+    """The EDF channel inventory cannot be mapped to electrodes unambiguously."""
+
+
 def channel_mapping(ch_names: list[str], valid: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Return ``{raw_name: canonical}`` for recognised channels and the unrecognised names."""
+    """Return ``{raw_name: canonical}`` for recognised channels and the unrecognised names.
+
+    Two label conventions are accepted, never mixed within one recording:
+
+    * **named**: 10-20 labels (``'Fp1'``, ``'EEG FP1-REF'``, ``'Fp1.'``);
+    * **indexed**: number-only labels, channel *k* = electrode *k* of the layout, where
+      ``valid`` is the layout order (``channels.recorded``, verified against the ``.loc``
+      file): D1 ``'EEG E01'``-``'EEG E32'``, D2 ``'Misc ExG1'``-``'Misc ExG32'``, also
+      ``'E1'``, ``'ExG 01'``, trailing dots. Numbers outside 1..len(valid) are unrecognised.
+
+    Raises ``ChannelMappingError`` for a mixed inventory or a repeated channel number."""
+    named = {ch: normalize_channel_name(ch, valid) for ch in ch_names}
+    numbers = {ch: indexed_number(ch) for ch in ch_names}
+    if any(named.values()) and any(n is not None and named[ch] is None for ch, n in numbers.items()):
+        raise ChannelMappingError(f"mixed channel naming (10-20 names and index-only labels): {list(ch_names)}")
+    seen = [n for n in numbers.values() if n is not None and 1 <= n <= len(valid)]
+    if len(seen) != len(set(seen)):
+        dup = sorted({n for n in seen if seen.count(n) > 1})
+        raise ChannelMappingError(f"channel number(s) {dup} occur more than once: {list(ch_names)}")
     mapping, unknown = {}, []
     for ch in ch_names:
-        canon = normalize_channel_name(ch, valid)
+        canon = named[ch]
+        if canon is None and numbers[ch] is not None and 1 <= numbers[ch] <= len(valid):
+            canon = valid[numbers[ch] - 1]
         if canon is None or canon in mapping.values():
             unknown.append(ch)
         else:
             mapping[ch] = canon
     return mapping, unknown
+
+
+def mapping_mode(mapping: dict[str, str]) -> str:
+    """'indexed' if the recognised channels use number-only labels, else 'named'."""
+    return "indexed" if mapping and all(indexed_number(ch) is not None for ch in mapping) else "named"
 
 
 def load_raw(path: str | Path, dataset: str, cfg: dict):
@@ -90,6 +120,7 @@ def load_raw(path: str | Path, dataset: str, cfg: dict):
         "unit_scale": scale,
         "dropped_channels": [c for c in mapping.values() if c not in keep],
         "unrecognised_channels": unknown,
+        "channel_naming": mapping_mode(mapping),
     }
     return raw, info
 
@@ -111,13 +142,20 @@ def inspect_headers(recordings: pd.DataFrame, valid: list[str]) -> pd.DataFrame:
     rows = []
     for rec in recordings.itertuples():
         raw = mne.io.read_raw_edf(rec.path, preload=False, verbose="error")
-        mapping, unknown = channel_mapping(raw.ch_names, valid)
+        try:
+            mapping, unknown = channel_mapping(raw.ch_names, valid)
+            error = ""
+        except ChannelMappingError as exc:     # reported per recording; the strict gate fails on it
+            mapping, unknown, error = {}, list(raw.ch_names), str(exc)
         units = sorted({str(u) for u in (getattr(raw, "_orig_units", None) or {}).values()})   # header units
         rows.append({
             "key": rec.key, "dataset": rec.dataset, "n_channels": len(raw.ch_names),
             "sfreq": raw.info["sfreq"], "duration_s": raw.n_times / raw.info["sfreq"],
+            "naming": mapping_mode(mapping) if mapping else "unmapped",
             "missing_canonical": ",".join(c for c in valid if c not in mapping.values()),
-            "unrecognised": ",".join(unknown), "raw_names": ",".join(raw.ch_names), "header_units": ",".join(units),
+            "unrecognised": ",".join(unknown), "mapping_error": error,
+            "mapping": ",".join(f"{k}->{v}" for k, v in mapping.items()),
+            "raw_names": ",".join(raw.ch_names), "header_units": ",".join(units),
         })
     return pd.DataFrame(rows)
 

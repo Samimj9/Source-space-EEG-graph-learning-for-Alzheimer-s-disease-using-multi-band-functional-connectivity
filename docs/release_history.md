@@ -3,7 +3,7 @@
 | Version | Commit | Status |
 |---|---|---|
 | `pre-real-data-v1` (annotated tag, created 2026-10-12) | `0589369a3d3100380f3adcf7218198446f7c6621` | **Historical baseline.** Frozen methodology, graph pipeline, experiments and visualization framework with checkpointing and reliability safeguards. Kept unchanged in the branch history. |
-| Final pre-real-data version | the commit that first appears in `<outputs>/CODE_COMMIT.txt` on Drive (also in every graph and experiment manifest as `git_commit`) | **Analysis version.** Adds the per-experiment Colab notebooks, the pre-real-data audit fixes (entry 33), bounded memory (34), progress bars (35) and the connectivity band-pass transition widths (36). |
+| Final pre-real-data version | the commit that first appears in `<outputs>/CODE_COMMIT.txt` on Drive (also in every graph and experiment manifest as `git_commit`) | **Analysis version.** Adds the per-experiment Colab notebooks, the pre-real-data audit fixes (entry 33), bounded memory (34), progress bars (35), the connectivity band-pass transition widths (36) and the index-based EDF channel mapping through the `.loc` layout (37). |
 
 Note on the tag: the `pre-real-data-v1` tag exists in the author's local clone, but pushing tags is
 not possible from the coding session. To publish it, run from any clone:

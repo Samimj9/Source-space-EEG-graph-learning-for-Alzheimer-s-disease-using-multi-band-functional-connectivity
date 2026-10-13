@@ -96,14 +96,25 @@ def choose_output_root(data_root: str | Path, drive: str | Path = DRIVE) -> Path
 
 
 def write_paths_yaml(repo: str | Path, data_root: str | Path, output_root: str | Path) -> Path:
-    """configs/paths.yaml (gitignored) pointing at the located data and output folders."""
+    """configs/paths.yaml (gitignored) pointing at the located data and output folders.
+
+    The electrode layout is located with ``find_layout_file`` (AD-LEB root first, then the EEG
+    folders, also accepting a single ``electrodes_positions_32 (1).loc`` copy); if none is found
+    the conventional root path is written and the header check reports it as missing."""
+    from .io.layout import find_layout_file
+
+    try:
+        layout = str(find_layout_file(data_root))
+    except (FileNotFoundError, ValueError) as e:
+        print(f"warning: {e}")
+        layout = "{drive_root}/electrodes_positions_32.loc"
     paths = {
         "drive_root": str(data_root),
         "dataset1": {"eeg_dir": "{drive_root}/EEGs/Dataset 1 (2017)",
                      "participants": "{drive_root}/Info participants/Info Participants_2017.xlsx"},
         "dataset2": {"eeg_dir": "{drive_root}/EEGs/Dataset 2 (2019)/RestingState",
                      "participants": "{drive_root}/Info participants/Info Participants_2019.xlsx"},
-        "electrode_layout": "{drive_root}/electrodes_positions_32.loc",
+        "electrode_layout": layout,
         "processed_dir": str(output_root),
         "cache_dir": str(Path(output_root) / "cache"),
     }

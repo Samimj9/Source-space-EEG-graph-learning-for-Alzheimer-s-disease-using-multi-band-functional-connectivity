@@ -26,6 +26,7 @@ from .connectivity.plv import band_analytic, check_filters_fit_edge_trim, phase_
 from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
+from .io.layout import check_layout, spatial_consistency
 from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
 from .preprocessing.clean import preprocess
@@ -275,6 +276,13 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
     raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
     progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
     raw, pp_qc = preprocess(raw, cfg)
+    # QC of the channel-to-electrode mapping only (changes nothing): nearby electrodes must
+    # correlate more than distant ones; near 0 would indicate a wrong index mapping
+    pos = np.array([raw.info["chs"][i]["loc"][:3] for i in range(len(raw.ch_names))])
+    rho = spatial_consistency(raw.get_data(), pos)
+    if not rho < -0.1:
+        log.warning("%s: distance vs |correlation| rho = %.2f (expected clearly negative); "
+                    "check the channel mapping (%s labels)", rec.key, rho, load_qc["channel_naming"])
     if raw.ch_names != list(op["ch_names"]):
         raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
     res = process_recording(raw, op["W"], cfg)
@@ -286,7 +294,8 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
     subject_row = {**row, **{k: load_qc[k] for k in ("orig_sfreq", "duration_s", "unit_scale")}, **subj_qc,
                    "bad_channels": json.dumps(pp_qc["bad_channels"]),
                    "bad_fraction_warning": pp_qc["bad_fraction_warning"],
-                   "unrecognised_channels": ",".join(load_qc["unrecognised_channels"]), "status": status}
+                   "unrecognised_channels": ",".join(load_qc["unrecognised_channels"]),
+                   "channel_naming": load_qc["channel_naming"], "qc_spatial_rho": rho, "status": status}
     arrays = {k: res[k] for k in DATA_ARRAY_KEYS if k in res}
     win_rows = [{
         "window_id": window_id(rec.key, int(res["window_index"][w])), "key": rec.key,
@@ -298,7 +307,8 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
         "qc_max_ptp_uv": res["qc_max_ptp_uv"][w], **{f"subject_{k}": v for k, v in subj_qc.items()},
     } for w in range(n)]
     windows = pd.DataFrame(win_rows, columns=list(WINDOW_COLUMNS) if not win_rows else None)
-    log.info("%s: %d/%d windows, %d bad channels", rec.key, n, res["n_windows_total"], pp_qc["n_bad_channels"])
+    log.info("%s: %d/%d windows, %d bad channels, %s channel labels, spatial rho %.2f", rec.key, n,
+             res["n_windows_total"], pp_qc["n_bad_channels"], load_qc["channel_naming"], rho)
     return arrays, windows, subject_row, res["roi_timeseries"]
 
 
@@ -513,6 +523,9 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     pp = cfg["preprocessing"]
     check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
     check_filters_fit_edge_trim(cfg)
+    if paths.get("electrode_layout"):           # index-only EDF labels rely on this order (log entry 37)
+        layout = check_layout(paths, cfg["channels"]["recorded"])
+        log.info("electrode layout %s (sha256 %s) matches channels.recorded", layout["path"], layout["sha256"][:12])
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
     operator_cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
     input_hash_cache = Path(input_hash_cache) if input_hash_cache else default_hash_cache(run_dir)

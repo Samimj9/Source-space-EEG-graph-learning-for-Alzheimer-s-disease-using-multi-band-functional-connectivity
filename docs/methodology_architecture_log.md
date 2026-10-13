@@ -2157,6 +2157,67 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 37. EDF channel labels are electrode numbers: mapping through the `.loc` layout
+
+**Problem (real-data header check, Notebook 01 cell 3, commit `d3498570`)**
+- The strict header check failed for all 43 recordings.
+- The EDF headers do not name electrodes. D1 has `EEG E01` … `EEG E32` (1000 Hz); D2 has
+  `Misc ExG1` … `Misc ExG32` (1024 Hz).
+- The pipeline only recognised 10–20 names, so every channel was "unrecognised" and every used
+  channel "missing". No signal had been read; no graph unit existed.
+
+**Evidence for the mapping**
+- The author confirmed that both datasets were recorded with the same 32-electrode cap, whose
+  layout is `AD-LEB/electrodes_positions_32.loc` (Drive file id `1fsfZUkd1ng-GnuiWtIlglQTTS78t6eva`,
+  SHA-256 `da108d02…0bd4`; `docs/data_inventory.md`).
+- That file was read (read-only, via the Drive connector) on 2026-10-13. Its order, index 1–32,
+  is Fp1 Fpz Fp2 F7 F3 Fz F4 F8 FC5 FC1 FC2 FC6 M1 T7 C3 Cz C4 T8 M2 CP5 CP1 CP2 CP6 P7 P3 Pz
+  P4 P8 POz O1 Oz O2. This is exactly `channels.recorded` in `configs/pipeline.yaml`, which the
+  original pipeline already used.
+- The polar angles in the `.loc` agree with the `standard_1020` positions of the same labels
+  (within 20°; tested), so the labels in the file and the montage positions are consistent.
+- 32 numbered EDF channels and 32 layout entries: channel *k* is electrode *k*.
+
+**Correction**
+- `adgraph.io.layout`: `parse_loc` (validated: 4 fields per line, indices 1..N, unique labels,
+  dot padding and CRLF handled); `verify_layout` (order must equal `channels.recorded`);
+  `find_layout_file` (root first, then `EEGs/`; a lone `… (1).loc` copy is accepted, different
+  copies are refused); `check_layout` (path + SHA-256 for logs).
+- `channel_mapping` accepts two conventions, never mixed in one recording: 10–20 names (as
+  before) or index-only labels (`EEG E01`, `E1`, `Misc ExG1`, `ExG 01`, zero padding, trailing
+  dots). It refuses mixed inventories and repeated channel numbers; numbers beyond 32 and other
+  channels (e.g. `Status`) are reported as unrecognised and not used.
+- The same function serves the header check (`inspect_headers`, `scripts/inspect_raw.py`) and
+  loading (`load_raw`), so the gate's verdict and the loaded channels cannot disagree (tested).
+- `load_raw` sets every kept channel to type `eeg` (D2's `Misc` channels are read as misc),
+  drops M1/M2, orders the 30 channels canonically and applies the `standard_1020` montage.
+  Everything downstream (preprocessing, 250 Hz resampling, operator, sensor PSD, source
+  reconstruction, connectivity, graphs) sees the same 30 named channels as before.
+- The strict header check first verifies the `.loc` file (printing its path, SHA-256 and the
+  index → label order) and fails if it is missing or differs. It also fails on an ambiguous
+  inventory or a missing used channel. `pipeline.run` verifies the layout whenever paths.yaml
+  names one. The layout file was already hashed into the assembly identity and manifest.
+- `colab.write_paths_yaml` locates the layout with `find_layout_file`.
+
+**Data-driven check of the mapping (QC only)**
+- `qc_spatial_rho` in `subjects.csv`: the Spearman correlation, per recording after
+  preprocessing, between inter-electrode distance and |signal correlation|. Volume conduction
+  makes it clearly negative when channels sit where the montage says. A shifted or shuffled
+  mapping gives a value near 0 (tested on synthetic data). Values above −0.1 are logged as a
+  warning and listed in Notebook 01's quality summary. Nothing is changed or excluded on it.
+
+**Not changed**
+- Bands, filters, reference, rejection, windows, inverse, parcellation, the 30-channel set,
+  the montage and the unit scaling (D1 ×1e-6, D2 ×1).
+- The EDF and `.loc` files (only read).
+
+**Effect on cached results**
+- The commit changes `code_identity`. Graph subjects and the operator cache from earlier
+  commits are therefore incompatible and are recomputed. None existed: the check failed before
+  any processing.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

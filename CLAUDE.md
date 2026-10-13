@@ -296,6 +296,10 @@ with *Runtime → Run all* and needs no editing.
 - Set and log random seeds (numpy, torch, python) for every run.
 - Units: keep EEG in volts inside MNE objects. Dataset 1 EDFs are mislabeled
   (values are µV but header says V): rescale ×1e-6 on load and log it.
+- Channels: the EDFs label channels by number only (D1 `EEG E01`–`E32` at 1000 Hz, D2
+  `Misc ExG1`–`ExG32` at 1024 Hz). Channel *k* is electrode *k* of
+  `AD-LEB/electrodes_positions_32.loc`, which is verified against `channels.recorded` at run
+  time (`adgraph.io.layout`, methodology log entry 37). Never map them by any other rule.
 - Bands (Hz): theta 4–8, alpha1 8–10, alpha2 10–13, beta 13–30. Connectivity band-pass:
   MNE FIR zero-phase firwin with 1.0 Hz transitions on every edge
   (`connectivity.transition_bandwidth_hz`; `docs/band_filters.md`, methodology log entry 36).

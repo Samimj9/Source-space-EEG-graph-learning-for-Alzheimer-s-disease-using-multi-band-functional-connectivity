@@ -17,6 +17,31 @@ file records structure, counts and issues only.
 Fp1 Fpz Fp2 F7 F3 Fz F4 F8 FC5 FC1 FC2 FC6 M1 T7 C3 Cz C4 T8 M2 CP5 CP1 CP2 CP6
 P7 P3 Pz P4 P8 POz O1 Oz O2.
 
+- **Location:** `AD-LEB/electrodes_positions_32.loc` (root of the shared folder; Drive file id
+  `1fsfZUkd1ng-GnuiWtIlglQTTS78t6eva`, 589 bytes, modified 2026-09-10).
+  SHA-256 `da108d022ebdf4565c52d69bc623b50dafbc92d8b2ff9c09aabacd3876e90bd4`.
+  The author's local copy is named `electrodes_positions_32 (1).loc` (browser download); the
+  pipeline accepts that name too if it is the only layout file (`find_layout_file`).
+- **Format:** one line per electrode, `index theta radius label`. Labels are padded with dots
+  (`F7..`), lines end in CRLF, indices run 1–32 without gaps. The polar angles agree with the
+  `standard_1020` positions of the same labels (tested).
+- **Read-only.** The pipeline never modifies this file or the EDFs.
+
+### EDF channel labels (header check 2026-10-13)
+
+The EDF headers carry **channel numbers, not electrode names**:
+
+| Dataset | Labels | Sampling rate |
+|---|---|---|
+| D1 (20 files) | `EEG E01` … `EEG E32` | 1000 Hz |
+| D2 resting (23 files) | `Misc ExG1` … `Misc ExG32` | 1024 Hz |
+
+Both were recorded with the same 32-electrode cap. EDF channel *k* is electrode *k* of the
+`.loc` file (e.g. `EEG E13` / `Misc ExG13` = M1, `E19` / `ExG19` = M2, `E32` / `ExG32` = O2).
+The order is verified against `channels.recorded` in `configs/pipeline.yaml` every time the
+header check or the graph pipeline runs (methodology log entry 37). Both datasets are
+resampled to 250 Hz.
+
 ## Participants
 
 ### Dataset 1 (`Info Participants_2017.xlsx`)
