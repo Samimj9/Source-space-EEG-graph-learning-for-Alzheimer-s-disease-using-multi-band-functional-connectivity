@@ -164,16 +164,21 @@ class GNNModel:
                                weight_decay=self.train_cfg.get("weight_decay", 1e-4))
         bs, epochs = self.train_cfg.get("batch_size", 32), self.train_cfg.get("epochs", 100)
         gen = torch.Generator().manual_seed(self.seed)
+        # whole training set on the device once (not copied per batch); identical batches and results
+        x, adj, y, w = x.to(dev), adj.to(dev), y.to(dev), w.to(dev)
+        cov = None if cov is None else cov.to(dev)
         best, best_state, patience = np.inf, None, 0
         for epoch in range(epochs):
             self.net.train()
             perm = torch.randperm(len(y), generator=gen)
             total = 0.0
             for i in range(0, len(y), bs):
-                idx = perm[i:i + bs]
-                logits = self.net(x[idx].to(dev), adj[idx].to(dev), None if cov is None else cov[idx].to(dev))
-                loss = (F.binary_cross_entropy_with_logits(logits, y[idx].to(dev), reduction="none")
-                        * w[idx].to(dev)).sum() / w[idx].sum().to(dev)
+                idx = perm[i:i + bs].to(dev)
+                logits = self.net(x[idx], adj[idx], None if cov is None else cov[idx])
+                # weights have mean 1 over the training set: dividing by the batch size (not the batch's
+                # weight sum) keeps one vote per subject and class balance across batches
+                bce = F.binary_cross_entropy_with_logits(logits, y[idx], reduction="none")
+                loss = (bce * w[idx]).sum() / len(idx)
                 opt.zero_grad()
                 loss.backward()
                 opt.step()

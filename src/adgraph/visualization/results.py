@@ -15,7 +15,27 @@ import pandas as pd
 from ..experiments.config import get_dotted
 
 INDEX_COLUMNS = ["experiment", "variant", "setting", "condition", "bands", "band_mode", "encoder", "model",
-                 "covariates", "score_type", "score_threshold", "timestamp", "path"]
+                 "covariates", "score_type", "score_threshold", "graph_run_id", "git_commit", "timestamp", "path"]
+# Primary analyses only: diagnosis target, k-fold CV, uncalibrated models. Probe, LOSO and
+# calibrated runs are separate analyses and never stand in for a primary result in a figure.
+PRIMARY = {"target": "label", "evaluation.scheme": "kfold", "model.calibration": "none"}
+
+
+class MissingInputs(ValueError):
+    """The saved outputs a figure needs do not exist (yet); not a code error."""
+
+
+MISSING: list[dict] = []          # (entry, setting, condition) requested by a figure but not found
+
+
+def reset_missing() -> list[dict]:
+    out = list(MISSING)
+    MISSING.clear()
+    return out
+
+
+def is_primary(cfg: dict) -> bool:
+    return all(_get(cfg, k, v) == v for k, v in PRIMARY.items())
 
 
 def _get(cfg: dict, path: str, default=None):
@@ -25,11 +45,12 @@ def _get(cfg: dict, path: str, default=None):
         return default
 
 
-def index_results(root: str | Path, duplicates: str = "error") -> pd.DataFrame:
+def index_results(root: str | Path, duplicates: str = "error", primary_only: bool = True) -> pd.DataFrame:
     """One row per saved (experiment, variant, setting) result, with its resolved variant config.
 
     ``duplicates``: ``error`` (default) if the same (experiment, variant, setting) appears in
     more than one run under ``root``; ``latest`` keeps the most recent by manifest timestamp.
+    ``primary_only`` (default) skips probe / LOSO / calibrated runs (``PRIMARY``).
     """
     rows = []
     for man in sorted(Path(root).rglob("manifest.json")):
@@ -40,6 +61,8 @@ def index_results(root: str | Path, duplicates: str = "error") -> pd.DataFrame:
             continue                                   # interrupted run: final outputs not validated
         m = json.loads(man.read_text())
         v = m["variant_config"]
+        if primary_only and not is_primary(v):
+            continue
         g = v.get("graph", {}) if v.get("input") == "graph" else {}
         rows.append({
             "experiment": v["experiment"], "variant": v["variant"], "setting": m["setting"],
@@ -49,6 +72,7 @@ def index_results(root: str | Path, duplicates: str = "error") -> pd.DataFrame:
             "model": _get(v, "model.name", "") if v.get("input") == "classical" else _get(v, "model.encoder", ""),
             "covariates": "+".join(v.get("covariates") or []),
             "score_type": m.get("score_type", "probability"), "score_threshold": m.get("score_threshold", 0.5),
+            "graph_run_id": (m.get("graph_run") or {}).get("graph_run_id", ""), "git_commit": m.get("git_commit", ""),
             "timestamp": m.get("timestamp", ""), "path": str(d), "config": v,
         })
     idx = pd.DataFrame(rows, columns=INDEX_COLUMNS + ["config"])
@@ -82,13 +106,19 @@ def select(index: pd.DataFrame, experiment: str | None = None, settings=None, wh
     if conditions:
         sel = sel[sel["condition"].isin(list(conditions))]
     if where:
-        sel = sel[[matches(c, where) for c in sel["config"]]]
+        sel = sel.loc[np.array([matches(c, where) for c in sel["config"]], dtype=bool)]   # empty -> zero rows
     return sel.reset_index(drop=True)
 
 
 def select_unique(index: pd.DataFrame, entry: dict, settings) -> pd.DataFrame:
     """Rows for one figure entry; at most one variant per (setting, condition), else an error."""
     sel = select(index, entry.get("experiment"), settings, entry.get("where"), entry.get("conditions"))
+    for s in settings or []:                       # record what was asked for but is not saved (yet)
+        for c in entry.get("conditions") or [None]:
+            have = sel[(sel["setting"] == s) & ((sel["condition"] == c) if c else True)]
+            if have.empty:
+                MISSING.append({"entry": entry.get("label", entry.get("experiment")), "setting": s,
+                                **({"condition": c} if c else {})})
     order = {"plv": 0, "ciplv": 1, "none": 2}                                 # PLV (primary) first
     sel = sel.sort_values("condition", key=lambda c: c.map(order).fillna(3), kind="stable").reset_index(drop=True)
     dup = sel.duplicated(["setting", "condition"], keep=False)

@@ -39,7 +39,7 @@ from ..config import config_hash
 from ..evaluation.metrics import (aggregate_subjects, binary_metrics, bootstrap_ci, permutation_p_value,
                                   summarize_repeats)
 from ..evaluation.splits import (CROSS_SETTINGS, SETTINGS, fold_indices, inner_folds, make_splits, setting_subset)
-from ..graphs.dataset import Dataset, build_dataset
+from ..graphs.dataset import Dataset, build_dataset, target_column
 from ..graphs.store import GraphStore
 from ..checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_savez, atomic_write_csv,
                           atomic_write_json, atomic_write_text, check_unit, code_identity, identity_diff, stable_hash,
@@ -202,11 +202,16 @@ class ExperimentCheckpoint:
 
 
 def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, seed: int,
-                   ckpt: ExperimentCheckpoint | None = None, sp_id: str = "") -> tuple[dict, list]:
+                   ckpt: ExperimentCheckpoint | None = None, sp_id: str = "",
+                   fold_name: str = "") -> tuple[dict, list]:
     """Subject-level inner CV inside the training subjects; returns (best params, score table).
 
     With a checkpoint, every completed (parameter combination, inner fold) trial is cached,
-    so an interrupted search resumes where it stopped."""
+    so an interrupted search resumes where it stopped (GNNs only: a classical fit takes
+    milliseconds, less than writing its checkpoint to Drive, so classical inner trials are
+    recomputed on resume; their outer folds are checkpointed as usual). Trials are named after their outer
+    fold unit (``fold_name``): the same subject split can recur in another repeat, where it
+    is a different unit (different seed)."""
     grid = hparam_grid(v)
     if len(grid) == 1:
         return grid[0], []
@@ -215,6 +220,8 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
     folds = inner_folds(train_view.meta, ev["inner_k"], seed, _strata(setting) if setting == "pooled" else ("y",),
                         data.target)
     scores = []
+    if v["input"] != "graph":
+        ckpt = None                                   # inner-trial cache only where fits are expensive
     for params in grid:
         vp = apply_hparams(v, params)
         preds = []
@@ -223,7 +230,7 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
             name = ident = None
             if ckpt is not None:
                 inner_id = split_id(train_view.meta["key"].iloc[itr].unique(), val.meta["key"].unique())
-                name = f"inner_{sp_id}_{stable_hash(params, 8)}_i{i}"
+                name = f"inner_{fold_name or sp_id}_{stable_hash(params, 8)}_i{i}"
                 ident = ckpt.unit_identity("inner", split_id=sp_id, params=params, inner_fold=i,
                                            inner_split_id=inner_id, seed=seed + i)
                 cached = ckpt.load_trial(name, ident)
@@ -289,7 +296,7 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
                 continue
             ckpt.status.set(name, "running")
         try:
-            params, scores = select_hparams(data, tr_g, v, setting, seed, ckpt, sp_id)
+            params, scores = select_hparams(data, tr_g, v, setting, seed, ckpt, sp_id, name)
             t0 = time.perf_counter()
             model = make_model(apply_hparams(v, params), seed).fit(data.view(tr_g, "train"))
             fit_seconds = time.perf_counter() - t0
@@ -308,6 +315,7 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
                          + [{"repeat": sp.repeat, "fold": sp.fold, "key": k, "side": "test"} for k in sp.test_keys])
             hp_row = {"repeat": sp.repeat, "fold": sp.fold, "selected": json.dumps(params),
                       "scores": json.dumps(scores), "n_parameters": model.n_parameters(), "fit_seconds": fit_seconds,
+                      "compute_fingerprint": compute_environment(run_device(v))["fingerprint"],
                       "split_id": sp_id, "seed": seed}
             emb = None
             if embeddings_out is not None and hasattr(model, "embed"):
@@ -368,11 +376,15 @@ def evaluate(pred: pd.DataFrame, threshold: float = 0.5, n_boot: int = 2000, see
 
 
 def permute_subject_labels(data: Dataset, rng: np.random.Generator) -> Dataset:
-    """Copy of ``data`` with labels permuted across subjects (within each dataset)."""
+    """Copy of ``data`` with labels permuted across subjects (within each dataset).
+
+    For the dataset-identity probe the label is constant within a dataset, so it is permuted
+    across all subjects instead (a within-dataset permutation would leave it unchanged)."""
     meta = data.meta.copy()
     subj = meta.drop_duplicates("key")[["key", "dataset", data.target]]
     perm = {}
-    for _, g in subj.groupby("dataset"):
+    groups = [subj] if data.target == target_column("dataset") else [g for _, g in subj.groupby("dataset")]
+    for g in groups:
         perm.update(dict(zip(g["key"], rng.permutation(g[data.target].to_numpy()))))
     meta[data.target] = meta["key"].map(perm)
     return Dataset(meta, data.payload, data.kind, data.info, data.target)
@@ -380,6 +392,17 @@ def permute_subject_labels(data: Dataset, rng: np.random.Generator) -> Dataset:
 
 FINAL_FILES = ("predictions_windows.csv", "predictions_subjects.csv", "metrics_repeats.csv", "folds.csv",
                "hparams.csv", "summary.json", "manifest.json")
+
+
+def result_dir(out_dir: str | Path, v: dict, setting: str) -> Path:
+    """``<out>/<experiment>/<variant>/<setting>``; analyses other than the primary one (dataset
+    target, LOSO) get their own directory, so they can never collide with primary results."""
+    variant = v["variant"]
+    if v.get("target", "label") != "label":
+        variant += f"__target-{v['target']}"
+    if v["evaluation"].get("scheme", "kfold") != "kfold":
+        variant += f"__scheme-{v['evaluation']['scheme']}"
+    return Path(out_dir) / v["experiment"] / variant / setting
 
 
 def experiment_identity(store: GraphStore, v: dict, setting: str) -> dict:
@@ -410,7 +433,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
         fails = gate_failures(store)
         if fails and not ev.get("allow_ungated_cross_dataset", False):
             raise RuntimeError("cross-dataset gate not passed (DESIGN.md §7): " + "; ".join(fails))
-    out = Path(out_dir) / v["experiment"] / v["variant"] / setting
+    out = result_dir(out_dir, v, setting)
     ck = ExperimentCheckpoint.open(out, experiment_identity(store, v, setting), Path(out_dir), resume, force)
     final_ident = {**ck.identity, "full_config_hash": config_hash(v)}
     state, _ = check_unit(out, "final", final_ident)
@@ -482,7 +505,7 @@ def experiment_status(store: GraphStore, v: dict, setting: str, out_dir: str | P
     """Completed / pending / failed outer folds of one variant and setting, without running anything."""
     from ..graphs.dataset import _meta, target_column
 
-    out = Path(out_dir) / v["experiment"] / v["variant"] / setting
+    out = result_dir(out_dir, v, setting)
     target = target_column(v.get("target", "label"))
     meta = _meta(store, v.get("target", "label"))
     _, _, splits = _splits(meta, v, setting, target)

@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 
 from .anatomy import subject_level
-from .results import anonymize, select_unique
+from .results import MissingInputs, anonymize, select_unique
 from .style import DATASET_MARKER, GROUP_STYLE, figure_size
 
 DISCLAIMER = "Exploratory, unsupervised projection; not statistical evidence"
@@ -75,14 +75,14 @@ def fig_graph_embedding(index, spec, style, stats=None):
     r = rows.iloc[0]
     path = Path(r["path"]) / "embeddings.npz"
     if not path.exists():
-        raise ValueError(f"{path} missing: rerun with evaluation.save_embeddings: true")
+        raise MissingInputs(f"{path} missing: rerun with evaluation.save_embeddings: true")
     if not isinstance(spec.get("repeat"), int) or not isinstance(spec.get("fold"), int):
         raise ValueError("graph-embedding figures need one explicit fitted model: integer 'repeat' and 'fold'; "
                          "embeddings of independently trained folds are never merged")
     z = np.load(path, allow_pickle=False)
     prefix = f"r{spec['repeat']:03d}_f{spec['fold']:02d}__"
     if prefix + "emb" not in z.files:
-        raise ValueError("requested repeat/fold not in embeddings.npz")
+        raise MissingInputs("requested repeat/fold not in embeddings.npz")
     e = pd.DataFrame(z[prefix + "emb"])                                    # one fitted model only
     dims = list(e.columns)
     e = e.assign(key=z[prefix + "key"], side=z[prefix + "side"], y=z[prefix + "y"], dataset=z[prefix + "dataset"])

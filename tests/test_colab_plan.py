@@ -100,7 +100,7 @@ def test_notebooks_are_run_all_ready():
     """Every notebook: valid JSON, the shared setup cell first, no shell '!' commands (they neither
     stop 'Run all' on failure nor show subprocess output), no commented-out run cells, no /content
     output paths."""
-    for nb_path in sorted((REPO / "notebooks").glob("*.ipynb")):
+    for nb_path in sorted((REPO / "notebooks").rglob("*.ipynb")):
         nb = json.loads(nb_path.read_text())
         code = ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
         assert "scripts/colab_setup.py" in code[0] and "drive.mount" in code[0], nb_path.name

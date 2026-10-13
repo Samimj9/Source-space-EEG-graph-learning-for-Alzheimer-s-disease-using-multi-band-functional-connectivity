@@ -15,7 +15,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from . import stats as st
-from .results import read_csv, select_unique
+from .results import MissingInputs, read_csv, select_unique
 from .style import BAND_STYLE, GROUP_STYLE, condition_style, figure_size, marker_kwargs
 
 
@@ -23,7 +23,7 @@ def subject_band_weights(row) -> pd.DataFrame:
     w = read_csv(row, "predictions_windows.csv")
     cols = [c for c in w if c.startswith("band_weight_")]
     if not cols:
-        raise ValueError(f"{row['path']}: no band weights saved")
+        raise MissingInputs(f"{row['path']}: no band weights saved")
     per = w.groupby(["repeat", "key"]).agg({**{c: "mean" for c in cols}, "y": "first", "dataset": "first"})
     per = per.reset_index().groupby("key").agg({**{c: "mean" for c in cols}, "y": "first", "dataset": "first"})
     return per.reset_index().rename(columns={c: c.removeprefix("band_weight_") for c in cols})

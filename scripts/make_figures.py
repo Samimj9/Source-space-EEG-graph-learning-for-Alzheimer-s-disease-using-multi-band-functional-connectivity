@@ -38,7 +38,7 @@ if not args.synthetic_demo:
     check_persistent({"--out": args.out}, allow_ephemeral=args.allow_ephemeral_storage)
 
 config = yaml.safe_load(Path(args.config).read_text())
-out = Path(args.out) / f"figures_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+out = Path(args.out) / f"figures_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 store, results = None, args.results
 if args.synthetic_demo:
     from adgraph.visualization.demo import build_synthetic_results
@@ -51,4 +51,9 @@ writer = make_figures(config, out, results, store, args.stats, args.style, synth
                       only=args.only, on_missing=args.on_missing)
 print(f"{len(writer.figures)} figures written to {out}")
 if writer.skipped:
-    print("skipped:\n" + json.dumps(writer.skipped, indent=1))
+    print("skipped (inputs not saved yet, or refused):\n" + json.dumps(writer.skipped, indent=1))
+if writer.incomplete:
+    print("drawn but INCOMPLETE (some requested results are not saved yet; listed in each figure's "
+          "metadata as missing_inputs):")
+    for f in writer.incomplete:
+        print(f"  {f['id']} ({f['status']}): {len(f['missing_inputs'])} missing, e.g. {f['missing_inputs'][:3]}")

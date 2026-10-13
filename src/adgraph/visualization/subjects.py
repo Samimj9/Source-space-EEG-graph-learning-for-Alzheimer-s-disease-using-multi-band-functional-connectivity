@@ -13,7 +13,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.metrics import roc_auc_score, roc_curve
 
-from .results import anonymize, select_unique, subject_scores
+from .results import MissingInputs, anonymize, select_unique, subject_scores
 from .style import GROUP_STYLE, OKABE_ITO, SETTING_LABEL, condition_style, figure_size, marker_kwargs
 
 FPR_GRID = np.linspace(0, 1, 101)
@@ -26,7 +26,7 @@ def _entry_rows(index, spec):
         for _, r in sel.iterrows():
             out.append((e["label"], r))
     if not out:
-        raise ValueError("no saved results matched the figure entries")
+        raise MissingInputs("no saved results matched the figure entries")
     return out
 
 

@@ -10,7 +10,7 @@ Graph construction and the experiments are separate. Their only interface is the
 graph-run directory (schema: `src/adgraph/graphs/store.py`).
 
 ```
-scripts/build_graphs.py ──► processed/graphs_v3_<stamp>_<hash>/
+scripts/build_graphs.py ──► processed/graphs_v3_<config hash>/
                               graphs.npz  windows.csv  subjects.csv  manifest.json  [roi_timeseries/]
                                               │
 scripts/run_experiment.py --config configs/experiments/<exp>.yaml --graphs <run dir>
@@ -231,6 +231,11 @@ for every graph.
 
 ## 5. Outputs (`<out>/<experiment>/<variant>/<setting>/`, checkpointed, never overwritten)
 
+Analyses other than the primary one get their own variant directory, so they can never
+overwrite or be mistaken for primary results: `<variant>__target-dataset` (dataset probe) and
+`<variant>__scheme-loso`. The figure index uses primary results only (diagnosis target, k-fold,
+uncalibrated).
+
 | File | Content |
 |---|---|
 | `predictions_windows.csv` | per window and repeat: identifiers, y, score (probability, or SVM margin) (+ learned band weights for multi-band models) |
@@ -249,7 +254,7 @@ committed.
 |---|---|
 | `_identity.json` | experiment identity: training-config hash, `graph_run_id`, setting, code version, automatic code fingerprint (git commit + source SHA-256 + library versions) |
 | `units/fold_r<rrr>_f<ff>.*` + `.done.json` | one outer fold: predictions, fold table, hparam row, optional embeddings |
-| `units/inner_*` | one inner-CV trial (parameter set × inner fold) |
+| `units/inner_fold_r<rrr>_f<ff>_*` | one inner-CV trial (parameter set × inner fold) of that outer fold; **GNNs only** (a classical fit takes milliseconds, less than writing a checkpoint to Drive, so classical inner searches are redone on resume; their outer folds are checkpointed) |
 | `units/perm_*` | one permutation |
 | `status.csv` | pending / running / completed / failed per outer fold |
 | `final.done.json` | validates the final outputs above (written last) |
@@ -262,7 +267,56 @@ To resume after new commits were pushed, check out the run's commit. For real gr
 `--out` must be on the mounted Drive; ephemeral Colab storage is refused (methodology log
 entry 32).
 
-## 6. Commands (to be run later in Colab, on real graphs)
+## 6. Running experiments: one at a time (Colab)
+
+The normal workflow runs **one experiment per notebook** and reviews it before starting the
+next one (`notebooks/README.md` lists the notebooks and their estimated cost):
+
+```
+notebooks/01_build_graphs.ipynb                 graphs + QC (once)
+notebooks/experiments/Exp0_sensor_psd.ipynb ... Exp6_multiband_psd_strength.ipynb
+notebooks/additional/                           Exp3b, baselines, dataset probe, EEG + age (one config each)
+notebooks/03_comparative_figures.ipynb          paper figures across experiments (afterwards)
+notebooks/advanced/Run_all_experiments_ADVANCED.ipynb   whole run plan; starts nothing unless enabled
+```
+
+Each experiment notebook calls `scripts/experiment.py` for its own config only:
+
+| Action | What it does |
+|---|---|
+| `status` | progress per (variant, setting) from the checkpoints; computes nothing |
+| `estimate` | exact number of model fits of the full protocol (repeats × outer folds × (inner folds × grid + refit)), one real fit timed per architecture on the current runtime and graph run, the checkpoint write time on Drive, and the time remaining (completed folds subtracted); saved in `_estimates/` |
+| `run` | every variant and setting of this config, with the config's full protocol; order: within-dataset settings (all variants) → pooled → cross-dataset (only if the DESIGN.md §7 gate passes, otherwise recorded as skipped); resumable; a failing unit is recorded and the others continue; never starts another experiment |
+| `report` | results table + single-experiment diagnostic figures from saved outputs |
+
+Per experiment, Drive holds `<processed>/experiments/<experiment>/`:
+
+| Path | Content |
+|---|---|
+| `<variant>/<setting>/` | results and checkpoints of one (variant, setting) (table above) |
+| `_run_status.csv` | state of every (variant, setting) of the last run (completed / failed / skipped + message) |
+| `_estimates/estimate_<time>.csv/.json` | runtime estimates |
+| `_reports/report_<time>/` | `results_summary.csv` (subject-level mean ± SD over repeats, bootstrap 95 % CI, window-level AUC), `progress.csv`, `README.txt`, `figures/` |
+
+**Single-experiment diagnostics vs comparative figures.** A report's figures (`D1_performance`,
+`D2_roc_<setting>`, `D3_confusion_<setting>`, `D4_subject_scores_<setting>`) show only that
+experiment's variants, for checking it. They select or rank nothing and are not paper figures.
+The comparative paper figures (`configs/figures/paper.yaml`, `docs/figures.md`) are generated
+by `03_comparative_figures` from the saved results of several experiments.
+
+### Estimated cost (full protocol, before launching)
+
+See `notebooks/README.md` for the per-experiment table. It is measured by
+`scripts/estimate_runtime_synthetic.py` with the same estimator on synthetic data of the real
+size (43 subjects × 27 windows) and 2 CPU threads, excluding checkpoint writes. Each notebook
+measures again on its runtime (GPU if available) and the real graph run before training
+(section 1), and shows the remaining time when resuming.
+
+### Advanced: whole plan, other commands
+
+`scripts/run_plan.py` runs every config of `configs/run_plan.yaml` in priority order
+(`--status` shows progress). It is never started automatically: only the advanced notebook
+calls it, and only after `RUN_EVERYTHING = True` is set deliberately.
 
 ```bash
 python scripts/run_experiment.py --config configs/experiments/exp5_multiband.yaml --graphs <run dir> --dry-run
@@ -270,4 +324,6 @@ python scripts/run_experiment.py --config configs/experiments/exp5_multiband.yam
     --settings within_D1 within_D2 --out /content/drive/MyDrive/AD-LEB/processed/experiments
 ```
 
+`run_experiment.py --variants` matches whole name tokens (`plv` selects `plv__*`, not `ciplv__*`).
+Cross-dataset settings whose gate fails are skipped with a message instead of aborting.
 `--synthetic` runs any config on synthetic data, to test the framework only.

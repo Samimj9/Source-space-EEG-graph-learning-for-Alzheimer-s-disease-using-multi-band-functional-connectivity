@@ -64,6 +64,7 @@ synthetic data.
 30. [Comparable timing and single-model embeddings](#30-comparable-timing-and-single-model-embeddings)
 31. [Checkpointing and resume](#31-checkpointing-and-resume)
 32. [Pre-real-run reliability safeguards](#32-pre-real-run-reliability-safeguards)
+33. [Pre-real-data audit fixes and the one-experiment-at-a-time workflow](#33-pre-real-data-audit-fixes-and-the-one-experiment-at-a-time-workflow)
 
 ---
 
@@ -1710,6 +1711,170 @@ synthetic data.
 
 ---
 
+## 33. Pre-real-data audit fixes and the one-experiment-at-a-time workflow
+
+**Previous design**
+- **Notebooks.**
+  - Notebook 02 had commented-out experiment commands.
+  - Shell steps (`!cmd`) neither stopped "Run all" on failure nor showed subprocess output.
+  - The smoke test wrote to ephemeral `/content`.
+- **Experiments.** There was no per-experiment runtime estimate or report.
+- **Audit.** A read-only audit of the graph pipeline, the experiment framework and the figure
+  pipeline (2026-10-13, synthetic data only) found the defects listed below.
+
+**Problem discovered** (verified by reading the code and by synthetic reproduction)
+1. **Inner-trial unit collision (blocker).** Inner-CV trial checkpoints were named by the
+   outer split's subject sets, but their identity includes the seed. D1 has only 45 × 45
+   distinct 5-fold test folds, so splits recur across 20 repeats. Every `within_D1` run
+   (all configs with a grid) stopped with `IncompatibleCheckpoint`.
+2. **GNN loss normalised per batch.** The loss was `Σ w·l / Σ w(batch)`, so every batch
+   counted equally whatever its weight. This only approximates the documented "one vote per
+   subject, classes balanced" weighting (methods decisions #29).
+3. **Degenerate dataset-probe permutation test.** Labels were permuted within each dataset.
+   For the dataset-identity target they are constant within a dataset, so the "permuted"
+   labels equalled the real ones and p = 1.
+4. **Collisions between analyses.**
+   - Runs with `target: dataset` or `scheme: loso` wrote to the primary result directory.
+   - The figure index could plot a probe, LOSO or calibrated run as a primary result.
+   - Results from different graph runs could be mixed in one figure.
+5. **Figure errors and gaps were hidden.**
+   - Every exception became a "skipped" figure, so code bugs looked like missing inputs.
+   - Figures drawn with some entries missing said nothing.
+   - A latent selection bug: an empty `where` match selected zero columns.
+6. **S20 and S21b inputs.**
+   - S20 needed Exp 6 embeddings, which no config saved.
+   - S21b compared fit times by one fingerprint per run, but a resumed run can mix machines.
+7. **`run_experiment.py`.**
+   - A failed cross-dataset gate aborted all remaining variants.
+   - `--variants plv` also matched `ciplv`.
+8. **Metadata.**
+   - A participant row with an unrecognised Group (e.g. "Control") was silently dropped,
+     and its recording was then processed with no label.
+   - A missing sex became the string "NAN".
+9. **Diagnostics only.**
+   - The header report could not show EDF units.
+   - Channel-name suffixes `-A1/-A2/-M1/-M2` were not recognised.
+10. **Drive I/O.** Classical inner-CV trials took milliseconds each but wrote a checkpoint
+    each. Exp 0 alone writes about 12 700 units, roughly an hour of Drive writes for about
+    5 minutes of computation.
+
+**Scientific / engineering reason**
+- Defects 1–8 could crash the real run or produce results that differ from the documented
+  protocol, or attribute them to the wrong analysis.
+- The author asked to run and inspect one experiment at a time without editing anything,
+  keeping the full protocol (20 repeats, tuning, all model configurations), with a realistic
+  cost estimate before launching (instruction of 2026-10-13).
+
+**Final implementation**
+- **Fixes:**
+  1. Inner trials are named after their outer fold unit (`inner_fold_rRRR_fFF_…`).
+  2. GNN loss is `Σ w·l / batch size`, with weights of mean 1 over the training set.
+  3. The probe permutes across all subjects.
+  4. Separate analyses and provenance:
+     - `runner.result_dir` adds `__target-<t>` and `__scheme-<s>` to the variant directory;
+     - `index_results` keeps primary runs only and records `graph_run_id` and `git_commit`;
+     - `make_figures` refuses results from several graph runs, or from a graph run other
+       than `--graphs`.
+  5. Figure errors and gaps:
+     - a typed `MissingInputs` exception;
+     - code errors fail the figure run after the other figures are written;
+     - missing entries are recorded per figure (`missing_inputs`, `incomplete`);
+     - the empty-selection bug is fixed.
+  6. Exp 6 `full` saves embeddings; each fold records its compute fingerprint.
+  7. `run_experiment.py` skips gated cross settings with a message, matches variant tokens
+     exactly, and reuses the dataset across settings.
+  8. Metadata:
+     - an unrecognised Group raises;
+     - recordings without a label stop graph construction before any processing;
+     - a missing sex becomes "".
+  9. EDF header units are reported, and reference suffixes are recognised.
+  10. Inner-trial checkpoints are kept only for GNNs. Outer folds are checkpointed for all
+      models. Results are identical.
+  11. GNN training tensors are moved to the device once per fit, not per batch. Batches and
+      results are identical.
+- **One experiment at a time:**
+  - `scripts/experiment.py estimate | run | status | report` handles one config:
+    - `run` covers all its variants and settings in the order within → pooled → cross
+      (gated);
+    - it isolates failures and writes a per-experiment status file;
+    - it never starts another experiment.
+  - `adgraph.experiments.estimate`:
+    - exact fit counts from the real splits;
+    - one fit timed per architecture on the current runtime;
+    - the measured Drive checkpoint cost;
+    - remaining time.
+  - `adgraph.experiments.report` writes a results table and single-experiment diagnostic
+    figures (D1–D4), labelled as not comparative.
+- **Notebooks (generated by `scripts/make_notebooks.py`):**
+  - 01 builds the graphs;
+  - one notebook per experiment config: Exp0–Exp6, plus Exp3b, baselines, the dataset probe
+    and EEG + age in `additional/`;
+  - 03 makes the comparative figures;
+  - an advanced whole-plan notebook that starts nothing unless `RUN_EVERYTHING = True`.
+- **Shared setup cell:**
+  - locates the data and a writable output folder on Drive;
+  - pins the code commit on Drive for all sessions;
+  - installs the pinned environment;
+  - stops "Run all" on any failure.
+- **Automatic checks in notebook 01:** inputs, tests and EDF headers are checked before any
+  graph is built.
+
+**Alternatives considered**
+- **Running the whole plan from one notebook.** Rejected by the author: each result must be
+  reviewed before the next experiment starts.
+- **Reducing repeats or grids to save time.** Rejected by the author: the full protocol is kept.
+- **Per-trial Drive checkpoints for classical models.** Rejected: a write costs more than the
+  fit. Outer folds remain checkpointed.
+
+**Effect on interpretation**
+- No method or protocol parameter changed.
+- Fix 2 changes GNN optimisation numerically, to match the documented weighting.
+- Fix 3 makes the probe's permutation p-value meaningful.
+- Fixes 4–5 prevent misattributed or silently incomplete figures.
+- **Open author decision (not changed):** the connectivity band-pass filters use MNE's
+  automatic transition bands. Their −6 dB bands are theta 3.0–9.0, alpha1 7.0–11.25,
+  alpha2 8.8–14.6 and beta 11.4–33.7 Hz, so alpha1 and alpha2 overlap substantially.
+  Narrower transitions would change the method and need approval (open item 8).
+
+**Code / config**
+- `src/adgraph/experiments/{runner,plan,estimate,report}.py`, `src/adgraph/models/trainer.py`
+- `src/adgraph/visualization/{results,figures,performance,subjects,embedding,fusion,connectivity}.py`
+- `src/adgraph/io/{participants,eeg}.py`, `src/adgraph/pipeline.py`, `src/adgraph/colab.py`
+- `scripts/{experiment,make_notebooks,estimate_runtime_synthetic,colab_setup,run_plan,run_experiment,inspect_raw,make_figures}.py`
+- `configs/experiments/exp6_multiband_psd_strength.yaml`, `configs/run_plan.yaml`, `notebooks/`
+
+**Validating tests**
+- `tests/test_audit_fixes.py`:
+  - recurring outer split;
+  - probe permutation;
+  - result directories;
+  - variant filter;
+  - loss normalisation;
+  - S20 embeddings;
+  - unrecognised Group;
+  - channel suffixes;
+  - unlabelled recordings;
+  - missing and incomplete figures;
+  - code errors vs missing inputs;
+  - graph-run mismatch;
+  - primary-only index.
+- `tests/test_notebooks.py`:
+  - notebooks match the generator;
+  - one notebook per config;
+  - each runs only its experiment;
+  - the advanced notebook is disabled by default;
+  - the CLI estimate → run → status → report on classical and GNN configs.
+- `tests/test_colab_plan.py`: setup helpers, code pin, input check, run plan.
+- `tests/test_checkpoint.py` (updated): classical inner searches are redone on resume; GNN
+  inner trials are reused.
+
+**Approval status**
+- One-experiment-at-a-time workflow, full protocol and estimates: author-specified (2026-10-13).
+- Bug fixes: approved in principle (author asked to fix identified bugs).
+- Band-filter widths: pending (open item 8).
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -1728,3 +1893,11 @@ synthetic data.
 6. Final repeat, fold, epoch and grid sizes (currently provisional).
 7. The target journal's width and font requirements (figure selections were resolved:
    entries 25–29).
+8. Connectivity band-pass transition widths (entry 33): MNE's automatic transitions make the
+   effective alpha1 and alpha2 bands overlap (−6 dB at 7.0–11.25 and 8.8–14.6 Hz). Keep as is,
+   or set narrower transition bands (longer filters) before the real run?
+9. Permutation tests (off by default): the null uses `permutation.n_repeats` CV repeats per
+   permutation while the observed statistic averages all repeats, which makes the test
+   conservative. Match them (e.g. compare repeat 0, or use equal repeats) before enabling it.
+10. No module produces the corrected, subject-level statistics file that figures can show
+    significance from (`docs/figures.md`). All figures are currently descriptive.

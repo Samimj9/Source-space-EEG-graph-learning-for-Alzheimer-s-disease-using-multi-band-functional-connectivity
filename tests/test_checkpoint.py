@@ -256,10 +256,11 @@ def test_experiment_resumes_from_unfinished_folds(small_store, tmp_path, fit_cou
     with pytest.raises(SimulatedCrash):
         runner.run_variant(small_store, v, "within_D1", tmp_path / "run")
     st = runner.experiment_status(small_store, v, "within_D1", tmp_path / "run")
-    assert st["state"] == "partial" and st["folds_completed"] == 2 and st["inner_trials_cached"] == 8 + 2   # 2 folds x 4 + 2 of fold 3
+    # classical inner trials are not cached (a fit is cheaper than a Drive write); outer folds are
+    assert st["state"] == "partial" and st["folds_completed"] == 2 and st["inner_trials_cached"] == 0
     fit_counter.update(fits=0, crash_at=None)
     resumed = runner.run_variant(small_store, v, "within_D1", tmp_path / "run")
-    assert fit_counter["fits"] == total - 12                       # 12 fits were completed and checkpointed
+    assert fit_counter["fits"] == total - 10                       # the 2 completed folds (5 fits each) reused
     a = pd.read_csv(tmp_path / "ref/exp1_source_psd/logreg/within_D1/predictions_windows.csv")
     b = pd.read_csv(tmp_path / "run/exp1_source_psd/logreg/within_D1/predictions_windows.csv")
     assert np.allclose(a["score"], b["score"])
@@ -305,7 +306,7 @@ def test_corrupted_fold_unit_is_recomputed_alone(small_store, tmp_path, fit_coun
     (out / "final.done.json").unlink()                               # e.g. crash before the final marker
     fit_counter["fits"] = 0
     runner.run_variant(small_store, v, "within_D1", tmp_path)
-    assert fit_counter["fits"] == 1                                  # outer refit only; its inner trials cached
+    assert fit_counter["fits"] == 5                                  # that fold only (classical: inner search redone)
 
 
 def test_permutations_resume(small_store, tmp_path, fit_counter):

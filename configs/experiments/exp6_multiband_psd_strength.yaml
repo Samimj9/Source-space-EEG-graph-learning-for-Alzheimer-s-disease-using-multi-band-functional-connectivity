@@ -15,7 +15,7 @@ model:
 sweep:
   graph.connectivity: [plv, ciplv]
 variants:
-  full: {}
+  full: {evaluation.save_embeddings: true}   # fused graph embeddings per split (figure S20); outputs only
   no_psd: {node_features.components: [strength]}
   no_strength: {node_features.components: [psd]}
   no_learned_fusion: {model.fusion: mean}

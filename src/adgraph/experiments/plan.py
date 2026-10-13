@@ -32,6 +32,33 @@ STATUS_COLUMNS = ["order", "config", "experiment", "variant", "setting", "state"
                   "subject_balanced_accuracy", "message", "updated"]
 
 
+def variant_matches(v: dict, filters) -> bool:
+    """True if a filter equals whole ``__``-separated tokens of the variant name (in order).
+
+    ``plv`` matches ``plv__full`` but not ``ciplv__full``; ``plv__full`` matches exactly."""
+    tokens = v["variant"].split("__")
+    for f in filters:
+        want = [t for t in str(f).strip("_").split("__") if t]
+        if any(tokens[i:i + len(want)] == want for i in range(len(tokens) - len(want) + 1)):
+            return True
+    return False
+
+
+SETTING_PASSES = (("within_D1", "within_D2"), ("pooled",), ("cross_D1_to_D2", "cross_D2_to_D1"))
+
+
+def experiment_entries(config: str | Path, config_root: str | Path = ".") -> list[dict]:
+    """Plan entries for ONE experiment config: all its variants and settings, in passes
+    (within-dataset first, then pooled, then cross-dataset). Nothing else is included."""
+    cfg = load_experiment(Path(config_root) / config)
+    entries = []
+    for p in SETTING_PASSES:
+        settings = [x for x in p if x in cfg["settings"]]
+        if settings:
+            entries.append({"config": str(config), "settings": settings})
+    return entries
+
+
 def load_plan(path: str | Path) -> list[dict]:
     plan = yaml.safe_load(Path(path).read_text())
     entries = plan["experiments"]
@@ -50,7 +77,7 @@ def plan_units(entries: list[dict], config_root: str | Path = ".") -> list[tuple
             cfg = set_dotted(cfg, key, value)
         variants = expand_variants(cfg)
         if e.get("variants"):
-            variants = [v for v in variants if any(s in v["name"] for s in e["variants"])]
+            variants = [v for v in variants if variant_matches(v, e["variants"])]
         for v in variants:
             for s in e.get("settings") or cfg["settings"]:
                 units.append((order, e["config"], v, s))
@@ -66,13 +93,15 @@ def _metric(summary: dict, name: str):
 
 
 def run_plan(entries: list[dict], store: GraphStore, out_dir: str | Path, config_root: str | Path = ".",
-             resume: bool = True, allow_ephemeral: bool = False) -> pd.DataFrame:
-    """Run (or resume) every unit; returns and saves ``<out_dir>/_plan_status.csv``."""
+             resume: bool = True, allow_ephemeral: bool = False,
+             status_path: str | Path | None = None) -> pd.DataFrame:
+    """Run (or resume) every unit; returns and saves the status table (default
+    ``<out_dir>/_plan_status.csv``)."""
     out_dir = Path(out_dir)
     units = plan_units(entries, config_root)
     gate = gate_failures(store)
     rows, data_cache = [], {}
-    status_path = out_dir / "_plan_status.csv"
+    status_path = Path(status_path) if status_path else out_dir / "_plan_status.csv"
     for i, (order, config, v, setting) in enumerate(units):
         row = {"order": order, "config": config, "experiment": v["experiment"], "variant": v["variant"],
                "setting": setting, "subject_roc_auc": float("nan"), "subject_balanced_accuracy": float("nan"),
@@ -114,4 +143,19 @@ def plan_status(entries: list[dict], store: GraphStore, out_dir: str | Path,
             continue
         st = experiment_status(store, v, setting, out_dir)
         rows.append({"order": order, "config": config, **st})
+    return pd.DataFrame(rows)
+
+
+def experiments_overview(configs: list[str], store: GraphStore, out_dir: str | Path,
+                         config_root: str | Path = ".") -> pd.DataFrame:
+    """One row per experiment config: how many (variant, setting) results are completed,
+    partial, not started, failed or skipped by the gate (read from checkpoints only)."""
+    rows = []
+    for config in configs:
+        st = plan_status(experiment_entries(config, config_root), store, out_dir, config_root)
+        counts = st["state"].value_counts().to_dict()
+        rows.append({"config": config, "experiment": st["experiment"].iloc[0] if len(st) else "",
+                     "units": len(st), **{k: counts.get(k, 0) for k in
+                                          ("completed", "partial", "not started", "failed", "incompatible",
+                                           "skipped (gate)")}})
     return pd.DataFrame(rows)

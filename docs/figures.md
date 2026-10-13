@@ -64,6 +64,30 @@ These decisions are recorded in `docs/methodology_architecture_log.md`, entries 
 | Provenance | Each figure is written with its exact plotted data (`<id>_data.csv`/`.json`) and `<id>_meta.json`. Each run writes `figure_manifest.json` with config, style, source files (sha256), timestamp and git commit. Existing files are never overwritten. |
 | Style | Styling is central (`configs/figures/style.yaml`): journal widths (single 85 mm, double 178 mm), font sizes, line widths, marker sizes. Output is PDF/SVG (editable text) plus PNG at 600 dpi. The palette is Okabe–Ito (colour-blind safe); categories also differ by marker and fill (grayscale). Maps use `cividis` (sequential) and `RdBu_r` (diverging, symmetric limits). Diverging sign is not recoverable in grayscale, so the data files carry the values. |
 
+## Incomplete inputs, errors and provenance checks
+
+- **Missing inputs are never silent.**
+  - A figure whose inputs are not saved yet is skipped and listed (`MissingInputs`).
+  - A figure drawn while some requested entries, settings or conditions are still missing
+    is marked INCOMPLETE. The missing items are listed in its metadata (`missing_inputs`),
+    in the figure manifest (`incomplete`) and in the `make_figures.py` output. Typical
+    causes: an experiment still running, or cross-dataset settings that did not pass the gate.
+- **Refusals are expected skips.** `IncomparableTiming` and `InvalidStatistics` are deliberate
+  refusals and are recorded as skips.
+- **Code errors are not skips.** Any other exception is a code error: the remaining figures
+  are still written, then the run fails and lists the errors.
+- **Primary results only.** The index uses diagnosis target, k-fold CV and uncalibrated
+  models. Dataset-probe, LOSO and calibrated runs (separate directories) never stand in for
+  a primary result.
+- **One graph run.** All results must come from one graph run, which must equal `--graphs`.
+  Otherwise the figure run is refused (CLAUDE.md rule 7).
+- **Fit-time comparisons.** These use each split's own compute fingerprint, so a run resumed
+  on different hardware is not compared as if it were one environment.
+- **Exp 6 embeddings.** Figure S20 needs embeddings, so `full` saves them
+  (`evaluation.save_embeddings: true`).
+- **Single-experiment diagnostics are separate.** The figures in each experiment's report
+  folder (`docs/experiments.md` §6) are not part of this inventory.
+
 ## Required input files
 
 | Symbol | File (per experiment result directory `<exp>/<variant>/<setting>/`) |

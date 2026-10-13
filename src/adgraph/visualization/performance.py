@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from . import stats as st
-from .results import read_csv, read_manifest, read_summary, same_splits, select, select_unique
+from .results import MissingInputs, read_csv, read_manifest, read_summary, same_splits, select, select_unique
 from .style import (CONDITION_STYLE, METRIC_LABEL, SETTING_LABEL, condition_style, figure_size, marker_kwargs)
 
 CHANCE = {"balanced_accuracy": 0.5, "roc_auc": 0.5}
@@ -48,7 +48,7 @@ def collect_metrics(index, entries, settings, metrics, scope="all", with_ci=Fals
                                  "path": r["path"]})
     df = pd.DataFrame(rows)
     if df.empty:
-        raise ValueError("no saved results matched the figure entries")
+        raise MissingInputs("no saved results matched the figure entries")
     return df
 
 
@@ -202,7 +202,7 @@ def fig_paired_conditions(index, spec, style, stats=None):
     metric, settings = spec["metric"], spec["settings"]
     pairs, refused = matched_condition_pairs(index, spec["experiments"], settings)
     if not pairs:
-        raise ValueError("no PLV/|ciPLV| pairs with identical configuration and identical subject folds")
+        raise MissingInputs("no PLV/|ciPLV| pairs with identical configuration and identical subject folds")
     rows = []
     for a, b in pairs:
         ma, mb = (read_csv(r, "metrics_repeats.csv").query("scope == 'all'").set_index("repeat")[metric] for r in (a, b))
@@ -254,7 +254,7 @@ def fig_band_comparison(index, spec, style, stats=None):
                              "value": m[metric], "path": r["path"]})
     df = pd.DataFrame(rows)
     if df.empty:
-        raise ValueError("no single-band results matched")
+        raise MissingInputs("no single-band results matched")
     dup = df.duplicated(["panel", "band", "setting", "condition", "repeat"])
     if dup.any():
         raise ValueError("several variants per panel/band/condition; refine panel 'where' (e.g. model.encoder)")
@@ -309,7 +309,7 @@ def fig_ablation(index, spec, style, stats=None):
                          "path": r["path"]})
     df = pd.DataFrame(rows)
     if df.empty:
-        raise ValueError("no ablation results matched")
+        raise MissingInputs("no ablation results matched")
     order = [o for o in order if o in set(df["ablation"])]
     conds = [c for c in ("plv", "ciplv") if c in set(df["condition"])]
     fig, axes = plt.subplots(2 * len(conds), len(settings), squeeze=False, sharey="row",
@@ -389,7 +389,7 @@ def fig_age_sensitivity(index, spec, style, stats=None):
                                  "value": m[metric], "path": r["path"]})
     df = pd.DataFrame(rows)
     if df.empty:
-        raise ValueError("no age-sensitivity results matched")
+        raise MissingInputs("no age-sensitivity results matched")
     groups = [g["label"] for g in spec["groups"]]
     fig, axes = plt.subplots(len(groups), len(settings), squeeze=False, sharey=True,
                              figsize=figure_size(style, spec.get("width", "double"),
@@ -427,13 +427,17 @@ def fig_complexity(index, spec, style, stats=None):
         for _, r in select_unique(index, e, [setting]).iterrows():
             hp = read_csv(r, "hparams.csv")
             if quantity not in hp:
-                raise ValueError(f"{r['path']}/hparams.csv has no {quantity!r} (older run)")
+                raise MissingInputs(f"{r['path']}/hparams.csv has no {quantity!r} (older run)")
             mr = read_csv(r, "metrics_repeats.csv").query("scope == 'all'")[metric]
             env = read_manifest(r).get("compute_environment")
             if quantity == "fit_seconds":
                 if not env:
                     raise IncomparableTiming(f"{r['path']}: no compute_environment saved; fit times not comparable")
-                envs.setdefault(env["fingerprint"], env)
+                # each split's own environment: a resumed run may mix splits timed on different machines
+                fps = {env["fingerprint"]} | (set(hp["compute_fingerprint"].astype(str))
+                                              if "compute_fingerprint" in hp else set())
+                for fp in fps:
+                    envs.setdefault(fp, env if fp == env["fingerprint"] else {"fingerprint": fp})
             rows.append({"label": e["label"], "condition": r["condition"], quantity: hp[quantity].mean(),
                          "environment": env.get("fingerprint") if env else None,
                          f"{quantity}_sd": hp[quantity].std(ddof=1) if len(hp) > 1 else np.nan,
@@ -453,8 +457,8 @@ def fig_complexity(index, spec, style, stats=None):
     ax.set_ylabel(METRIC_LABEL.get(metric, metric))
     fig.tight_layout()
     if quantity == "fit_seconds":
-        ax.set_title(f"one environment: {next(iter(envs.values()))['device']}, "
-                     f"{next(iter(envs.values()))['cpu_model'][:40]}", fontsize=5)
+        env0 = next(iter(envs.values()))
+        ax.set_title(f"one environment: {env0.get('device', '?')}, {str(env0.get('cpu_model', '?'))[:40]}", fontsize=5)
     return fig, df.drop(columns=["path"]), _meta(
         "descriptive", UNIT_REPEATS, f"x = mean {quantity} over splits; y = mean ± SD across repeats",
         {"compute_environment": next(iter(envs.values())) if envs else None}), sorted(set(df["path"]))

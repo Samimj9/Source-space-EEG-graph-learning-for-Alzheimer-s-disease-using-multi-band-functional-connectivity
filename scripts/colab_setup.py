@@ -38,7 +38,15 @@ output_root = choose_output_root(data_root)
 head = git("rev-parse", "HEAD")
 pin_file = output_root / "CODE_COMMIT.txt"
 commit, needs_checkout = resolve_code_pin(pin_file, head, update=args.update_code)
+# files the current notebooks call; an older pinned commit without them cannot serve these notebooks
+REQUIRED = ["scripts/experiment.py", "scripts/build_graphs.py", "scripts/make_figures.py", "scripts/run_plan.py",
+            "src/adgraph/colab.py"]
 if needs_checkout:
+    missing = [f for f in REQUIRED if subprocess.run(["git", "cat-file", "-e", f"{commit}:{f}"], cwd=REPO).returncode]
+    if missing:
+        raise SystemExit(f"The pinned code ({commit[:10]}, {pin_file}) is older than these notebooks (it lacks "
+                         f"{missing}). Set UPDATE_CODE = True in the first cell to use the newest code "
+                         "(unfinished work is then recomputed; finished results stay on Drive).")
     sh(f"git checkout -q {commit}", cwd=REPO)
 print(f"code: commit {commit} (pinned in {pin_file})" + (" - newer pushes are ignored until UPDATE_CODE"
                                                           if needs_checkout else ""))

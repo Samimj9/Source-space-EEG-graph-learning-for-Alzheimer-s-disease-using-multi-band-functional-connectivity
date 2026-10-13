@@ -481,6 +481,9 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
 
     hashes = InputHashes(input_hash_cache, rehash=rehash_inputs)
     registry, recs, no_meta, no_rec = build_registry(paths, limit, hashes)
+    unlabelled = registry.loc[registry["label"].isna(), "key"].tolist()
+    if unlabelled:                                # never build graphs without a diagnosis label
+        raise ValueError(f"recordings without a participant row (no AD/HC label): {unlabelled}")
     aux = hash_auxiliary_inputs(paths, hashes)
     log.info("input content hashes: %d files read, %d from cache", hashes.n_hashed,
              len(registry) + len(aux) - hashes.n_hashed)

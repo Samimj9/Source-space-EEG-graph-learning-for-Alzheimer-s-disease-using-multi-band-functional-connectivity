@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 
 from .anatomy import roi_table, subject_level
+from .results import MissingInputs
 from .style import OKABE_ITO, figure_size
 
 LABEL = {"plv": "PLV", "ciplv": "|ciPLV|"}
@@ -67,7 +68,7 @@ def fig_connectivity_matrices(store, spec, style, stats=None):
 
 def fig_connectivity_network(store, spec, style, stats=None):
     if store.roi_coords is None:
-        raise ValueError("graph run has no roi_coords (ROI centroids); cannot draw the network view")
+        raise MissingInputs("graph run has no roi_coords (ROI centroids); cannot draw the network view")
     conn, dataset, top_n = spec["connectivity"], spec.get("dataset"), int(spec.get("display_top_n", 40))
     quantity = spec.get("quantity", "AD_minus_HC")                          # AD_minus_HC | AD_mean | HC_mean
     bands = spec.get("bands", store.bands)

@@ -27,7 +27,10 @@ import logging
 import pandas as pd
 import yaml
 
+from adgraph.evaluation.splits import CROSS_SETTINGS
 from adgraph.experiments.config import expand_variants, load_experiment, set_dotted
+from adgraph.experiments.gate import gate_failures
+from adgraph.experiments.plan import variant_matches
 from adgraph.experiments.runner import dry_run, experiment_status, run_variant
 from adgraph.graphs.dataset import build_dataset
 from adgraph.graphs.store import GraphStore
@@ -39,7 +42,8 @@ src = parser.add_mutually_exclusive_group(required=True)
 src.add_argument("--graphs", help="graph run directory (graphs.npz, windows.csv, ...)")
 src.add_argument("--synthetic", action="store_true", help="use a synthetic store (framework test only)")
 parser.add_argument("--settings", nargs="+", help="default: the config's settings list")
-parser.add_argument("--variants", nargs="+", help="only variants whose name contains one of these strings")
+parser.add_argument("--variants", nargs="+",
+                    help="only variants containing one of these as whole name tokens ('plv' excludes 'ciplv')")
 parser.add_argument("--override", action="append", default=[], help="dotted.key=yaml_value, applied before expansion")
 parser.add_argument("--out", help="output root (required unless --dry-run)")
 parser.add_argument("--dry-run", action="store_true")
@@ -62,7 +66,7 @@ for item in args.override:
     cfg = set_dotted(cfg, key, yaml.safe_load(value))
 variants = expand_variants(cfg)
 if args.variants:
-    variants = [v for v in variants if any(s in v["name"] for s in args.variants)]
+    variants = [v for v in variants if variant_matches(v, args.variants)]
 settings = args.settings or cfg["settings"]
 
 if args.synthetic:
@@ -88,9 +92,14 @@ if args.status:
     raise SystemExit
 if not args.synthetic:
     verify_environment()
+gate = gate_failures(store)
 for v in variants:
     data = None
     for s in settings:
+        if s in CROSS_SETTINGS and gate and not v["evaluation"].get("allow_ungated_cross_dataset", False):
+            print(f"{v['name']} / {s}: not run, cross-dataset gate not passed: {'; '.join(gate)}")
+            continue
+        data = build_dataset(store, v) if data is None else data   # one dataset per variant, all settings
         summary = run_variant(store, v, s, args.out, data=data, resume=args.resume, force=args.force,
                               allow_ephemeral=args.allow_ephemeral_storage)
 print(f"outputs under: {args.out}")

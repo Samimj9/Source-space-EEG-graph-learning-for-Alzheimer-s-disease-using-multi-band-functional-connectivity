@@ -36,7 +36,7 @@ def normalize_channel_name(name: str, valid: list[str]) -> str | None:
     """Map an EDF label (e.g. ``'EEG FP1-REF'``, ``'Fp1.'``) to a canonical name, or None."""
     s = name.strip().rstrip(".").strip()
     s = re.sub(r"^(EEG|EXG)[\s_-]*", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"[-_](REF|LE|AVG|AR)$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"[-_](REF|LE|AVG|AR|A1A2|A1|A2|M1M2|M1|M2)$", "", s, flags=re.IGNORECASE)   # reference suffix
     s = s.replace(" ", "")
     lookup = {v.lower(): v for v in valid}
     return lookup.get(s.lower())
@@ -109,12 +109,12 @@ def inspect_headers(recordings: pd.DataFrame, valid: list[str]) -> pd.DataFrame:
     for rec in recordings.itertuples():
         raw = mne.io.read_raw_edf(rec.path, preload=False, verbose="error")
         mapping, unknown = channel_mapping(raw.ch_names, valid)
-        units = sorted({str(ch.get("unit_mul", "")) for ch in raw.info["chs"]})
+        units = sorted({str(u) for u in (getattr(raw, "_orig_units", None) or {}).values()})   # header units
         rows.append({
             "key": rec.key, "dataset": rec.dataset, "n_channels": len(raw.ch_names),
             "sfreq": raw.info["sfreq"], "duration_s": raw.n_times / raw.info["sfreq"],
             "missing_canonical": ",".join(c for c in valid if c not in mapping.values()),
-            "unrecognised": ",".join(unknown), "raw_names": ",".join(raw.ch_names), "unit_mul": ",".join(units),
+            "unrecognised": ",".join(unknown), "raw_names": ",".join(raw.ch_names), "header_units": ",".join(units),
         })
     return pd.DataFrame(rows)
 

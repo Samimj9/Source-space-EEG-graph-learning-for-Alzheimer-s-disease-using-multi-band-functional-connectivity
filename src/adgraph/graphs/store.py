@@ -12,7 +12,7 @@ A run directory contains
                                            influence; never used as an adjacency)
                      psd_abs/psd_log/psd_rel            (n_windows, n_bands, n_rois) float32
                      sensor_psd_abs/_log/_rel           (n_windows, n_bands, n_channels) float32
-                   and constants: bands, band_edges, roi_names, channels, W,
+                   and constants: bands, band_edges, roi_names, channels,
                    roi_coords (n_rois, 3) MNI mm label centroids (optional; visualization only)
     windows.csv    one row per window: identifiers + QC (see WINDOW_COLUMNS)
     subjects.csv   one row per subject: metadata + QC
