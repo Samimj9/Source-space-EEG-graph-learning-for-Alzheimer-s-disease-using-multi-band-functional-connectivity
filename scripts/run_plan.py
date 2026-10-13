@@ -20,6 +20,7 @@ from adgraph.config import load_paths
 from adgraph.experiments.plan import load_plan, plan_status, run_plan
 from adgraph.graphs.store import GraphStore
 from adgraph.pipeline import latest_complete_graph_run
+from adgraph.progress import log_handler_context
 from adgraph.provenance import verify_environment
 
 parser = argparse.ArgumentParser()
@@ -48,7 +49,8 @@ if args.status:
 
 verify_environment()
 store = GraphStore.load(graphs)
-result = run_plan(entries, store, out, allow_ephemeral=args.allow_ephemeral_storage)
+with log_handler_context():
+    result = run_plan(entries, store, out, allow_ephemeral=args.allow_ephemeral_storage)
 print(result.drop(columns=["updated"]).to_string(index=False))
 print("\n" + result["state"].value_counts().to_string())
 bad = result[result["state"].isin(["failed", "incompatible"])]

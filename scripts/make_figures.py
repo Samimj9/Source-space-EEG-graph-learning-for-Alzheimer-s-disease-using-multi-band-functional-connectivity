@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from adgraph.graphs.store import GraphStore
+from adgraph.progress import log_handler_context
 from adgraph.storage import check_persistent
 from adgraph.visualization.figures import make_figures
 
@@ -47,8 +48,9 @@ if args.synthetic_demo:
 elif args.graphs:
     store = GraphStore.load(args.graphs)
 
-writer = make_figures(config, out, results, store, args.stats, args.style, synthetic=args.synthetic_demo,
-                      only=args.only, on_missing=args.on_missing)
+with log_handler_context():
+    writer = make_figures(config, out, results, store, args.stats, args.style, synthetic=args.synthetic_demo,
+                          only=args.only, on_missing=args.on_missing)
 print(f"{len(writer.figures)} figures written to {out}")
 if writer.skipped:
     print("skipped (inputs not saved yet, or refused):\n" + json.dumps(writer.skipped, indent=1))

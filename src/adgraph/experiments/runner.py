@@ -46,6 +46,7 @@ from ..checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, at
                           supersede, write_marker)
 from ..graphs.store import graph_run_id
 from ..provenance import compute_environment, git_commit, git_dirty, versions
+from .. import progress
 from ..storage import check_persistent
 from .config import apply_hparams, hparam_grid
 from .gate import gate_failures
@@ -222,10 +223,13 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
     scores = []
     if v["input"] != "graph":
         ckpt = None                                   # inner-trial cache only where fits are expensive
+    n_trials, trial = len(grid) * len(folds), 0
     for params in grid:
         vp = apply_hparams(v, params)
         preds = []
         for i, (itr, iva) in enumerate(folds):
+            trial += 1
+            progress.set(inner=f"{trial}/{n_trials}")
             val = train_view.take(iva, "val")
             name = ident = None
             if ckpt is not None:
@@ -245,6 +249,7 @@ def select_hparams(data: Dataset, train_idx: np.ndarray, v: dict, setting: str, 
         subj = aggregate_subjects(pd.concat(preds))
         score = binary_metrics(subj["y"], subj["score"], score_threshold(v))[ev["selection_metric"]]
         scores.append({**params, "inner_score": score})
+    progress.set(inner="refit")
     best = max(range(len(grid)), key=lambda i: -np.inf if np.isnan(scores[i]["inner_score"])
                else scores[i]["inner_score"])
     return grid[best], scores
@@ -275,7 +280,11 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
     preds, folds, hps = [], [], []
     if ckpt is not None:
         ckpt.status.ensure([fold_unit_name(sp) for sp in splits])
-    for sp in splits:
+    n_rep, n_fold = len({sp.repeat for sp in splits}), len({sp.fold for sp in splits})
+    done_here: list[float] = []                   # durations of folds computed in this session (unit ETA)
+    for i_sp, sp in enumerate(splits):
+        if ckpt is not None:
+            progress.set(repeat=f"{sp.repeat + 1}/{n_rep}", fold=f"{sp.fold + 1}/{n_fold}")
         tr, te = fold_indices(meta, sp)
         tr_g, te_g = sub[tr], sub[te]
         seed = int(ev["seed"] + 1000 * sp.repeat + sp.fold)
@@ -293,8 +302,9 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
                     embeddings_out.append(emb)
                 if ckpt.status.get(name) != "completed":
                     ckpt.status.set(name, "completed", "validated existing checkpoint")
-                continue
+                continue                          # already counted as done by the progress bar
             ckpt.status.set(name, "running")
+        t_fold = time.perf_counter()
         try:
             params, scores = select_hparams(data, tr_g, v, setting, seed, ckpt, sp_id, name)
             t0 = time.perf_counter()
@@ -339,9 +349,16 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
         if ckpt is not None:
             ckpt.save_fold(name, ident, out, fold_rows, hp_row, emb)
             ckpt.status.set(name, "completed")
+            done_here.append(time.perf_counter() - t_fold)
+            remaining = len(splits) - i_sp - 1
+            eta = (sum(done_here) / len(done_here) * remaining) if len(done_here) >= 2 and remaining else None
+            progress.set(inner=None, **{"unit ETA": progress.fmt_seconds(eta) if eta is not None else None})
+            progress.advance(timed=False)
         preds.append(out)
         folds += fold_rows
         hps.append(hp_row)
+    if ckpt is not None:
+        progress.set(repeat=None, fold=None, inner=None, **{"unit ETA": None})
     return pd.concat(preds, ignore_index=True), pd.DataFrame(folds), pd.DataFrame(hps)
 
 
@@ -466,6 +483,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
             name = f"perm_{p:04d}"
             ident = ck.unit_identity("perm", index=p, n_repeats=perm_cfg.get("n_repeats", 1), seed=ev["seed"])
             val = ck.load_perm(name, ident)
+            progress.set(permutation=f"{p + 1}/{perm_cfg['n']}")
             if val is None:
                 rng = np.random.default_rng([ev["seed"], p])          # independent per permutation (resumable)
                 p_pred, _, _ = cross_validate(permute_subject_labels(data, rng), v, setting,
@@ -473,7 +491,9 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
                 _, p_rep, _ = evaluate(p_pred, thr, n_boot=0)
                 val = float(p_rep.loc[p_rep["scope"] == "all", "roc_auc"].mean())
                 ck.save_perm(name, ident, val)
+                progress.advance(timed=False)
             null.append(val)
+        progress.set(permutation=None)
         observed = per_repeat.loc[per_repeat["scope"] == "all", "roc_auc"].mean()
         summary["permutation"] = {"metric": "roc_auc", "observed": observed, "n": len(null),
                                   "p_value": permutation_p_value(observed, np.array(null)), "null": null}
@@ -509,9 +529,11 @@ def experiment_status(store: GraphStore, v: dict, setting: str, out_dir: str | P
     target = target_column(v.get("target", "label"))
     meta = _meta(store, v.get("target", "label"))
     _, _, splits = _splits(meta, v, setting, target)
+    perm_cfg = v["evaluation"].get("permutation", {}) or {}
+    n_perm = int(perm_cfg.get("n", 0) or 0)
     row = {"experiment": v["experiment"], "variant": v["variant"], "setting": setting, "folds_total": len(splits),
-           "folds_completed": 0, "folds_failed": 0, "inner_trials_cached": 0, "state": "not started",
-           "changed": ""}
+           "folds_completed": 0, "folds_failed": 0, "inner_trials_cached": 0, "perms_total": n_perm,
+           "perms_completed": 0, "state": "not started", "changed": ""}
     if not out.exists():
         return row
     ident_file = out / "_identity.json"
@@ -533,6 +555,9 @@ def experiment_status(store: GraphStore, v: dict, setting: str, out_dir: str | P
         elif ck.status.get(fold_unit_name(sp)) == "failed":
             row["folds_failed"] += 1
     row["inner_trials_cached"] = len(list(ck.units.glob("inner_*.done.json"))) if ck.units.exists() else 0
+    for p in range(n_perm):
+        pid = ck.unit_identity("perm", index=p, n_repeats=perm_cfg.get("n_repeats", 1), seed=ev["seed"])
+        row["perms_completed"] += check_unit(ck.units, f"perm_{p:04d}", pid)[0] == "complete"
     final_state, _ = check_unit(out, "final", {**ident, "full_config_hash": config_hash(v)})
     row["state"] = ("completed" if final_state == "complete" else
                     "failed" if row["folds_failed"] else

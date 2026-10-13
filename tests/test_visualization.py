@@ -38,9 +38,8 @@ EXP1_SVM = {"label": "Exp1 SVM", "experiment": "exp1_source_psd", "where": {"mod
 
 
 @pytest.fixture(scope="module")
-def synth(tmp_path_factory):
-    root = tmp_path_factory.mktemp("synthetic_inputs")
-    store, results = build_synthetic_results(root, cohort={"D1": (5, 5), "D2": (5, 6)})
+def synth(synthetic_results):
+    store, results = synthetic_results                 # shared session fixture (conftest)
     return store, results, index_results(results)
 
 

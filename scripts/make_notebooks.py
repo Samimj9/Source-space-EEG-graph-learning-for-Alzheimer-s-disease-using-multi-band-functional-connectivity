@@ -9,7 +9,7 @@ Layout:
                                                     dataset probe, EEG + age)
     notebooks/03_comparative_figures.ipynb          paper figures across experiments
     notebooks/advanced/Run_all_experiments_ADVANCED.ipynb   whole plan; does nothing unless enabled
-    notebooks/README.md                             index with Colab links and cost estimates
+    notebooks/README.md                             index with Colab links and the Drive output layout
 
 Every notebook: Runtime -> Run all, nothing to edit. Scientific code lives in src/adgraph.
 """
@@ -28,7 +28,6 @@ OWNER_REPO = "Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-us
 BRANCH = "claude/ecstatic-davinci-a2e8mh"
 REPO_URL = f"https://github.com/{OWNER_REPO}.git"
 COLAB = f"https://colab.research.google.com/github/{OWNER_REPO}/blob/{BRANCH}/notebooks"
-ESTIMATES = REPO / "results" / "tables" / "runtime_estimates_synthetic.csv"
 
 # (folder, notebook name, config, title, one-line description)
 EXPERIMENTS = [
@@ -122,23 +121,6 @@ def notebook(cells: list[dict], gpu: bool = False) -> dict:
     return {"cells": cells, "metadata": meta, "nbformat": 4, "nbformat_minor": 0}
 
 
-# ------------------------------------------------------------------ cost table (synthetic, measured)
-def cost_lines(experiment: str) -> tuple[str, float | None]:
-    if not ESTIMATES.exists():
-        return "", None
-    t = pd.read_csv(ESTIMATES)
-    t = t[t["experiment"] == experiment]
-    if t.empty:
-        return "", None
-    per = t.groupby("variant", sort=False)["cpu_hours"].sum()
-    total = float(per.sum())
-    fmt = lambda h: f"{h * 60:.0f} min" if h < 1 else f"{h:.1f} h"  # noqa: E731
-    shown = per if len(per) <= 8 else per.sort_values(ascending=False)
-    lines = "\n".join(f"| `{v}` | {fmt(h)} |" for v, h in list(shown.items())[:8])
-    more = f"\n| … {len(per) - 8} more variants | {fmt(float(shown.iloc[8:].sum()))} |" if len(per) > 8 else ""
-    return f"| variant | CPU time |\n|---|---|\n{lines}{more}\n| **total** | **{fmt(total)}** |", total
-
-
 def protocol(cfg_path: str) -> tuple[list[dict], str]:
     variants = expand_variants(load_experiment(REPO / "configs" / "experiments" / f"{cfg_path}.yaml"))
     v = variants[0]
@@ -158,31 +140,26 @@ def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict
     variants, proto = protocol(cfg_path)
     experiment = variants[0]["experiment"]
     gnn = variants[0]["input"] == "graph"
-    table, cpu_h = cost_lines(experiment)
     config = f"configs/experiments/{cfg_path}.yaml"
-    cost = (f"""
-**Estimated cost before you start.** Measured with the same estimator on synthetic data of the real
-size (43 subjects × 27 windows) on a 2-vCPU machine (like a Colab CPU runtime):
-
-{table}
-
-{"A GPU runtime (T4) is usually several times faster for GNNs. " if gnn else "Classical models run on the CPU; a GPU is not needed. "}Section 1
-below **measures the cost again on your runtime and the real graphs** (and shows the time remaining
-when resuming) before anything is trained. Large experiments take several Colab sessions: just
-*Run all* again after each disconnect.""" if table else "")
     nb = notebook([
         md(f"# {title}\n\n{desc}\n\n**Runs only this experiment** (`{config}`): every predefined variant and "
            f"setting, with nested cross-validation, evaluation and checkpointing. It never starts another "
-           f"experiment.\n\n{proto}\n" + HOWTO + cost + f"""
+           f"experiment.\n\n{proto}\n" + HOWTO + f"""
+**Progress** is shown as one updating line: completed outer folds of the whole experiment
+(previously completed folds recovered from Drive count as done immediately), current variant,
+setting, repeat and fold, inner-CV trial{", training epoch" if gnn else ""}, and the counts of finished /
+resumed / failed / skipped units. An ETA is shown only for the current variant and setting, from folds
+computed in this session.{" Large GNN experiments take several Colab sessions: just *Run all* again after each disconnect." if gnn else ""}
 
 Results are saved under `<outputs>/experiments/{experiment}/` on Drive: per-fold/repeat checkpoints,
 window and subject predictions, metrics per repeat, selected hyperparameters, summaries, manifests,
-and a report folder (results table + **single-experiment diagnostic figures**). The comparative paper
-figures across experiments are made separately (`03_comparative_figures.ipynb`).
+runtime and peak memory per unit (`_run_status.csv`), and a report folder (results table +
+**single-experiment diagnostic figures**). The comparative paper figures across experiments are made
+separately (`03_comparative_figures.ipynb`).
 
 Requires the graphs from `01_build_graphs.ipynb`."""),
         code(SETUP),
-        md("## 1. This experiment: progress so far and measured cost on this runtime"),
+        md("## 1. This experiment: progress so far (from the checkpoints on Drive)"),
         code(f"""CONFIG = '{config}'   # this notebook's experiment
 EXPERIMENT = '{experiment}'
 import torch
@@ -190,36 +167,45 @@ print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_avai
 """ + ("""if not torch.cuda.is_available():
     print('NOTE: GNN experiment on CPU. It works, but a GPU runtime (Runtime > Change runtime type > T4 GPU) '
           'is much faster. Interrupt now if you want to switch; nothing is lost.')
-""" if gnn else "") + """sh(f"python scripts/experiment.py status --config {CONFIG}")
-sh(f"python scripts/experiment.py estimate --config {CONFIG}")"""),
+""" if gnn else "") + """sh(f"python scripts/experiment.py status --config {CONFIG}")"""),
         md("## 2. Run (or resume) this experiment\nSaves every completed fold to Drive as it goes. "
-           "Units that fail are recorded and the others continue."),
-        code("""try:
+           "Units that fail are recorded and the others continue; failures are reported at the end of "
+           "section 3 (after the results are shown) and stop *Run all* with an error."),
+        code("""RUN_ERROR = None
+try:
     sh(f"python scripts/experiment.py run --config {CONFIG}")
-except RuntimeError:
-    print('\\nWARNING: some units failed or are incompatible; see the table in section 3 and '
-          f'{OUT}/experiments/{EXPERIMENT}/_run_status.csv')"""),
+except RuntimeError as exc:
+    RUN_ERROR = exc
+    print('\\nSome units failed or are incompatible; details after the results below.')"""),
         md("## 3. Results of this experiment (saved outputs only)\nSubject-level metrics: mean ± SD over CV "
-           "repeats, subject-bootstrap 95 % CI. Diagnostic figures of this experiment only; not the "
-           "comparative paper figures. Nothing is selected or ranked here."),
+           "repeats, subject-bootstrap 95 % CI. Runtime and peak memory per variant and setting. "
+           "Diagnostic figures of this experiment only; not the comparative paper figures. Nothing is "
+           "selected or ranked here."),
         code("""sh(f"python scripts/experiment.py report --config {CONFIG}")
 from pathlib import Path
 import pandas as pd
 from IPython.display import Image, display
-report = sorted((Path(OUT) / 'experiments' / EXPERIMENT / '_reports').glob('report_*'))[-1]
+exp_dir = Path(OUT) / 'experiments' / EXPERIMENT
+report = sorted((exp_dir / '_reports').glob('report_*'))[-1]
 print('report folder on Drive:', report)
-table = pd.read_csv(report / 'results_summary.csv')
 pd.set_option('display.max_rows', 500, 'display.width', 250)
-if len(table):
-    display(table)
-else:
-    print('no completed results yet')
+table = pd.read_csv(report / 'results_summary.csv')
+display(table) if len(table) else print('no completed results yet')
+status = pd.read_csv(exp_dir / '_run_status.csv') if (exp_dir / '_run_status.csv').exists() else pd.DataFrame()
+if len(status):
+    print('runtime and peak memory of the last run (seconds, MB):')
+    display(status[['variant', 'setting', 'state', 'seconds', 'mem_peak_mb', 'message']])
 for png in sorted((report / 'figures').glob('D[12]_*.png')):
     print(png.name)
     display(Image(filename=str(png)))
-print('all files:', sorted(p.name for p in (report / 'figures').glob('*.png')))"""),
+print('all figures:', sorted(p.name for p in (report / 'figures').glob('*.png')))
+bad = status[status['state'].isin(['failed', 'incompatible'])] if len(status) else status
+if RUN_ERROR is not None or len(bad):
+    raise RuntimeError(f"{len(bad)} unit(s) of {EXPERIMENT} did not complete (see the table above and "
+                       f"{exp_dir / '_run_status.csv'}); completed units are saved. Fix the cause, then Run all "
+                       "again: only the incomplete units are recomputed.")"""),
     ], gpu=gnn)
-    entry = {"folder": folder, "name": name, "title": title, "config": config, "gpu": gnn, "cpu_hours": cpu_h}
+    entry = {"folder": folder, "name": name, "title": title, "config": config, "gpu": gnn}
     return nb, entry
 
 
@@ -233,6 +219,14 @@ Steps (each stops the notebook with a clear message if something is wrong):
 4. smoke test on the first subject of each dataset (downloads fsaverage into the Drive cache once);
 5. full graph construction for all 43 recordings (several hours; resumable);
 6. quality summary (including peak memory per subject; also saved in `memory_log.csv`).
+
+**Progress** is shown as updating bars: input hashing, the source operator (built once, then loaded
+from the Drive cache), then one line for all recordings (e.g. `12/43`) with the current subject,
+dataset and processing stage (loading, preprocessing, source reconstruction, connectivity per band,
+PSD, saving the checkpoint), the counts of done / resumed / failed / pending recordings and, once two
+recordings have been processed in this session, an ETA. Then assembly and saving of the cohort.
+Recordings already completed on Drive count as done immediately and are not recomputed.
+Runtime and peak memory per recording are saved in `subjects.csv` and `memory_log.csv`.
 
 Then open one experiment notebook in `notebooks/experiments/` (e.g. `Exp0_sensor_psd.ipynb`).
 A GPU is not needed for this notebook."""),
@@ -272,8 +266,13 @@ if mem is not None:
     print(f"memory: highest peak {mem['mem_peak_mb'].max():.0f} MB per unit "
           f"(machine total {mem['mem_total_mb'].max():.0f} MB; lowest available {mem['mem_available_before_mb'].min():.0f} MB)")
 s = pd.read_csv(run / 'subjects.csv')
-s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels', 'n_windows_kept',
-   'n_windows_total', 'mem_peak_mb', 'status'] if c in s]]"""),
+from IPython.display import display
+display(s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels',
+                       'n_windows_kept', 'n_windows_total', 'seconds', 'mem_peak_mb', 'status'] if c in s]])
+errors = s[s['status'].astype(str).str.startswith('error')]
+if len(errors):   # below_min_windows is the pre-specified exclusion, not an error
+    raise RuntimeError(f"{len(errors)} recording(s) failed: {errors[['key', 'status']].to_dict('records')}. "
+                       "Completed recordings are saved; fix the cause and Run all again (only failed ones rerun).")"""),
     ])
 
 
@@ -335,39 +334,67 @@ else:
     ], gpu=True)
 
 
+DRIVE_LAYOUT = """\
+<outputs>/                          AD-LEB/processed (or My Drive/AD-LEB-processed if that is read-only)
+├── CODE_COMMIT.txt                 code commit used by every session and notebook
+├── header_report_<time>.csv        EDF header checks (notebook 01, step 3)
+├── cache/
+│   ├── subjects/fsaverage/         fsaverage template (downloaded once)
+│   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
+│   ├── input_sha256.json           content hashes of EDFs and sheets
+│   └── tests_passed/<commit>_<env>.txt            test-suite pass record
+├── graphs_v3_<config hash>_limit1/ smoke test (never used for analysis)
+├── graphs_v3_<config hash>/        graph run used by the experiments
+│   ├── run_identity.json  status.csv  memory_log.csv
+│   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
+│   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
+│   └── _superseded/<time>/         replaced checkpoints (never deleted)
+├── experiments/
+│   └── <experiment>/               one folder per experiment notebook
+│       ├── <variant>/<setting>/    predictions_windows.csv predictions_subjects.csv metrics_repeats.csv
+│       │                           folds.csv hparams.csv summary.json manifest.json [embeddings.npz]
+│       │                           final.done.json _identity.json status.csv units/ (fold, inner-trial,
+│       │                           permutation checkpoints)
+│       ├── _run_status.csv         state, runtime (s) and peak memory (MB) per variant and setting
+│       ├── _estimates/             (only if `experiment.py estimate` is run manually)
+│       └── _reports/report_<time>/ results_summary.csv progress.csv README.txt figures/ (diagnostics D1-D4)
+└── figures/figures_<time>/         comparative paper figures (notebook 03): figure files, data,
+                                    metadata, figure_manifest.json
+"""
+
+
 def readme(entries: list[dict]) -> str:
-    fmt = lambda h: "" if h is None else (f"{h * 60:.0f} min" if h < 1 else f"{h:.0f} h")  # noqa: E731
     rows = "\n".join(
-        f"| [{e['name']}]({COLAB}/{e['folder']}/{e['name']}.ipynb) | `{e['config']}` | "
-        f"{'GPU' if e['gpu'] else 'CPU'} | {fmt(e['cpu_hours'])} |" for e in entries)
+        f"| [{e['folder']}/{e['name']}.ipynb]({COLAB}/{e['folder']}/{e['name']}.ipynb) | `{e['config']}` | "
+        f"{'GPU (T4)' if e['gpu'] else 'CPU'} |" for e in entries)
     return f"""# Colab notebooks
 
 Open a notebook in Colab (links below), then *Runtime → Run all*. Nothing needs to be edited;
-everything is saved to Google Drive, and *Run all* again resumes after a disconnect. These files
+everything is saved to Google Drive, and *Run all* again resumes after a disconnect (finished work
+is shown as done and never recomputed). Progress is shown as updating progress bars. These files
 are generated by `scripts/make_notebooks.py` (do not edit them by hand).
 
-1. [01_build_graphs]({COLAB}/01_build_graphs.ipynb): graphs + QC (first, once).
+1. [01_build_graphs.ipynb]({COLAB}/01_build_graphs.ipynb): graphs + QC (first, once).
 2. One experiment at a time ([notebooks/experiments](experiments)): each runs **only** its own
-   experiment, saves its results and shows them. Review, then choose the next one.
-3. [03_comparative_figures]({COLAB}/03_comparative_figures.ipynb): paper figures comparing experiments
-   (after the experiments you need have finished).
+   experiment with the full protocol, saves its results and shows them. Review, then choose the next.
+3. [03_comparative_figures.ipynb]({COLAB}/03_comparative_figures.ipynb): paper figures comparing
+   experiments (after the experiments you need have finished).
 
 Optional: secondary analyses in [notebooks/additional](additional), and
-[advanced/Run_all_experiments_ADVANCED]({COLAB}/advanced/Run_all_experiments_ADVANCED.ipynb) (whole plan;
-starts nothing unless explicitly enabled).
+[advanced/Run_all_experiments_ADVANCED.ipynb]({COLAB}/advanced/Run_all_experiments_ADVANCED.ipynb)
+(whole plan; starts nothing unless explicitly enabled).
 
-## Experiment notebooks and estimated cost
+## Experiment notebooks
 
-CPU time measured with the notebooks' own estimator on synthetic data of the real size (43 subjects
-× 27 windows), 2 CPU threads (like a Colab CPU runtime), full protocol from the configs, checkpoint
-writes excluded (`results/tables/runtime_estimates_synthetic.csv`, `scripts/estimate_runtime_synthetic.py`).
-GNN notebooks are set to a GPU runtime, which is usually several times faster; every notebook
-re-measures the cost on its runtime and the real graphs before training (section 1).
+| Notebook | Config | Runtime type |
+|---|---|---|
+{{rows}}
 
-| Notebook | Config | Runtime | CPU time (est.) |
-|---|---|---|---|
-{rows}
-"""
+## Google Drive output structure
+
+```
+{{DRIVE_LAYOUT}}```
+""".replace("{rows}", rows).replace("{DRIVE_LAYOUT}", DRIVE_LAYOUT)
 
 
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:

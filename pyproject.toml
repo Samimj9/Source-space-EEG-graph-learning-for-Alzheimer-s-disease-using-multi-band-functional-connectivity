@@ -16,6 +16,7 @@ dependencies = [
     "mne>=1.6",
     "scikit-learn>=1.4",
     "matplotlib>=3.8",
+    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]

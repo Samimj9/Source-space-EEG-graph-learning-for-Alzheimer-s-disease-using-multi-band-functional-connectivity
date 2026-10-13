@@ -115,12 +115,8 @@ def test_graph_run_refuses_recordings_without_label(cohort):
 
 # ----------------------------------------------------------------- figures
 @pytest.fixture(scope="module")
-def results(tmp_path_factory):
-    from adgraph.visualization.demo import build_synthetic_results
-
-    root = tmp_path_factory.mktemp("audit_fig")
-    store, results = build_synthetic_results(root, cohort={"D1": (5, 5), "D2": (5, 6)})
-    return store, Path(results)
+def results(synthetic_results):
+    return synthetic_results                           # shared session fixture (conftest)
 
 
 def _paper():

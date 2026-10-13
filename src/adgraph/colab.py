@@ -27,12 +27,25 @@ EXPECTED = {"D1": {"recordings": 20, "AD": 10, "HC": 10}, "D2": {"recordings": 2
 
 
 def sh(cmd: str, cwd: str | Path | None = None) -> None:
-    """Run a shell command, print its output live, raise if it fails (stops "Run all")."""
+    """Run a shell command, show its output live, raise if it fails (stops "Run all").
+
+    Output is forwarded in raw chunks as it arrives (not line by line), so carriage-return
+    progress bars redraw in place in the notebook instead of printing a new line per update."""
+    import codecs
+    import os
+
     print(f"$ {cmd}", flush=True)
-    p = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         bufsize=1)
-    for line in p.stdout:
-        print(line, end="", flush=True)
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    p = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    while True:
+        chunk = os.read(p.stdout.fileno(), 8192)
+        if not chunk:
+            break
+        sys.stdout.write(decoder.decode(chunk))
+        sys.stdout.flush()
+    sys.stdout.write(decoder.decode(b"", final=True))
+    sys.stdout.flush()
     if p.wait():
         raise RuntimeError(f"command failed (exit {p.returncode}): {cmd}")
 

@@ -11,6 +11,7 @@ skipped, with the reason recorded, when the graph run does not pass the DESIGN.m
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,9 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from .. import progress
 from ..checkpoint import IncompatibleCheckpoint, atomic_write_csv
+from ..memory import MemoryTracker
 from ..evaluation.splits import CROSS_SETTINGS
 from ..graphs.dataset import build_dataset
 from ..graphs.store import GraphStore
@@ -29,7 +32,7 @@ from .runner import experiment_status, run_variant
 log = logging.getLogger(__name__)
 
 STATUS_COLUMNS = ["order", "config", "experiment", "variant", "setting", "state", "subject_roc_auc",
-                  "subject_balanced_accuracy", "message", "updated"]
+                  "subject_balanced_accuracy", "seconds", "mem_peak_mb", "message", "updated"]
 
 
 def variant_matches(v: dict, filters) -> bool:
@@ -102,32 +105,59 @@ def run_plan(entries: list[dict], store: GraphStore, out_dir: str | Path, config
     gate = gate_failures(store)
     rows, data_cache = [], {}
     status_path = Path(status_path) if status_path else out_dir / "_plan_status.csv"
-    for i, (order, config, v, setting) in enumerate(units):
-        row = {"order": order, "config": config, "experiment": v["experiment"], "variant": v["variant"],
-               "setting": setting, "subject_roc_auc": float("nan"), "subject_balanced_accuracy": float("nan"),
-               "message": ""}
-        allow = v["evaluation"].get("allow_ungated_cross_dataset", False)
-        if setting in CROSS_SETTINGS and gate and not allow:
-            row.update(state="skipped", message="cross-dataset gate not passed: " + "; ".join(gate))
-        else:
-            log.info("[%d/%d] %s / %s", i + 1, len(units), v["name"], setting)
-            try:
-                if v["name"] not in data_cache:
-                    data_cache.clear()                    # one variant's dataset in memory at a time
-                    data_cache[v["name"]] = build_dataset(store, v)
-                summary = run_variant(store, v, setting, out_dir, data=data_cache[v["name"]], resume=resume,
-                                      allow_ephemeral=allow_ephemeral)
-                row.update(state="completed", subject_roc_auc=_metric(summary, "roc_auc"),
-                           subject_balanced_accuracy=_metric(summary, "balanced_accuracy"))
-            except IncompatibleCheckpoint as exc:
-                row.update(state="incompatible", message=str(exc)[:500])
-                log.error("%s / %s: %s", v["name"], setting, exc)
-            except Exception as exc:                      # recorded; KeyboardInterrupt etc. propagate
-                row.update(state="failed", message=f"{type(exc).__name__}: {exc}"[:500])
-                log.error("%s / %s failed:\n%s", v["name"], setting, traceback.format_exc())
-        row["updated"] = datetime.now(timezone.utc).isoformat()
-        rows.append(row)
-        atomic_write_csv(status_path, pd.DataFrame(rows, columns=STATUS_COLUMNS))
+    gated = lambda v, s: (s in CROSS_SETTINGS and gate  # noqa: E731
+                          and not v["evaluation"].get("allow_ungated_cross_dataset", False))
+    # checkpoint-aware totals: every outer fold and permutation of every runnable unit; those already
+    # completed on Drive are shown as done from the start and never recomputed
+    total = done = 0
+    before = {}
+    for _, _, v, s in units:
+        if not gated(v, s):
+            st = experiment_status(store, v, s, out_dir)
+            before[(v["name"], s)] = st["state"]
+            total += st["folds_total"] + st["perms_total"]
+            done += (st["folds_completed"] + st["perms_completed"]) if st["state"] != "incompatible" else 0
+    desc = units[0][2]["experiment"] if len({u[2]["experiment"] for u in units}) == 1 else "experiments"
+    with progress.reporter(total, desc, initial=done, unit="folds+perms", eta=False,
+                           counts={"units done": 0, "resumed": 0, "failed": 0, "skipped": 0,
+                                   "pending": len(units)}) as bar:
+        for i, (order, config, v, setting) in enumerate(units):
+            row = {"order": order, "config": config, "experiment": v["experiment"], "variant": v["variant"],
+                   "setting": setting, "subject_roc_auc": float("nan"), "subject_balanced_accuracy": float("nan"),
+                   "seconds": float("nan"), "mem_peak_mb": float("nan"), "message": ""}
+            bar.set(variant=v["variant"], setting=setting)
+            if gated(v, setting):
+                row.update(state="skipped", message="cross-dataset gate not passed: " + "; ".join(gate))
+            else:
+                log.info("[%d/%d] %s / %s", i + 1, len(units), v["name"], setting)
+                t0 = time.perf_counter()
+                try:
+                    with MemoryTracker() as m:
+                        if v["name"] not in data_cache:
+                            data_cache.clear()            # one variant's dataset in memory at a time
+                            data_cache[v["name"]] = build_dataset(store, v)
+                        summary = run_variant(store, v, setting, out_dir, data=data_cache[v["name"]],
+                                              resume=resume, allow_ephemeral=allow_ephemeral)
+                    row.update(state="completed", subject_roc_auc=_metric(summary, "roc_auc"),
+                               subject_balanced_accuracy=_metric(summary, "balanced_accuracy"),
+                               mem_peak_mb=m.record()["mem_peak_mb"])
+                except IncompatibleCheckpoint as exc:
+                    row.update(state="incompatible", message=str(exc)[:500])
+                    log.error("%s / %s: %s", v["name"], setting, exc)
+                except Exception as exc:                  # recorded; KeyboardInterrupt etc. propagate
+                    row.update(state="failed", message=f"{type(exc).__name__}: {exc}"[:500])
+                    log.error("%s / %s failed:\n%s", v["name"], setting, traceback.format_exc())
+                row["seconds"] = round(time.perf_counter() - t0, 1)
+            bar.counts["pending"] -= 1
+            key = {"completed": "units done", "skipped": "skipped"}.get(row["state"], "failed")
+            if key == "units done" and before.get((v["name"], setting)) == "completed":
+                key = "resumed"                           # finished in an earlier session, read from Drive
+            bar.counts[key] += 1
+            bar.set()
+            row["updated"] = datetime.now(timezone.utc).isoformat()
+            rows.append(row)
+            atomic_write_csv(status_path, pd.DataFrame(rows, columns=STATUS_COLUMNS))
+        bar.set(variant=None, setting=None)
     return pd.DataFrame(rows, columns=STATUS_COLUMNS)
 
 

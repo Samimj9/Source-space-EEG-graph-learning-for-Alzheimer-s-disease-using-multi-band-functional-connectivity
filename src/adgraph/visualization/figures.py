@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import progress
 from . import connectivity, embedding, fusion, performance, spectral, subjects
 from .performance import IncomparableTiming
 from .results import MissingInputs, index_results, reset_missing
@@ -68,9 +69,22 @@ def make_figures(config: dict, out_dir: str | Path, results_root: str | Path | N
                                            "graphs": str(getattr(store, "root", None)),
                                            "stats": str(stats_path) if stats_path else None}, synthetic)
     writer.skipped, writer.incomplete, errors = [], [], []
-    for spec in config["figures"]:
-        if only and spec["id"] not in only:
-            continue
+    specs = [f for f in config["figures"] if not only or f["id"] in only]
+    with progress.reporter(len(specs), "figures", unit="figures", eta=False,
+                           counts={"made": 0, "skipped": 0, "incomplete": 0, "errors": 0}) as bar:
+        _draw_all(specs, index, store, style, stats, writer, errors, on_missing, bar)
+    writer.config["skipped"] = writer.skipped
+    writer.config["incomplete"] = writer.incomplete
+    writer.write_manifest()
+    if errors:
+        raise RuntimeError(f"{len(errors)} figure(s) failed with code errors (other figures were written to "
+                           f"{writer.out_dir}): {errors}")
+    return writer
+
+
+def _draw_all(specs, index, store, style, stats, writer, errors, on_missing, bar):
+    for spec in specs:
+        bar.set(figure=spec["id"])
         fn, kind = FAMILIES[spec["family"]]
         source = index if kind == "results" else store
         reset_missing()
@@ -83,24 +97,25 @@ def make_figures(config: dict, out_dir: str | Path, results_root: str | Path | N
             if on_missing == "error":
                 raise
             writer.skipped.append({"id": spec["id"], "reason": f"{type(exc).__name__}: {exc}"})
+            bar.counts["skipped"] += 1
+            bar.advance(timed=False)
             continue
         except Exception as exc:                       # noqa: BLE001 - a code error, never a silent skip
             if on_missing == "error":
                 raise
             errors.append({"id": spec["id"], "error": f"{type(exc).__name__}: {exc}"})
             writer.skipped.append({"id": spec["id"], "reason": f"ERROR {type(exc).__name__}: {exc}"})
+            bar.counts["errors"] += 1
+            bar.advance(timed=False)
             continue
         missing = reset_missing()
         if missing:
             writer.incomplete.append({"id": spec["id"], "status": spec.get("status", "supplementary"),
                                       "missing_inputs": missing})
+            bar.counts["incomplete"] += 1
         writer.save(fig, spec["id"], data,
                     {"family": spec["family"], "status": spec.get("status", "supplementary"),
                      "title": spec.get("title", ""), "spec": spec, "missing_inputs": missing, **meta}, sources)
-    writer.config["skipped"] = writer.skipped
-    writer.config["incomplete"] = writer.incomplete
-    writer.write_manifest()
-    if errors:
-        raise RuntimeError(f"{len(errors)} figure(s) failed with code errors (other figures were written to "
-                           f"{writer.out_dir}): {errors}")
-    return writer
+        bar.counts["made"] += 1
+        bar.advance(timed=False)
+    bar.set(figure=None)

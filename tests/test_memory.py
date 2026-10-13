@@ -194,7 +194,7 @@ KILL_SCRIPT = textwrap.dedent('''
             os.kill(os.getpid(), signal.SIGKILL)
         return real(path, **arrays)
     pl.atomic_savez = killing
-    pl.run(paths, cfg, out, sd, operator_cache=cache)
+    pl.run(paths, cfg, out, sd, operator_cache=cache, allow_ephemeral=True)   # tmp dirs on purpose (also in Colab)
 ''')
 
 

@@ -66,6 +66,7 @@ synthetic data.
 32. [Pre-real-run reliability safeguards](#32-pre-real-run-reliability-safeguards)
 33. [Pre-real-data audit fixes and the one-experiment-at-a-time workflow](#33-pre-real-data-audit-fixes-and-the-one-experiment-at-a-time-workflow)
 34. [Memory audit of source reconstruction and graph construction](#34-memory-audit-of-source-reconstruction-and-graph-construction)
+35. [Progress display, final Colab verification, alpha-band filter verification](#35-progress-display-final-colab-verification-alpha-band-filter-verification)
 
 ---
 
@@ -1841,7 +1842,8 @@ synthetic data.
 - `src/adgraph/experiments/{runner,plan,estimate,report}.py`, `src/adgraph/models/trainer.py`
 - `src/adgraph/visualization/{results,figures,performance,subjects,embedding,fusion,connectivity}.py`
 - `src/adgraph/io/{participants,eeg}.py`, `src/adgraph/pipeline.py`, `src/adgraph/colab.py`
-- `scripts/{experiment,make_notebooks,estimate_runtime_synthetic,colab_setup,run_plan,run_experiment,inspect_raw,make_figures}.py`
+- `scripts/{experiment,make_notebooks,colab_setup,run_plan,run_experiment,inspect_raw,make_figures}.py`
+  (`estimate_runtime_synthetic.py` was removed in entry 35)
 - `configs/experiments/exp6_multiband_psd_strength.yaml`, `configs/run_plan.yaml`, `notebooks/`
 
 **Validating tests**
@@ -1976,6 +1978,115 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 35. Progress display, final Colab verification, alpha-band filter verification
+
+**Previous design**
+- **No progress display.** Long stages only printed log lines, and `adgraph.colab.sh`
+  forwarded subprocess output line by line, which breaks carriage-return progress bars.
+- **Cost estimate in notebooks.** Each experiment notebook ran a runtime-estimate stage, and
+  the README carried a static cost table.
+- **Failures did not stop the notebook.** A failed experiment unit or failed recording was
+  recorded and printed, but *Run all* still finished without an error.
+- **Unverified filters.** The alpha1/alpha2 filter overlap from entry 33 was reported from
+  −6 dB points only and was not documented in detail.
+
+**Problem discovered**
+- Runs take hours to days with no visible progress, and a resumed run needs to show what was
+  recovered from Drive.
+- The author asked that no cost-estimation stage or table be part of the workflow
+  (2026-10-13).
+- Incomplete work must not look like a successful run.
+
+**Final implementation**
+- **`adgraph.progress`.** One tqdm line per stage, never nested (tested: at most one active
+  bar). Library code reports context with `progress.set(...)` and items with
+  `progress.advance()`; both are no-ops without an active bar.
+- **Graph construction:**
+  - bars for input SHA-256, the source operator (cached or built: fetch fsaverage →
+    forward/inverse → verification) and all recordings (`n/43`);
+  - the recordings line shows the current subject, dataset and stage (loading, preprocessing,
+    windowing and rejection, source reconstruction, connectivity per band with window count,
+    source and sensor PSD, saving the checkpoint);
+  - it also counts done / resumed / failed / pending recordings;
+  - then bars for assembly (per subject) and saving the cohort.
+- **Experiments:**
+  - one line for the whole experiment, counting outer folds plus permutations;
+  - it shows the current variant, setting, repeat and fold, inner-CV trial (or refit), GNN
+    epoch and permutation, plus finished / resumed / failed / skipped / pending units.
+- **Figures:** one line through the figures, with made / skipped / incomplete / error counts.
+- **Checkpoint-aware counting:**
+  - graphs pre-check each subject's marker identity without hashing the payload;
+  - experiments pre-read `experiment_status`, now including permutations;
+  - recovered items count as done from the start, are never recomputed, and are not timed;
+  - a subject whose marker matched but whose payload is invalid is taken back off the count
+    and recomputed.
+- **Honest ETA.** tqdm's rate-based ETA is never shown.
+  - Recordings: from at least two recordings processed in this session.
+  - Experiments: only for the current variant and setting, from at least two of its folds
+    computed in this session. Whole-experiment ETAs would mix units that differ in cost by
+    orders of magnitude.
+- **Colab rendering:**
+  - `sh` forwards raw output chunks, so `\r` redraws update one line;
+  - redraws are rate-limited (`ADGRAPH_PROGRESS_INTERVAL`, default 2 s);
+  - logging goes through `tqdm.contrib.logging`, so log lines print above the bar;
+  - `ADGRAPH_PROGRESS=0` disables the bars.
+- **Logs:**
+  - runtime (`seconds`) and peak memory per recording in `subjects.csv` and
+    `memory_log.csv`;
+  - per experiment unit in `_run_status.csv` (`seconds`, `mem_peak_mb`).
+- **Notebooks:**
+  - the cost-estimate stage and table are removed (`experiment.py estimate` remains as an
+    optional command; `scripts/estimate_runtime_synthetic.py` is removed);
+  - experiment notebooks display results, runtime and memory, then raise a visible error if
+    any unit failed or is incompatible;
+  - notebook 01 raises after its QC summary if any recording failed (`below_min_windows` is
+    the pre-specified exclusion, not an error);
+  - `notebooks/README.md` documents the exact Google Drive output structure.
+- **Alpha-band verification.** `scripts/inspect_band_filters.py` and `docs/band_filters.md`
+  measure the filters actually applied (impulse check against MNE `filter_data`). Findings:
+  - the passbands match the nominal bands within about 0.15 Hz;
+  - MNE's automatic transition bands (2–3.25 Hz at the alpha edges) make the effective −6 dB
+    bands alpha1 ≈ 7.0–11.25 Hz and alpha2 ≈ 8.76–14.62 Hz, overlapping on 8.76–11.25 Hz;
+  - for flat input, about 46 % of alpha1 and 42 % of alpha2 output power lies outside the
+    nominal band;
+  - alpha2 passes 67 % of the amplitude at 9 Hz and 92 % at 9.5 Hz.
+
+  **Nothing changed** (open item 8).
+
+**Alternatives considered**
+- **Nested bars** (one per level). Rejected: multi-line bars need cursor-movement escape
+  codes that Colab's text output does not render reliably, and they clutter the output.
+- **In-kernel widget bars.** Rejected: they would require running the pipeline inside the
+  notebook kernel instead of isolated subprocesses.
+
+**Effect on interpretation**
+- None. Display and logging only. Results and the protocol are unchanged.
+
+**Code / config**
+- `src/adgraph/progress.py`, `src/adgraph/colab.py` (`sh`)
+- `src/adgraph/pipeline.py`, `src/adgraph/experiments/{plan,runner}.py`,
+  `src/adgraph/models/trainer.py`, `src/adgraph/visualization/figures.py`,
+  `src/adgraph/checkpoint.py` (`marker_matches`)
+- `scripts/{build_graphs,experiment,run_plan,make_figures,make_notebooks,inspect_band_filters}.py`
+- `notebooks/`, `docs/band_filters.md`, `requirements.txt` / `pyproject.toml` (tqdm)
+
+**Validating tests** (`tests/test_progress.py`, synthetic only)
+- ETA comes only from items processed in this session.
+- `sh` forwards `\r` redraws.
+- Graph progress on a fresh run (4 done) and on resume (4 resumed, none recomputed, no ETA).
+- Experiment progress across a simulated disconnect: recovered folds counted as done from the
+  start; the third run recomputes nothing.
+- Inner-trial, fold, permutation and epoch context are shown.
+- Figure progress counts.
+- Never more than one active bar.
+- `tests/test_notebooks.py` checks there is no cost stage and that failures end experiment
+  notebooks visibly.
+
+**Approval status**
+- Author-specified (2026-10-13). Filter changes: pending author decision (open item 8).
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -1994,9 +2105,11 @@ AD-LEB EDF, which are 20–39 MB)
 6. Final repeat, fold, epoch and grid sizes (currently provisional).
 7. The target journal's width and font requirements (figure selections were resolved:
    entries 25–29).
-8. Connectivity band-pass transition widths (entry 33): MNE's automatic transitions make the
-   effective alpha1 and alpha2 bands overlap (−6 dB at 7.0–11.25 and 8.8–14.6 Hz). Keep as is,
-   or set narrower transition bands (longer filters) before the real run?
+8. Connectivity band-pass transition widths (entries 33, 35; measured in `docs/band_filters.md`):
+   MNE's automatic transitions make the effective alpha1 and alpha2 bands overlap (−6 dB at
+   7.0–11.25 and 8.76–14.62 Hz; for flat input, 46 % / 42 % of their output power lies outside
+   the nominal band). Options there: keep and report effective bands, narrower transitions, or
+   changed band definitions. Keep as is, or change before the real run?
 9. Permutation tests (off by default): the null uses `permutation.n_repeats` CV repeats per
    permutation while the observed statistic averages all repeats, which makes the test
    conservative. Match them (e.g. compare repeat 0, or use equal repeats) before enabling it.

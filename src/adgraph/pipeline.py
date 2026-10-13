@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,7 +32,8 @@ from .preprocessing.clean import preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
                          atomic_write_csv, atomic_write_json, check_unit, cleanup_temp_files, code_identity,
-                         identity_diff, stable_hash, supersede, write_marker)
+                         identity_diff, marker_matches, stable_hash, supersede, write_marker)
+from . import progress
 from .memory import MemoryTracker
 from .provenance import git_commit, git_dirty, versions
 from .storage import check_persistent
@@ -86,6 +88,7 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     """
     sfreq = raw.info["sfreq"]
     wcfg = cfg["windowing"]
+    progress.set(stage="windowing + artifact rejection")
     data = raw.get_data()
     win_len, step = window_samples(sfreq, wcfg["window_s"], wcfg["step_s"])
     starts = window_starts(data.shape[1], sfreq, wcfg["window_s"], wcfg["step_s"], wcfg["edge_trim_s"])
@@ -94,6 +97,7 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     kept_idx = np.flatnonzero(keep)
     kept = starts[kept_idx]
 
+    progress.set(stage="source reconstruction (ROI signals)")
     roi = W @ data  # (n_rois, n_times): continuous source-space ROI signals
     bands = cfg["connectivity"]["bands"]
     n_w, n_b, n_r, n_c = len(kept), len(bands), roi.shape[0], data.shape[0]
@@ -102,7 +106,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     ciplv_signed = np.zeros_like(plv)
     # Band-pass + Hilbert once per band on the continuous ROI signals, then cut windows.
     # One band's analytic signal is in memory at a time (released before the next band).
-    for b, (lo, hi) in enumerate(bands.values()):
+    for b, (name, (lo, hi)) in enumerate(bands.items()):
+        progress.set(stage=f"connectivity {name} ({b + 1}/{n_b} bands, {n_w} windows)")
         analytic = band_analytic(roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS)
         for w, s in enumerate(kept):
             plv[w, b], ciplv[w, b], ciplv_signed[w, b] = phase_sync(analytic[:, s:s + win_len])
@@ -115,6 +120,7 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     for prefix, sig, n in (("psd", roi, n_r), ("sensor_psd", data, n_c)):
         if prefix == "sensor_psd" and not psd_cfg.get("sensor", True):
             continue
+        progress.set(stage=f"PSD {'source ROIs' if prefix == 'psd' else 'sensors'}")
         feats = {k: np.zeros((n_w, n_b, n), np.float32) for k in PSD_KINDS}
         for w, s in enumerate(kept):
             bp = window_band_powers(sig[:, s:s + win_len], sfreq, bands, psd_cfg)
@@ -162,7 +168,13 @@ def build_registry(paths: dict, limit: int | None = None, hashes: InputHashes | 
     if limit:
         registry = registry.groupby("dataset", group_keys=False).head(limit).reset_index(drop=True)
     if hashes is not None:
-        registry["sha256"] = [hashes.sha256(p) for p in registry["path"]]
+        shas = []
+        with progress.reporter(len(registry), "input SHA-256", unit="files", eta=False) as bar:
+            for p in registry["path"]:
+                bar.set(_file=Path(p).name)
+                shas.append(hashes.sha256(p))
+                bar.advance(timed=False)
+        registry["sha256"] = shas
     return registry, recs, no_meta, no_rec
 
 
@@ -198,6 +210,9 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
     name = f"operator_{op_id}"
     state, marker = check_unit(cache_dir, name, ident)
     if state == "complete" and not force:
+        with progress.reporter(1, "source operator", unit="step", eta=False) as bar:
+            bar.set(_step="loaded from cache (no rebuild)")
+            bar.advance(timed=False)
         z = np.load(cache_dir / f"{name}.npz")
         log.info("reusing cached ROI operator %s", op_id)
         return {"W": z["W"], "roi_names": z["roi_names"].tolist(), "ch_names": z["ch_names"].tolist(),
@@ -207,10 +222,17 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
                 "from_cache": True}
     if state in ("corrupt", "incompatible") or (state == "complete" and force):
         supersede(cache_dir / f"{name}.npz", cache_dir)
-    fetch_fsaverage(subjects_dir)
-    info = canonical_info(cfg)
-    op = build_roi_operator(info, cfg, subjects_dir)
-    op_err = verify_operator(op, info, cfg, subjects_dir)
+    with progress.reporter(3, "source operator", unit="steps", eta=False) as bar:
+        bar.set(_step="fetching fsaverage (first time only)")
+        fetch_fsaverage(subjects_dir)
+        bar.advance(timed=False)
+        bar.set(_step="forward model + inverse operator -> 68x30 ROI operator")
+        info = canonical_info(cfg)
+        op = build_roi_operator(info, cfg, subjects_dir)
+        bar.advance(timed=False)
+        bar.set(_step="verifying against the full MNE inverse")
+        op_err = verify_operator(op, info, cfg, subjects_dir)
+        bar.advance(timed=False)
     if op_err > 1e-6:
         raise RuntimeError(f"ROI operator does not match the full inverse (rel. err {op_err:.2e})")
     if op["fwd_ch_names"] != common_channels(cfg):
@@ -248,7 +270,9 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
     """Full per-subject computation: load, preprocess, ROI signals, windows, PSD, connectivity."""
     row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
                                          "mmse", "acer", "comment", "path", "size_bytes")}
+    progress.set(stage="loading EDF")
     raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+    progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
     raw, pp_qc = preprocess(raw, cfg)
     if raw.ch_names != list(op["ch_names"]):
         raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
@@ -383,15 +407,19 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
             for k in keys}
     stacked = {k: np.empty((n_total, *tail[k]), np.float32) for k in keys}
     pos = 0
-    for unit_dir, n in ok_units:
-        with np.load(unit_dir / "arrays.npz") as z:
-            for k in keys:
-                block = z[k]
-                if block.shape != (n, *tail[k]):
-                    raise ValueError(f"{unit_dir}/arrays.npz[{k}] has shape {block.shape}, expected {(n, *tail[k])}")
-                stacked[k][pos:pos + n] = block
-                del block
-        pos += n
+    with progress.reporter(len(ok_units), "assembly", unit="subjects", eta=False) as bar:
+        for unit_dir, n in ok_units:
+            bar.set(subject=unit_dir.name, windows=n)
+            with np.load(unit_dir / "arrays.npz") as z:
+                for k in keys:
+                    block = z[k]
+                    if block.shape != (n, *tail[k]):
+                        raise ValueError(f"{unit_dir}/arrays.npz[{k}] has shape {block.shape}, "
+                                         f"expected {(n, *tail[k])}")
+                    stacked[k][pos:pos + n] = block
+                    del block
+            pos += n
+            bar.advance(timed=False)
     windows = pd.concat(win, ignore_index=True) if win else pd.DataFrame(columns=list(WINDOW_COLUMNS))
     subjects = pd.DataFrame(subj_rows)
     win_s, step_s = window_samples(cfg["preprocessing"]["sfreq"], cfg["windowing"]["window_s"],
@@ -422,11 +450,18 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         },
         "outputs": ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "subjects/<key>/"],
     }
-    store = GraphStore(stacked, windows, list(bands), np.array(list(bands.values()), dtype=float),
-                       list(op["roi_names"]), list(op["ch_names"]), subjects, manifest,
-                       roi_coords=op.get("roi_coords"))
-    store.save(run_dir)
-    write_marker(run_dir, "assembly", ident, ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"])
+    with progress.reporter(3, "saving cohort", unit="steps", eta=False) as bar:
+        bar.set(_step=f"validating {n_total} graphs")
+        store = GraphStore(stacked, windows, list(bands), np.array(list(bands.values()), dtype=float),
+                           list(op["roi_names"]), list(op["ch_names"]), subjects, manifest,
+                           roi_coords=op.get("roi_coords"))
+        bar.advance(timed=False)
+        bar.set(_step="writing graphs.npz, windows.csv, subjects.csv, manifest.json to Drive")
+        store.save(run_dir)
+        bar.advance(timed=False)
+        bar.set(_step="writing completion marker")
+        write_marker(run_dir, "assembly", ident, ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"])
+        bar.advance(timed=False)
     return run_dir
 
 
@@ -515,21 +550,49 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     table.ensure(registry["key"].tolist())
     save_ts = cfg["output"].get("save_roi_timeseries", False)
     failed = {}
+    idents = {rec.key: subject_identity(cfg, rec, op["operator_id"]) for rec in registry.itertuples()}
+    # checkpoint-aware progress: subjects whose marker already matches are shown as done from the
+    # start (full validation still happens below; a corrupt one is then recomputed and counted)
+    likely_done = {k for k, i in idents.items() if marker_matches(run_dir / "subjects" / k, "subject", i)}
+    with progress.reporter(len(registry), "subjects", initial=len(likely_done), unit="recordings",
+                           counts={"done": 0, "resumed": 0, "failed": 0, "pending": len(registry)}) as bar:
+        _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar)
+    with MemoryTracker() as m:
+        out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
+    mem_log.add("assembly", "done", m.record())
+    return out
+
+
+def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar):
+    """Subject loop of ``run``: one subject in memory at a time, each saved as soon as it finishes."""
+    def counts(kind):
+        bar.counts[kind] += 1
+        bar.counts["pending"] -= 1
+        bar.set()
+
     for rec in registry.itertuples():
         unit_dir = run_dir / "subjects" / rec.key
-        sident = subject_identity(cfg, rec, op["operator_id"])
+        sident = idents[rec.key]
+        bar.set(subject=rec.key, dataset=rec.dataset, stage="checking checkpoint")
         state, marker = check_unit(unit_dir, "subject", sident)
         if state == "complete":
             if table.get(rec.key) != "completed":
                 table.set(rec.key, "completed", "validated existing checkpoint")
             log.info("%s: completed checkpoint found, skipped", rec.key)
+            if rec.key not in likely_done:
+                bar.advance(timed=False)
+            counts("resumed")
             continue
+        if rec.key in likely_done:                # marker matched but payload invalid: recomputed now
+            bar.advance(-1, timed=False)
         if state in ("incompatible", "corrupt"):
             why = (f" (changed: {', '.join(identity_diff(marker.get('identity'), sident))})"
                    if state == "incompatible" else "")
             log.warning("%s: %s checkpoint%s, recomputing", rec.key, state, why)
             supersede(unit_dir, run_dir)
         table.set(rec.key, "running")
+        bar.start_item()
+        t_start = time.perf_counter()
         try:
             with MemoryTracker() as m:            # one subject in memory at a time; released below
                 arrays, windows, subject_row, roi_ts = process_subject(rec, cfg, op)
@@ -540,20 +603,22 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
             atomic_write_json(unit_dir / "failed.json", {**row, "status": f"error: {exc}"})
             table.set(rec.key, "failed", str(exc)[:500])
             failed[rec.key] = f"error: {exc}"
-            mem_log.add(rec.key, "failed", m.record())
+            mem_log.add(rec.key, "failed", {**m.record(), "seconds": round(time.perf_counter() - t_start, 1)})
+            bar.advance(timed=False)
+            counts("failed")
             continue
-        mem = m.record()
-        subject_row.update(mem)                   # memory QC in subjects.csv
+        mem = {**m.record(), "seconds": round(time.perf_counter() - t_start, 1)}
+        subject_row.update(mem)                   # runtime + memory QC in subjects.csv
+        bar.set(stage="saving checkpoint to Drive")
         save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None)
         table.set(rec.key, "completed")
         mem_log.add(rec.key, "completed", mem)
-        log.info("%s: peak memory %s MB (available before: %s MB)", rec.key, mem["mem_peak_mb"],
-                 mem["mem_available_before_mb"])
+        log.info("%s: %s s, peak memory %s MB (available before: %s MB)", rec.key, mem["seconds"],
+                 mem["mem_peak_mb"], mem["mem_available_before_mb"])
         del arrays, windows, subject_row, roi_ts  # release this subject before the next one
-    with MemoryTracker() as m:
-        out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
-    mem_log.add("assembly", "done", m.record())
-    return out
+        bar.advance()
+        counts("done")
+    bar.set(subject=None, dataset=None, stage=None)
 
 
 class MemoryLog:

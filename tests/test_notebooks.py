@@ -58,7 +58,8 @@ def test_experiment_notebooks_run_only_their_experiment():
         assert "run_plan" not in src and "run_experiment.py" not in src, nb.name
         runs = [ln for ln in src.splitlines() if "scripts/experiment.py run" in ln]
         assert runs == ['    sh(f"python scripts/experiment.py run --config {CONFIG}")'], nb.name
-        assert "experiment.py estimate" in src and "experiment.py report" in src
+        assert "experiment.py estimate" not in src and "experiment.py report" in src   # no cost stage
+        assert "raise RuntimeError" in src.split("experiment.py report")[1]          # failures end visibly
 
 
 def test_advanced_notebook_starts_nothing_by_default():

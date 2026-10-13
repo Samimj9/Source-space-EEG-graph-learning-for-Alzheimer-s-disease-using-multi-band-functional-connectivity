@@ -200,6 +200,17 @@ def check_unit(directory, name: str, identity: dict) -> tuple[str, dict | None]:
     return "complete", marker
 
 
+def marker_matches(directory, name: str, identity: dict) -> bool:
+    """Cheap pre-check (no payload hashing): a marker exists and carries ``identity``.
+
+    For progress display only; whether a unit is complete is always decided by ``check_unit``."""
+    mp = marker_path(directory, name)
+    try:
+        return mp.exists() and _norm(json.loads(mp.read_text()).get("identity")) == _norm(identity)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 def supersede(path: str | Path, root: str | Path) -> Path | None:
     """Move ``path`` under ``root/_superseded/<stamp>/`` (never delete, never overwrite)."""
     path, root = Path(path), Path(root)

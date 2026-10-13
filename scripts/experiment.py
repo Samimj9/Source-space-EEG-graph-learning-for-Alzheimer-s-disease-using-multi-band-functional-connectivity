@@ -33,6 +33,7 @@ from adgraph.experiments.config import load_experiment
 from adgraph.experiments.plan import experiment_entries, plan_status, plan_units, run_plan
 from adgraph.graphs.store import GraphStore
 from adgraph.pipeline import latest_complete_graph_run
+from adgraph.progress import log_handler_context
 from adgraph.provenance import verify_environment
 from adgraph.storage import check_persistent
 
@@ -92,8 +93,9 @@ elif args.action == "run":
     store = GraphStore.load(graphs)
     if not store.manifest.get("synthetic"):
         verify_environment()
-    result = run_plan(entries, store, out, allow_ephemeral=args.allow_ephemeral_storage,
-                      status_path=exp_dir / "_run_status.csv")
+    with log_handler_context():                    # log lines print above the progress bar
+        result = run_plan(entries, store, out, allow_ephemeral=args.allow_ephemeral_storage,
+                          status_path=exp_dir / "_run_status.csv")
     print(result.drop(columns=["updated", "order"]).to_string(index=False))
     print("\n" + result["state"].value_counts().to_string())
     bad = result[result["state"].isin(["failed", "incompatible"])]
@@ -105,7 +107,8 @@ elif args.action == "report":
     from adgraph.experiments.report import experiment_report
 
     progress = plan_status(entries, GraphStore.load(graphs, keys=()), out)
-    rep = experiment_report(out, experiment, progress)
+    with log_handler_context():
+        rep = experiment_report(out, experiment, progress)
     print(f"report: {rep['report_dir']}")
     if rep["table"].empty:
         print("no completed results yet")

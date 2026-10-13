@@ -118,6 +118,9 @@ def test_graph_run_resumes_after_interruption(cohort, monkeypatch):
     assert not (Path(st["run_dir"]) / "graphs.npz").exists()
 
     monkeypatch.undo()                                # "reconnect": same code, no crash
+    from adgraph import storage
+
+    monkeypatch.setattr(storage, "in_colab", lambda: False)   # undo() also removed conftest's tmp-dir allowance
     pl2, *_ = cohort
     counts["process"].clear()
     from adgraph import pipeline as fresh

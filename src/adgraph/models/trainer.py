@@ -168,7 +168,10 @@ class GNNModel:
         x, adj, y, w = x.to(dev), adj.to(dev), y.to(dev), w.to(dev)
         cov = None if cov is None else cov.to(dev)
         best, best_state, patience = np.inf, None, 0
+        from .. import progress
+
         for epoch in range(epochs):
+            progress.set(epoch=f"{epoch + 1}/{epochs}")
             self.net.train()
             perm = torch.randperm(len(y), generator=gen)
             total = 0.0
@@ -195,6 +198,7 @@ class GNNModel:
                 break
         if best_state is not None:
             self.net.load_state_dict(best_state)
+        progress.set(epoch=None)
         return self
 
     def _weighted_loss(self, view: DataView) -> float:

@@ -270,7 +270,7 @@ entry 32).
 ## 6. Running experiments: one at a time (Colab)
 
 The normal workflow runs **one experiment per notebook** and reviews it before starting the
-next one (`notebooks/README.md` lists the notebooks and their estimated cost):
+next one (`notebooks/README.md` lists the notebooks, their Colab links and the Drive output layout):
 
 ```
 notebooks/01_build_graphs.ipynb                 graphs + QC (once)
@@ -285,7 +285,7 @@ Each experiment notebook calls `scripts/experiment.py` for its own config only:
 | Action | What it does |
 |---|---|
 | `status` | progress per (variant, setting) from the checkpoints; computes nothing |
-| `estimate` | exact number of model fits of the full protocol (repeats × outer folds × (inner folds × grid + refit)), one real fit timed per architecture on the current runtime and graph run, the checkpoint write time on Drive, and the time remaining (completed folds subtracted); saved in `_estimates/` |
+| `estimate` | optional, not used by the notebooks: fit counts of the full protocol × one timed fit per architecture, saved in `_estimates/` |
 | `run` | every variant and setting of this config, with the config's full protocol; order: within-dataset settings (all variants) → pooled → cross-dataset (only if the DESIGN.md §7 gate passes, otherwise recorded as skipped); resumable; a failing unit is recorded and the others continue; never starts another experiment |
 | `report` | results table + single-experiment diagnostic figures from saved outputs |
 
@@ -294,8 +294,8 @@ Per experiment, Drive holds `<processed>/experiments/<experiment>/`:
 | Path | Content |
 |---|---|
 | `<variant>/<setting>/` | results and checkpoints of one (variant, setting) (table above) |
-| `_run_status.csv` | state of every (variant, setting) of the last run (completed / failed / skipped + message) |
-| `_estimates/estimate_<time>.csv/.json` | runtime estimates |
+| `_run_status.csv` | state of every (variant, setting) of the last run (completed / failed / skipped + message), runtime (`seconds`) and peak memory (`mem_peak_mb`) |
+| `_estimates/estimate_<time>.csv/.json` | only if `estimate` is run manually |
 | `_reports/report_<time>/` | `results_summary.csv` (subject-level mean ± SD over repeats, bootstrap 95 % CI, window-level AUC), `progress.csv`, `README.txt`, `figures/` |
 
 **Single-experiment diagnostics vs comparative figures.** A report's figures (`D1_performance`,
@@ -304,13 +304,19 @@ experiment's variants, for checking it. They select or rank nothing and are not 
 The comparative paper figures (`configs/figures/paper.yaml`, `docs/figures.md`) are generated
 by `03_comparative_figures` from the saved results of several experiments.
 
-### Estimated cost (full protocol, before launching)
+### Progress, runtime and memory
 
-See `notebooks/README.md` for the per-experiment table. It is measured by
-`scripts/estimate_runtime_synthetic.py` with the same estimator on synthetic data of the real
-size (43 subjects × 27 windows) and 2 CPU threads, excluding checkpoint writes. Each notebook
-measures again on its runtime (GPU if available) and the real graph run before training
-(section 1), and shows the remaining time when resuming.
+- **Progress line.** `run` shows one updating line (`adgraph.progress`, tqdm). It shows:
+  - outer folds plus permutations completed for the whole experiment (folds already
+    completed on Drive count as done from the start and are never recomputed);
+  - the current variant and setting, repeat and fold, inner-CV trial (or `refit`), GNN epoch
+    and permutation;
+  - finished / resumed / failed / skipped / pending units.
+- **ETA.** It is shown only for the current variant and setting, from at least two folds
+  computed in this session. Units differ too much in cost for an honest whole-experiment ETA.
+- **Logs.** Runtime and peak memory per unit are written to `_run_status.csv`.
+- **Failures.** A failed unit stops the notebook with a visible error after the results are
+  displayed; completed units stay saved.
 
 ### Advanced: whole plan, other commands
 

@@ -23,6 +23,7 @@ from adgraph.config import load_paths, load_yaml
 import pandas as pd
 
 from adgraph.pipeline import run, status
+from adgraph.progress import log_handler_context
 from adgraph.provenance import verify_environment
 
 parser = argparse.ArgumentParser()
@@ -59,8 +60,9 @@ if args.status:
     print(st["subjects"].to_string())
     raise SystemExit
 verify_environment()
-out = run(paths, cfg, out_root=out_root, subjects_dir=args.subjects_dir or f"{paths['cache_dir']}/subjects",
-          limit=args.limit, resume=args.resume, force=args.force, run_dir=args.run_dir, operator_cache=op_cache,
-          input_hash_cache=hash_cache, rehash_inputs=args.rehash_inputs,
-          allow_ephemeral=args.allow_ephemeral_storage)
+with log_handler_context():                        # log lines print above the progress bars
+    out = run(paths, cfg, out_root=out_root, subjects_dir=args.subjects_dir or f"{paths['cache_dir']}/subjects",
+              limit=args.limit, resume=args.resume, force=args.force, run_dir=args.run_dir, operator_cache=op_cache,
+              input_hash_cache=hash_cache, rehash_inputs=args.rehash_inputs,
+              allow_ephemeral=args.allow_ephemeral_storage)
 print(f"outputs: {out}")
