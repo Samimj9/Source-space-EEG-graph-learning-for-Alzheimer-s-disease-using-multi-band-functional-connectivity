@@ -35,20 +35,34 @@ def detect_bad_channels(data: np.ndarray, ch_names: list[str], rules: dict) -> d
     return bads
 
 
+def resample_and_bandpass(raw, cfg: dict):
+    """First preprocessing step (in place): resample to ``sfreq``, band-pass ``l_freq``-``h_freq``."""
+    pp = cfg["preprocessing"]
+    raw.resample(pp["sfreq"], verbose="error")
+    raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
+    return raw
+
+
 def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     """Resample, band-pass, check units, interpolate bad channels, average reference.
+
+    The amplitude check (``units.plausible_std_v``) is applied to the median over channels of
+    the per-channel std of the resampled 0.1-45 Hz signal, in the recording reference (before
+    bad-channel handling and the average reference). ``scripts/diagnose_amplitude.py`` reports
+    the same quantity and its breakdown for a real recording.
 
     The average reference is added as a projection and applied, so the data and
     ``raw.info`` both carry it (required by the inverse operator).
     """
     pp = cfg["preprocessing"]
-    raw.resample(pp["sfreq"], verbose="error")
-    raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
+    resample_and_bandpass(raw, cfg)
 
     med_std = robust_channel_std(raw.get_data())
     lo, hi = cfg["units"]["plausible_std_v"]
     if not lo <= med_std <= hi:
-        raise ValueError(f"median channel std {med_std:.3g} V outside plausible range [{lo}, {hi}]: check unit scale")
+        raise ValueError(f"median channel std {med_std:.3g} V outside plausible range [{lo}, {hi}] "
+                         "(resampled 0.1-45 Hz signal, recording reference): check the unit scale; "
+                         "run scripts/diagnose_amplitude.py for the breakdown")
 
     detect_on = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error").get_data()
     bads = detect_bad_channels(detect_on, raw.ch_names, pp["bad_channels"])

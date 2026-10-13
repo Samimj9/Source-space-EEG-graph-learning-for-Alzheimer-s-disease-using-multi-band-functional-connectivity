@@ -177,10 +177,12 @@ def test_corrupted_and_failed_subjects_are_recomputed(cohort, monkeypatch):
         return real(rec, cfg, op)
 
     monkeypatch.setattr(pl, "process_subject", failing)
-    run_dir = pl.run(paths, CFG, tmp / "out", tmp / "sd")
+    with pytest.raises(pl.GraphRunIncomplete, match="D2-17"):     # a failed subject blocks assembly
+        pl.run(paths, CFG, tmp / "out", tmp / "sd")
+    run_dir = Path(pl.graph_run_dir(tmp / "out", CFG))
     assert pl.status(paths, CFG, tmp / "out")["subjects"].set_index("key").loc["D2-17", "state"] == "failed"
-    subj = pd.read_csv(run_dir / "subjects.csv").set_index("key")
-    assert subj.loc["D2-17", "status"].startswith("error")
+    assert json.loads((run_dir / "subjects" / "D2-17" / "failed.json").read_text())["status"].startswith("error")
+    assert not (run_dir / "assembly.done.json").exists() and not (run_dir / "graphs.npz").exists()
     monkeypatch.setattr(pl, "process_subject", real)
     counts["process"].clear()
     p = run_dir / "subjects" / "D1-1" / "arrays.npz"
@@ -189,7 +191,7 @@ def test_corrupted_and_failed_subjects_are_recomputed(cohort, monkeypatch):
     monkeypatch.setattr(pl, "process_subject", lambda r, c, o: (calls.append(r.key), real(r, c, o))[1])
     pl.run(paths, CFG, tmp / "out", tmp / "sd")
     assert sorted(calls) == ["D1-1", "D2-17"]             # corrupted + previously failed; others skipped
-    assert (run_dir / "_superseded").exists()            # old unit and old assembly kept, not overwritten
+    assert (run_dir / "_superseded").exists()            # old (corrupted) unit kept, not overwritten
     assert pd.read_csv(run_dir / "subjects.csv")["status"].eq("ok").all()
 
 

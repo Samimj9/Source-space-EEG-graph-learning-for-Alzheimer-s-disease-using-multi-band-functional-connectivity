@@ -44,7 +44,7 @@ from ..graphs.store import GraphStore
 from ..checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_savez, atomic_write_csv,
                           atomic_write_json, atomic_write_text, check_unit, code_identity, identity_diff, stable_hash,
                           supersede, write_marker)
-from ..graphs.store import graph_run_id
+from ..graphs.store import graph_run_id, require_complete_cohort
 from ..provenance import compute_environment, git_commit, git_dirty, versions
 from .. import progress
 from ..storage import check_persistent
@@ -440,6 +440,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
     For real (non-synthetic) graph runs ``out_dir`` must be persistent storage (mounted Drive
     in Colab), else ``EphemeralStorageError`` unless ``allow_ephemeral``."""
     ev = v["evaluation"]
+    require_complete_cohort(store)              # never train on an empty, partial or smoke-test graph run
     if not store.manifest.get("synthetic"):
         check_persistent({"experiment output root": out_dir}, allow_ephemeral=allow_ephemeral)
     if setting not in SETTINGS:

@@ -241,6 +241,15 @@ A GPU is not needed for this notebook."""),
            "by number only (D1 `EEG E01`-`E32`, D2 `Misc ExG1`-`ExG32`), and channel *k* is electrode *k* "
            "of that file. Then every recording must have the 30 channels used (M1/M2 dropped)."),
         code("""sh(f"python scripts/inspect_raw.py --paths configs/paths.yaml --out '{OUT}' --strict")"""),
+        md("## 3b. Amplitude diagnostic (read-only)\nReads the first recording of each dataset (the smoke-test "
+           "subjects) and breaks the preprocessing amplitude check down by stage: EDF header units, MNE's unit "
+           "conversion, dataset scale, band-pass, 1 Hz high-pass, average reference, edges, drift, clipping, "
+           "spectra (methodology log entry 38). It writes only to `diagnostics/amplitude_<time>/` and changes "
+           "nothing. Other recordings: add `--keys D1-3 D2-5`."),
+        code("""sh(f"python scripts/diagnose_amplitude.py --paths configs/paths.yaml --out '{OUT}'")
+from pathlib import Path
+from IPython.display import Image, display
+display(Image(str(sorted(Path(OUT, 'diagnostics').glob('amplitude_*/amplitude.png'))[-1])))"""),
         md("## 4. Smoke test: first subject of each dataset\nWritten to Drive as `graphs_v3_<hash>_limit1/`; "
            "it is never used for analysis."),
         code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --limit 1")'),
@@ -345,6 +354,7 @@ DRIVE_LAYOUT = """\
 <outputs>/                          AD-LEB/processed (or My Drive/AD-LEB-processed if that is read-only)
 ├── CODE_COMMIT.txt                 code commit used by every session and notebook
 ├── header_report_<time>.csv        EDF header checks (notebook 01, step 3)
+├── diagnostics/amplitude_<time>/   read-only amplitude diagnostic (notebook 01, step 3b)
 ├── cache/
 │   ├── subjects/fsaverage/         fsaverage template (downloaded once)
 │   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
@@ -352,9 +362,11 @@ DRIVE_LAYOUT = """\
 │   └── tests_passed/<commit>_<env>.txt            test-suite pass record
 ├── graphs_v3_<config hash>_limit1/ smoke test (never used for analysis)
 ├── graphs_v3_<config hash>/        graph run used by the experiments
-│   ├── run_identity.json  status.csv  memory_log.csv
+│   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
+│   │                               (failed.json: the error of a failed subject)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
+│   │                               (only when every subject succeeded and the cohort is not empty)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)
 ├── experiments/
 │   └── <experiment>/               one folder per experiment notebook

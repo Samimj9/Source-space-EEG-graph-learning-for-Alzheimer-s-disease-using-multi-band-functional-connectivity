@@ -24,7 +24,7 @@ import pandas as pd
 from .config import common_channels, config_hash
 from .connectivity.plv import band_analytic, check_filters_fit_edge_trim, phase_sync
 from .features.psd import check_relative_range, window_band_powers
-from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, window_id
+from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, require_complete_cohort, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
 from .io.layout import check_layout, spatial_consistency
 from .io.fingerprint import InputHashes, auxiliary_inputs
@@ -43,8 +43,15 @@ from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
 log = logging.getLogger(__name__)
 
 DATASETS = ("D1", "D2")
+ASSEMBLY_FILES = ("graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "assembly.done.json")
+
 # ROIs band-filtered + Hilbert-transformed together (bounds memory; results identical, see band_analytic)
 ANALYTIC_CHUNK_ROWS = 8
+
+
+class GraphRunIncomplete(RuntimeError):
+    """Graph construction finished without a usable cohort (failed subjects or no graphs);
+    nothing is assembled and no completion marker is written (methodology log entry 38)."""
 
 
 def canonical_info(cfg: dict):
@@ -376,7 +383,12 @@ def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = Non
 # ---------------------------------------------------------------------- assembly
 def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dict, op: dict,
              no_meta: list, no_rec: list, limit: int | None, keys_failed: dict, aux_inputs: dict | None = None) -> Path:
-    """Concatenate completed subject units into the cohort store (skipped if already assembled)."""
+    """Concatenate completed subject units into the cohort store (skipped if already assembled).
+
+    Refuses (``GraphRunIncomplete``) a cohort with failed subjects or without any graph: an
+    assembled run with a completion marker is always complete and non-empty."""
+    if keys_failed:
+        raise GraphRunIncomplete(f"not assembling: {len(keys_failed)} subject(s) failed: {sorted(keys_failed)}")
     units = {}
     for rec in registry.itertuples():
         mp = run_dir / "subjects" / rec.key / "subject.done.json"
@@ -391,7 +403,7 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         log.info("cohort already assembled for these subject units; nothing to do")
         return run_dir
     if state != "missing":                     # units changed (e.g. a failed subject now succeeded)
-        for f in ("graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "assembly.done.json"):
+        for f in ASSEMBLY_FILES:
             supersede(run_dir / f, run_dir)
 
     bands = cfg["connectivity"]["bands"]
@@ -414,6 +426,9 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
     # Pass 2: preallocate each cohort array once and copy one subject at a time into its slice
     # (no per-subject lists + concatenate, which held every array twice).
     n_total = sum(n for _, n in ok_units)
+    if not n_total:
+        raise GraphRunIncomplete(f"not assembling an empty cohort: no subject has graphs "
+                                 f"(statuses: {[(r.get('key'), r.get('status')) for r in subj_rows]})")
     tail = {k: (n_b, n_r, n_r) if k in ("plv", "ciplv", "ciplv_signed") else (n_b, n_c if "sensor" in k else n_r)
             for k in keys}
     stacked = {k: np.empty((n_total, *tail[k]), np.float32) for k in keys}
@@ -499,7 +514,9 @@ def latest_complete_graph_run(processed_dir: str | Path) -> Path:
     runs = runs[runs["assembled"] & ~runs["limit_smoke_test"]].sort_values("assembled_at")
     if runs.empty:
         raise FileNotFoundError(f"no assembled graph run in {processed_dir}")
-    return Path(runs["run_dir"].iloc[-1])
+    latest = Path(runs["run_dir"].iloc[-1])
+    require_complete_cohort(GraphStore.load(latest, keys=()))    # never falls back to an older run
+    return latest
 
 
 # ---------------------------------------------------------------------- driver
@@ -572,10 +589,45 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     with progress.reporter(len(registry), "subjects", initial=len(likely_done), unit="recordings",
                            counts={"done": 0, "resumed": 0, "failed": 0, "pending": len(registry)}) as bar:
         _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar)
+    check_run_complete(run_dir, registry, failed)
     with MemoryTracker() as m:
         out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
     mem_log.add("assembly", "done", m.record())
     return out
+
+
+def check_run_complete(run_dir: Path, registry: pd.DataFrame, failed: dict) -> None:
+    """Raise ``GraphRunIncomplete`` unless every subject succeeded and at least one has graphs.
+
+    Before raising: ``last_attempt.json`` records the failed subjects and their errors (the
+    per-subject ``failed.json``, ``status.csv`` and ``memory_log.csv`` are kept as well), and a
+    previously assembled cohort in this directory, which no longer matches the subject units, is
+    moved to ``_superseded/`` so the directory never advertises a completed cohort."""
+    statuses = {}
+    for key in registry["key"]:
+        if key in failed:
+            statuses[key] = failed[key]
+            continue
+        row = run_dir / "subjects" / key / "subject.json"
+        statuses[key] = json.loads(row.read_text())["status"] if row.exists() else "missing"
+    n_ok = sum(v == "ok" for v in statuses.values())
+    complete = not failed and n_ok > 0
+    reason = ("all subjects processed" if complete else f"{len(failed)} of {len(registry)} subject(s) failed"
+              if failed else f"no subject produced graphs ({len(registry)} processed)")
+    atomic_write_json(run_dir / "last_attempt.json", {         # replaced on every attempt (diagnostic only)
+        "time": datetime.now(timezone.utc).isoformat(), "git_commit": git_commit(),
+        "result": "subjects complete" if complete else "incomplete", "reason": reason,
+        "n_subjects": len(registry), "n_ok": n_ok, "failed": failed, "statuses": statuses})
+    if complete:
+        return
+    if (run_dir / "assembly.done.json").exists() or (run_dir / "graphs.npz").exists():
+        for f in ASSEMBLY_FILES:
+            supersede(run_dir / f, run_dir)
+    lines = "\n  ".join(f"{k}: {v}" for k, v in failed.items()) or "(none failed)"
+    raise GraphRunIncomplete(
+        f"graph construction incomplete: {reason}; the cohort was NOT assembled.\n  {lines}\n"
+        f"Details: {run_dir / 'last_attempt.json'}, {run_dir / 'status.csv'}, subjects/<key>/failed.json. "
+        "Completed subjects are saved; after fixing the cause, rerun the same command (only failed ones rerun).")
 
 
 def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar):

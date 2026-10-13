@@ -2218,6 +2218,130 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 38. Amplitude check failure in the first real-data smoke test; empty runs fail explicitly
+
+**What happened (Notebook 01, smoke test, commit `ba4d574`)**
+- The layout check, the input SHA-256 checks and the fsaverage operator succeeded (relative
+  inverse verification error 1.3e-15).
+- Both smoke-test recordings stopped at the preprocessing amplitude check
+  (`preprocessing/clean.py`):
+  - D1-1: median channel std 0.000221 V (221 µV);
+  - D2-2: 0.000322 V (322 µV);
+  - plausible range `units.plausible_std_v` = [1e-7, 2e-4] V (0.1–200 µV).
+- The run reported `done: 0, failed: 2` but still assembled an **empty cohort** and wrote a
+  completion marker (`assembly.done.json`).
+
+**What the check measures** (traced in code)
+- It is the median over the 30 channels of each channel's standard deviation.
+- The signal is taken after resampling to 250 Hz and the 0.1–45 Hz band-pass.
+- It is measured in the **recording reference**, i.e. before bad-channel handling and before
+  the average reference.
+- It covers the **whole recording**, including the first and last 10 s that windowing later
+  discards.
+- It is a plain standard deviation, so a few large transients can dominate it.
+- Purpose (decision 20): catch unit errors in either dataset, which shift amplitudes by 10³
+  or 10⁶.
+
+**Unit chain** (traced in code)
+- MNE reads the EDF physical values and converts them with the header's physical dimension:
+  `V` × 1, `mV` × 1e-3, `uV`/`µV` × 1e-6.
+- `load_raw` then multiplies by `units.scale`: D1 × 1e-6 (header `V`, values µV), D2 × 1.
+- The reported values exclude the gross errors:
+  - if D1 were rescaled twice, its value would be 2.2e-10 V, not 2.2e-4 V;
+  - if it were not rescaled at all, its value would be 221 V;
+  - an mV/µV mix-up would give 0.22 V or 0.22 µV.
+- Both datasets give a similar 200–300 µV through different chains (× 1e-6 vs × 1). A shared
+  scale error would be a coincidence.
+- **Hypothesis to test, not a conclusion.** 200–300 µV is plausible for a 0.1 Hz high-passed
+  signal that still carries:
+  - electrode drift / skin potentials;
+  - a common-mode or reference signal (removed later by the average reference);
+  - start-up transients.
+
+  Typical resting EEG in the bands that are analysed (1–45 Hz, average reference) is a few
+  to tens of µV.
+- Genuinely noisy EEG remains possible and is distinguished by the diagnostic below.
+
+**Diagnostic (read-only; no pipeline change)**
+- `adgraph.preprocessing.amplitude.amplitude_report`, `scripts/diagnose_amplitude.py` and
+  Notebook 01 section 3b.
+- Run on the two smoke-test recordings, or any `--keys`, it reports:
+  - the EDF header per channel: physical dimension, MNE's conversion factor, physical and
+    digital limits, resolution, prefiltering;
+  - per-channel and median statistics at six stages: MNE volts, after the dataset scale,
+    the QC stage, + 1 Hz high-pass, + average reference, both. The statistics are std,
+    robust std (1.4826 MAD), percentiles of |x − median|, peak-to-peak, DC offset and
+    linear trend;
+  - the QC value without the 10 s edges;
+  - band fractions of the 0.1–45 Hz power (0.1–1 Hz drift share);
+  - the common-mode variance fraction;
+  - 20 s block amplitudes over time;
+  - clipping at the EDF physical limits, flat samples, 50/60 Hz line noise, and the alpha
+    peak and its spectral density.
+- The QC-stage value is computed with the same calls as `preprocess()`. `preprocess` now uses
+  a shared `resample_and_bandpass` helper, with identical numerics, and the two values agree
+  exactly in a test.
+- It prints evidence statements with fixed criteria:
+  - **units**: the 1–45 Hz average-referenced std inside 2–100 µV;
+  - **drift**: ≥ 50 % of the power below 1 Hz;
+  - **common mode**: ≥ 50 % of the variance shared by all channels;
+  - **transients**: std / robust std > 1.5;
+  - **clipping**: > 0.1 % of samples at the limits;
+  - **edges**: whole-recording vs edge-trimmed value.
+- These criteria are evidence for the author, not an automatic decision.
+
+**Decision status**
+- The threshold, the check's stage and the scaling are **unchanged**.
+- No error is suppressed: the smoke test keeps failing until the cause is decided.
+- If the diagnostic shows correct units, with the excess due to drift, common mode or edges, a
+  candidate revision for the author would be:
+  - apply the check to the signal that actually enters the features: edge-trimmed, 1–45 Hz,
+    average reference, robust std;
+  - keep a range that still separates the 10³/10⁶ unit errors.
+
+  This is a methods decision. It needs the diagnostic's numbers and the author's approval,
+  and it would be logged as a new decision row.
+- **Open item 11.**
+
+**Empty / incomplete runs** (implemented)
+- `pipeline.run` checks the subject outcomes before assembly (`check_run_complete`). If any
+  subject failed, or no subject produced graphs (e.g. all below the 5-window rule), it:
+  - writes `last_attempt.json` (failed subjects, errors, statuses);
+  - keeps `subjects/<key>/failed.json`, `status.csv` and `memory_log.csv`;
+  - moves a previously assembled cohort in that directory to `_superseded/`;
+  - raises `GraphRunIncomplete`. `build_graphs.py` exits with `FAILED: …`, so the notebook stops.
+- `assemble` itself refuses failed subjects or an empty cohort. A completion marker therefore
+  always means a complete, non-empty cohort.
+- This replaces the earlier behaviour, which assembled the successful subjects with failed
+  ones listed. A full run with a failed subject is no longer assembled. Fix the cause and
+  rerun; only the failed subjects are recomputed.
+- Experiments refuse unusable graph runs (`graphs.store.require_complete_cohort`, called by
+  `runner.run_variant` and by `pipeline.latest_complete_graph_run`). A run is refused if it
+  has:
+  - no graphs;
+  - a failed subject, in `subjects.csv` or in the manifest units;
+  - a dataset without graphs;
+  - been a `--limit` smoke test.
+
+  `latest_complete_graph_run` does not fall back to an older run, so an empty cohort
+  assembled by earlier code is refused too.
+
+**Effect on checkpoints**
+- The new commit changes `code_identity`. The cached operator is therefore rebuilt once (as
+  after every commit), and graph subject units are recomputed.
+- The empty smoke-test directory `graphs_v3_<hash>_limit1/` from commit `ba4d574` contains
+  an empty `graphs.npz`, `manifest.json` and `assembly.done.json`. It is never selected:
+  - smoke-test directories are excluded from `latest_complete_graph_run`;
+  - `require_complete_cohort` refuses it.
+- On the next smoke-test attempt with the new code, that directory is reused because its
+  config hash is unchanged:
+  - if the attempt fails, the empty assembly is moved to `_superseded/`;
+  - if it succeeds, the assembly is rebuilt and the old files are superseded.
+
+  Nothing is deleted.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -2242,3 +2366,7 @@ AD-LEB EDF, which are 20–39 MB)
    conservative. Match them (e.g. compare repeat 0, or use equal repeats) before enabling it.
 10. No module produces the corrected, subject-level statistics file that figures can show
     significance from (`docs/figures.md`). All figures are currently descriptive.
+11. Preprocessing amplitude check (entry 38): first real recordings give 221 µV (D1-1) and
+    322 µV (D2-2), above the 200 µV limit. Decide, from `scripts/diagnose_amplitude.py` output,
+    between a unit error, revising the check's stage or limit, and treating the recordings as
+    noisy. Full graph construction waits for this.

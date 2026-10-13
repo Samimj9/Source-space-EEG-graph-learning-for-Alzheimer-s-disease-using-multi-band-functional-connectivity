@@ -5,7 +5,9 @@
 
 Outputs go to <processed>/graphs_v<version>_<config hash>/. Every subject is saved as soon as
 it finishes (subjects/<key>/ + validated marker); rerunning the same command skips completed
-subjects and continues (--resume, default). The sensor->ROI operator is cached under
+subjects and continues (--resume, default). If any subject fails, or no subject produces
+graphs, the cohort is not assembled and the command exits with an error (last_attempt.json,
+status.csv and subjects/<key>/failed.json keep the details). The sensor->ROI operator is cached under
 <cache_dir>/operators and reused while its source-model hash matches. --force starts a fresh
 run directory (..._force<stamp>) and rebuilds the operator; nothing is overwritten.
 
@@ -22,7 +24,7 @@ import logging
 from adgraph.config import load_paths, load_yaml
 import pandas as pd
 
-from adgraph.pipeline import run, status
+from adgraph.pipeline import GraphRunIncomplete, run, status
 from adgraph.progress import log_handler_context
 from adgraph.provenance import verify_environment
 
@@ -60,9 +62,12 @@ if args.status:
     print(st["subjects"].to_string())
     raise SystemExit
 verify_environment()
-with log_handler_context():                        # log lines print above the progress bars
-    out = run(paths, cfg, out_root=out_root, subjects_dir=args.subjects_dir or f"{paths['cache_dir']}/subjects",
-              limit=args.limit, resume=args.resume, force=args.force, run_dir=args.run_dir, operator_cache=op_cache,
-              input_hash_cache=hash_cache, rehash_inputs=args.rehash_inputs,
-              allow_ephemeral=args.allow_ephemeral_storage)
+try:
+    with log_handler_context():                    # log lines print above the progress bars
+        out = run(paths, cfg, out_root=out_root, subjects_dir=args.subjects_dir or f"{paths['cache_dir']}/subjects",
+                  limit=args.limit, resume=args.resume, force=args.force, run_dir=args.run_dir,
+                  operator_cache=op_cache, input_hash_cache=hash_cache, rehash_inputs=args.rehash_inputs,
+                  allow_ephemeral=args.allow_ephemeral_storage)
+except GraphRunIncomplete as exc:                  # explicit failure; nothing assembled, no completion marker
+    raise SystemExit(f"FAILED: {exc}") from None
 print(f"outputs: {out}")

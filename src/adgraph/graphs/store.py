@@ -188,3 +188,46 @@ class GraphStore:
             root=run_dir,
             roi_coords=npz["roi_coords"] if "roi_coords" in npz.files else None,
         )
+
+
+class IncompleteGraphRun(ValueError):
+    """The graph run is empty, has failed subjects, or is a --limit smoke test."""
+
+
+def cohort_problems(store: "GraphStore", allow_subset: bool = False) -> list[str]:
+    """Reasons why ``store`` is not a complete cohort usable for experiments (empty = usable).
+
+    * no graphs at all;
+    * a subject that failed in graph construction (status ``error: ...``, or a failed unit in
+      the manifest); ``below_min_windows`` is the pre-specified exclusion and is allowed;
+    * a dataset without any usable subject;
+    * a ``--limit`` smoke test (unless ``allow_subset``)."""
+    problems = []
+    if store.n_windows == 0:
+        problems.append("the graph run contains no graphs (empty cohort)")
+    subj = store.subjects
+    if not subj.empty and "status" in subj:
+        bad = subj.loc[subj["status"].astype(str).str.startswith("error"), "key"].tolist()
+        if bad:
+            problems.append(f"subjects failed in graph construction: {bad}")
+    units = store.manifest.get("subject_units") or {}
+    failed_units = sorted(k for k, u in units.items() if isinstance(u, dict) and "failed" in u)
+    if failed_units:
+        problems.append(f"failed subject units in the manifest: {failed_units}")
+    datasets = sorted(set(subj["dataset"])) if not subj.empty and "dataset" in subj else []
+    have = set(store.windows["dataset"]) if store.n_windows else set()
+    empty_ds = [d for d in datasets if d not in have]
+    if empty_ds:
+        problems.append(f"no graphs for dataset(s) {empty_ds}")
+    if not allow_subset and (store.manifest.get("registry") or {}).get("subset_limit"):
+        problems.append("the graph run is a --limit smoke test")
+    return problems
+
+
+def require_complete_cohort(store: "GraphStore", allow_subset: bool = False) -> "GraphStore":
+    """Raise ``IncompleteGraphRun`` unless ``cohort_problems`` is empty; returns ``store``."""
+    problems = cohort_problems(store, allow_subset)
+    if problems:
+        where = f" ({store.root})" if store.root else ""
+        raise IncompleteGraphRun(f"graph run not usable for experiments{where}: " + "; ".join(problems))
+    return store

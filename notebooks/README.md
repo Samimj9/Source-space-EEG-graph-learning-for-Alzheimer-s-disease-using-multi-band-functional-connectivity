@@ -45,6 +45,7 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 <outputs>/                          AD-LEB/processed (or My Drive/AD-LEB-processed if that is read-only)
 ├── CODE_COMMIT.txt                 code commit used by every session and notebook
 ├── header_report_<time>.csv        EDF header checks (notebook 01, step 3)
+├── diagnostics/amplitude_<time>/   read-only amplitude diagnostic (notebook 01, step 3b)
 ├── cache/
 │   ├── subjects/fsaverage/         fsaverage template (downloaded once)
 │   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
@@ -52,9 +53,11 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 │   └── tests_passed/<commit>_<env>.txt            test-suite pass record
 ├── graphs_v3_<config hash>_limit1/ smoke test (never used for analysis)
 ├── graphs_v3_<config hash>/        graph run used by the experiments
-│   ├── run_identity.json  status.csv  memory_log.csv
+│   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
+│   │                               (failed.json: the error of a failed subject)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
+│   │                               (only when every subject succeeded and the cohort is not empty)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)
 ├── experiments/
 │   └── <experiment>/               one folder per experiment notebook
