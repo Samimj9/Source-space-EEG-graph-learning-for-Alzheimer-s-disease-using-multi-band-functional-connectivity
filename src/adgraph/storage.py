@@ -33,7 +33,14 @@ def in_colab() -> bool:
 
 
 def drive_mounted(mount: Path = DRIVE_MOUNT) -> bool:
-    return os.path.ismount(mount)
+    """True if a filesystem is mounted at ``mount`` or below it (Colab's Drive FUSE mount)."""
+    if os.path.ismount(mount):
+        return True
+    try:
+        points = [line.split()[1] for line in Path("/proc/mounts").read_text().splitlines() if len(line.split()) > 1]
+    except OSError:
+        return False
+    return any(p == str(mount) or p.startswith(str(mount) + "/") for p in points)
 
 
 def _under(p: Path, root: Path) -> bool:
