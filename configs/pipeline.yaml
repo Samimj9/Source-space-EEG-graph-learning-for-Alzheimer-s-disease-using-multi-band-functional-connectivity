@@ -66,6 +66,12 @@ connectivity:
     alpha2: [10.0, 13.0]
     beta: [13.0, 30.0]
   metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = |ciPLV|, leakage-robust sensitivity, never merged
+  # Band-pass for phase (MNE FIR, zero phase, firwin/Hamming, applied to the continuous ROI signals):
+  # the same transition width on every band edge (lower edge capped at l_freq); nominal bands above
+  # unchanged. 1.0 Hz keeps alpha1/alpha2 cross-band leakage at the noise floor with 3.3 s filters
+  # (half-length 1.65 s < edge_trim_s). null = MNE 'auto' widths (2-7.5 Hz; design before
+  # methodology log entry 36). See docs/band_filters.md.
+  transition_bandwidth_hz: 1.0
 
 psd:
   # Band power for the same bands as connectivity, per window, for the 68 ROIs and

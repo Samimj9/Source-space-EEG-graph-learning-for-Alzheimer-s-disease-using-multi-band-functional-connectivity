@@ -20,8 +20,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-from adgraph.colab import (choose_output_root, find_data_root, resolve_code_pin, sh,  # noqa: E402
-                           write_paths_yaml)
+from adgraph.colab import (choose_output_root, find_data_root, has_completed_work, resolve_code_pin,  # noqa: E402
+                           sh, write_paths_yaml)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--update-code", action="store_true", help="move the code pin to the cloned commit")
@@ -37,7 +37,12 @@ data_root = find_data_root()
 output_root = choose_output_root(data_root)
 head = git("rev-parse", "HEAD")
 pin_file = output_root / "CODE_COMMIT.txt"
-commit, needs_checkout = resolve_code_pin(pin_file, head, update=args.update_code)
+old_pin = pin_file.read_text().split()[0] if pin_file.exists() and pin_file.read_text().split() else None
+work = has_completed_work(output_root)
+commit, needs_checkout = resolve_code_pin(pin_file, head, update=args.update_code, has_work=work)
+if old_pin and old_pin != commit:
+    print(f"code pin moved {old_pin[:10]} -> {commit[:10]} "
+          + ("(UPDATE_CODE)" if args.update_code else "(no completed results were pinned to the old commit)"))
 # files the current notebooks call; an older pinned commit without them cannot serve these notebooks
 REQUIRED = ["scripts/experiment.py", "scripts/build_graphs.py", "scripts/make_figures.py", "scripts/run_plan.py",
             "src/adgraph/colab.py"]

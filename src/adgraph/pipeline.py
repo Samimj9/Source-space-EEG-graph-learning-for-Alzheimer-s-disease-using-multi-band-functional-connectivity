@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from .config import common_channels, config_hash
-from .connectivity.plv import band_analytic, phase_sync
+from .connectivity.plv import band_analytic, check_filters_fit_edge_trim, phase_sync
 from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
@@ -108,7 +108,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     # One band's analytic signal is in memory at a time (released before the next band).
     for b, (name, (lo, hi)) in enumerate(bands.items()):
         progress.set(stage=f"connectivity {name} ({b + 1}/{n_b} bands, {n_w} windows)")
-        analytic = band_analytic(roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS)
+        analytic = band_analytic(roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS,
+                                 transition_bandwidth_hz=cfg["connectivity"].get("transition_bandwidth_hz"))
         for w, s in enumerate(kept):
             plv[w, b], ciplv[w, b], ciplv_signed[w, b] = phase_sync(analytic[:, s:s + win_len])
         del analytic
@@ -511,6 +512,7 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     """
     pp = cfg["preprocessing"]
     check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
+    check_filters_fit_edge_trim(cfg)
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
     operator_cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
     input_hash_cache = Path(input_hash_cache) if input_hash_cache else default_hash_cache(run_dir)

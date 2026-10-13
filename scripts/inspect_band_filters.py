@@ -28,15 +28,22 @@ from scipy.signal import freqz
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/pipeline.yaml")
-parser.add_argument("--out-table", default="results/tables/band_filter_responses.csv")
-parser.add_argument("--out-figure", default="docs/img/band_filter_responses.png")
+parser.add_argument("--design", choices=["config", "auto"], default="config",
+                    help="config: connectivity.transition_bandwidth_hz as applied now; auto: MNE 'auto' (before)")
+parser.add_argument("--out-table", help="default: results/tables/band_filter_responses_<design>.csv")
+parser.add_argument("--out-figure", help="default: docs/img/band_filter_responses_<design>.png")
 args = parser.parse_args()
+args.out_table = args.out_table or f"results/tables/band_filter_responses_{args.design}.csv"
+args.out_figure = args.out_figure or f"docs/img/band_filter_responses_{args.design}.png"
 
 import mne  # noqa: E402
+
+from adgraph.connectivity.plv import transition_kwargs  # noqa: E402
 
 cfg = yaml.safe_load(Path(args.config).read_text())
 sfreq = float(cfg["preprocessing"]["sfreq"])
 bands = cfg["connectivity"]["bands"]
+width = None if args.design == "auto" else cfg["connectivity"].get("transition_bandwidth_hz")
 f = np.arange(0.0, 60.0 + 1e-9, 0.005)
 resp, rows = {}, []
 
@@ -55,12 +62,12 @@ def edge(mask_from_center, freqs, center, side):
 
 for name, (lo, hi) in bands.items():
     h = mne.filter.create_filter(None, sfreq, lo, hi, method="fir", phase="zero", fir_design="firwin",
-                                 verbose="error")
+                                 verbose="error", **transition_kwargs(lo, hi, width))
     # the kernel analysed here is the one the pipeline applies: impulse through filter_data
     imp = np.zeros(int(sfreq * 60))
     imp[len(imp) // 2] = 1.0
     out = mne.filter.filter_data(imp, sfreq, lo, hi, method="fir", phase="zero", fir_design="firwin",
-                                 verbose="error")
+                                 verbose="error", **transition_kwargs(lo, hi, width))
     half = len(h) // 2
     applied = out[len(imp) // 2 - half: len(imp) // 2 - half + len(h)]
     if not np.allclose(applied, h, atol=1e-10):
@@ -68,9 +75,10 @@ for name, (lo, hi) in bands.items():
     _, H = freqz(h, worN=f, fs=sfreq)
     g = np.abs(H)                                        # phase="zero": applied once, magnitude |H|
     resp[name] = g
-    # MNE's 'auto' transition widths (mne.filter rules for firwin)
-    l_tb = min(max(lo * 0.25, 2.0), lo)
-    h_tb = min(max(hi * 0.25, 2.0), sfreq / 2.0 - hi)
+    if width is None:                                    # MNE's 'auto' transition widths (firwin rules)
+        l_tb, h_tb = min(max(lo * 0.25, 2.0), lo), min(max(hi * 0.25, 2.0), sfreq / 2.0 - hi)
+    else:
+        l_tb, h_tb = min(width, lo), width
     c = (lo + hi) / 2
     db = 20 * np.log10(np.maximum(g, 1e-12))
     rows.append({"band": name, "nominal_low_hz": lo, "nominal_high_hz": hi,
@@ -126,8 +134,9 @@ axes[1].set_ylim(-80, 5)
 axes[1].set_ylabel("gain (dB)")
 axes[1].set_xlabel("frequency (Hz)")
 axes[1].set_xlim(0, 45)
-fig.suptitle(f"Connectivity band-pass filters as applied (MNE FIR, zero phase, firwin, auto transitions, "
-             f"{sfreq:g} Hz)\nshaded: nominal bands", fontsize=8)
+label = "MNE 'auto' transitions (before)" if width is None else f"{width:g} Hz transitions (applied)"
+fig.suptitle(f"Connectivity band-pass filters: MNE FIR, zero phase, firwin, {label}, {sfreq:g} Hz\n"
+             "shaded: nominal bands", fontsize=8)
 fig.tight_layout()
 Path(args.out_figure).parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(args.out_figure, dpi=200)

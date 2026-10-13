@@ -58,10 +58,27 @@ def test_output_root_and_paths_yaml(tmp_path, monkeypatch):
 def test_code_pin(tmp_path):
     pin = tmp_path / "out" / "CODE_COMMIT.txt"
     assert colab.resolve_code_pin(pin, "aaa") == ("aaa", False)              # first session pins
-    assert colab.resolve_code_pin(pin, "bbb") == ("aaa", True)               # newer push ignored
+    assert colab.resolve_code_pin(pin, "bbb") == ("aaa", True)               # newer push ignored (results)
     assert colab.resolve_code_pin(pin, "bbb", update=True) == ("bbb", False)  # deliberate update
     assert colab.resolve_code_pin(pin, "ccc") == ("bbb", True)
     assert "previous pin: aaa" in pin.read_text()
+    # a stale pin with no completed work behind it (setup-only session) moves to the current commit
+    assert colab.resolve_code_pin(pin, "ddd", has_work=False) == ("ddd", False)
+    assert colab.resolve_code_pin(pin, "eee") == ("ddd", True)               # from now on it protects results
+
+
+def test_completed_work_detection(tmp_path):
+    out = tmp_path / "processed"
+    assert not colab.has_completed_work(out)
+    (out / "graphs_v3_abc" / "subjects" / "D1-1").mkdir(parents=True)
+    (out / "graphs_v3_abc" / "subjects" / "D1-1" / "arrays.npz").write_bytes(b"partial")
+    assert not colab.has_completed_work(out)                               # unfinished unit: no marker
+    (out / "graphs_v3_abc" / "subjects" / "D1-1" / "subject.done.json").write_text("{}")
+    assert colab.has_completed_work(out)
+    exp = tmp_path / "p2" / "experiments" / "exp0_sensor_psd" / "svm" / "within_D1" / "units"
+    exp.mkdir(parents=True)
+    (exp / "fold_r000_f00.done.json").write_text("{}")
+    assert colab.has_completed_work(tmp_path / "p2")
 
 
 def _cohort_names(root, d1=(("Sub1", "AD"), ("Sub2", "HC")), d2=(("3_1342019", "HC"),)):

@@ -176,18 +176,31 @@ def run_tests_once(output_root: str | Path, repo: str | Path = ".") -> None:
     marker.write_text("passed\n")
 
 
-def resolve_code_pin(pin_file: str | Path, head: str, update: bool = False) -> tuple[str, bool]:
+def has_completed_work(output_root: str | Path) -> bool:
+    """True if any graph-subject or experiment checkpoint has been completed under ``output_root``
+    (a pinned commit then protects results and must not move silently)."""
+    root = Path(output_root)
+    if any(root.glob("graphs_v*/subjects/*/subject.done.json")):
+        return True
+    return any(root.glob("experiments/*/*/*/units/*.done.json")) or any(
+        root.glob("experiments/*/*/*/final.done.json"))
+
+
+def resolve_code_pin(pin_file: str | Path, head: str, update: bool = False,
+                     has_work: bool = True) -> tuple[str, bool]:
     """Commit every session must use, and whether it differs from the cloned ``head``.
 
     The first call records ``head`` in ``pin_file``; later calls return the recorded commit,
     so all sessions and notebooks run the same code. ``update`` moves the pin to ``head``
-    (previous pins are kept as comments)."""
+    (previous pins are kept as comments). A pin with no completed work behind it
+    (``has_work`` False, e.g. left by a setup-only session) protects nothing and is moved to
+    ``head`` automatically, so the first real run records the current commit."""
     from datetime import datetime, timezone
 
     pin_file = Path(pin_file)
     text = pin_file.read_text() if pin_file.exists() else ""
     pinned = next((ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")), None)
-    if pinned and not update:
+    if pinned and not update and (has_work or pinned == head):
         return pinned, pinned != head
     history = [ln if ln.startswith("#") else f"# previous pin: {ln}" for ln in text.splitlines() if ln.strip()]
     pin_file.parent.mkdir(parents=True, exist_ok=True)

@@ -67,6 +67,7 @@ synthetic data.
 33. [Pre-real-data audit fixes and the one-experiment-at-a-time workflow](#33-pre-real-data-audit-fixes-and-the-one-experiment-at-a-time-workflow)
 34. [Memory audit of source reconstruction and graph construction](#34-memory-audit-of-source-reconstruction-and-graph-construction)
 35. [Progress display, final Colab verification, alpha-band filter verification](#35-progress-display-final-colab-verification-alpha-band-filter-verification)
+36. [Connectivity band-pass transition widths](#36-connectivity-band-pass-transition-widths)
 
 ---
 
@@ -2087,6 +2088,75 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 36. Connectivity band-pass transition widths
+
+**Previous design**
+- Phase bands were filtered with MNE FIR, zero phase, `firwin`, and MNE's automatic transition
+  widths: 2–3.25 Hz at the alpha edges, 7.5 Hz at 30 Hz.
+- This was never chosen explicitly. It was the library default.
+
+**Problem discovered** (entry 35; `docs/band_filters.md`)
+- The passbands matched the nominal bands, but the wide transitions made the effective −6 dB
+  bands overlap: alpha1 7.0–11.25 Hz, alpha2 8.76–14.62 Hz.
+- On synthetic signals, coupling only at 9 Hz (inside alpha1) gave alpha2 PLV 0.67 (in-band
+  0.86). Coupling only at 11.5 Hz appeared in alpha1 (0.34) and beta (0.38). Band-specific
+  connectivity was therefore not band-specific.
+
+**Scientific reason**
+- Band-specific claims (single-band experiments, band comparisons, fusion weights) require
+  that a band's PLV / |ciPLV| reflects phase coupling within that band.
+- The author asked to keep the nominal bands and choose a more selective, defensible design
+  (instruction of 2026-10-13).
+
+**Final implementation**
+- Config: `connectivity.transition_bandwidth_hz: 1.0` sets one transition width on every edge
+  (lower edge capped at `l_freq`; `null` reproduces MNE 'auto').
+- `connectivity.plv.band_analytic(..., transition_bandwidth_hz)` applies it;
+  `pipeline.process_recording` passes the configured value.
+- Filters are 3.3 s long (825 samples at 250 Hz).
+- `check_filters_fit_edge_trim` runs at every graph run and refuses filters whose half-length
+  reaches the 10 s edge trim.
+- `CODE_VERSIONS["graph_subject"]` is now `graph-subject-2`.
+- Nothing else changed: nominal bands, filtering of the continuous signal, zero-phase FIR,
+  Hilbert phase, PLV/ciPLV, windows and PSD.
+
+**Alternatives considered** (synthetic comparison, `scripts/compare_band_filter_designs.py`)
+- **1.5 Hz.** Leaves residual leakage (alpha2 PLV 0.20 for 9 Hz coupling).
+- **0.5 Hz.** Doubles filter length (6.6 s) and temporal smearing, with no measurable gain in
+  specificity.
+- **Keeping 'auto' and reporting the effective bands.** Rejected: band-specific
+  interpretation would be confounded.
+- **Merging or redefining bands.** Excluded by the author.
+
+**Effect on interpretation**
+- Off-band leakage falls to the noise floor: alpha2 PLV 0.11 for 9 Hz coupling, against a
+  floor of 0.10.
+- In-band coupling recovery is maintained or slightly improved (0.90 vs 0.86).
+- The null PLV floor rises slightly (alpha1 0.084 → 0.110) because of the narrower effective
+  bandwidth. This applies equally to all subjects and classes.
+- The −6 dB overlap between neighbouring bands is now ±0.5 Hz around the shared edge.
+- No real-data graphs existed with the previous design, and the config hash changes, so no
+  result mixes designs.
+
+**Code / config**
+- `configs/pipeline.yaml`, `src/adgraph/connectivity/plv.py`, `src/adgraph/pipeline.py`
+- `scripts/inspect_band_filters.py`, `scripts/compare_band_filter_designs.py`
+- `docs/band_filters.md`
+
+**Validating tests** (`tests/test_band_filters.py`, synthetic only)
+- Frozen nominal bands and width.
+- Passbands on the nominal edges, with −6 dB at edge ∓ 0.5 Hz and a stopband below −50 dB.
+- alpha1/alpha2 overlap of 9.5–10.5 Hz or less.
+- Filters fit inside the edge trim, and too-narrow transitions are refused.
+- 9 Hz and 11.5 Hz coupling stays in its band, with PLV and |ciPLV| at the noise floor in the
+  other band; the old design is shown to leak.
+- The pipeline passes the configured width.
+
+**Approval status**
+- Author-specified (instruction to recommend and implement, 2026-10-13). Resolves open item 8.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
@@ -2105,11 +2175,7 @@ AD-LEB EDF, which are 20–39 MB)
 6. Final repeat, fold, epoch and grid sizes (currently provisional).
 7. The target journal's width and font requirements (figure selections were resolved:
    entries 25–29).
-8. Connectivity band-pass transition widths (entries 33, 35; measured in `docs/band_filters.md`):
-   MNE's automatic transitions make the effective alpha1 and alpha2 bands overlap (−6 dB at
-   7.0–11.25 and 8.76–14.62 Hz; for flat input, 46 % / 42 % of their output power lies outside
-   the nominal band). Options there: keep and report effective bands, narrower transitions, or
-   changed band definitions. Keep as is, or change before the real run?
+8. ~~Connectivity band-pass transition widths~~: resolved in entry 36 (1.0 Hz transitions, nominal bands unchanged).
 9. Permutation tests (off by default): the null uses `permutation.n_repeats` CV repeats per
    permutation while the observed statistic averages all repeats, which makes the test
    conservative. Match them (e.g. compare repeat 0, or use equal repeats) before enabling it.

@@ -296,7 +296,9 @@ with *Runtime → Run all* and needs no editing.
 - Set and log random seeds (numpy, torch, python) for every run.
 - Units: keep EEG in volts inside MNE objects. Dataset 1 EDFs are mislabeled
   (values are µV but header says V): rescale ×1e-6 on load and log it.
-- Bands (Hz): theta 4–8, alpha1 8–10, alpha2 10–13, beta 13–30.
+- Bands (Hz): theta 4–8, alpha1 8–10, alpha2 10–13, beta 13–30. Connectivity band-pass:
+  MNE FIR zero-phase firwin with 1.0 Hz transitions on every edge
+  (`connectivity.transition_bandwidth_hz`; `docs/band_filters.md`, methodology log entry 36).
 - Commit messages: imperative, describe the scientific change (e.g. "Group CV
   folds by subject").
 
