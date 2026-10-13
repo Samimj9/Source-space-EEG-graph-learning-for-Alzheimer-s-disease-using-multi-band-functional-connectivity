@@ -65,6 +65,7 @@ synthetic data.
 31. [Checkpointing and resume](#31-checkpointing-and-resume)
 32. [Pre-real-run reliability safeguards](#32-pre-real-run-reliability-safeguards)
 33. [Pre-real-data audit fixes and the one-experiment-at-a-time workflow](#33-pre-real-data-audit-fixes-and-the-one-experiment-at-a-time-workflow)
+34. [Memory audit of source reconstruction and graph construction](#34-memory-audit-of-source-reconstruction-and-graph-construction)
 
 ---
 
@@ -1872,6 +1873,106 @@ synthetic data.
 - One-experiment-at-a-time workflow, full protocol and estimates: author-specified (2026-10-13).
 - Bug fixes: approved in principle (author asked to fix identified bugs).
 - Band-filter widths: pending (open item 8).
+
+---
+
+## 34. Memory audit of source reconstruction and graph construction
+
+**Previous design** (audited 2026-10-13 by code reading and `tracemalloc` profiling of a
+synthetic worst-case recording: 20 min, 500 Hz, 34 channels, 41 MB EDF, larger than any
+AD-LEB EDF, which are 20–39 MB)
+- **Already sound:**
+  - Recordings were processed one subject at a time.
+  - The source model was reduced once to the 68 × 30 operator `W`, built from a 30-column
+    identity probe and verified on 200 random samples. It is cached on Drive, and a real
+    recording only ever goes through `W @ data`. The full 20 484-vertex source time series is
+    never formed.
+  - Subject checkpoints were atomic, with the marker written last.
+- **Wasteful:**
+  - `read_raw_edf(preload=True)` loaded every EDF channel at the original rate before picking.
+  - Band-pass + Hilbert ran on all 68 ROIs at once, and the previous band's analytic signal
+    was still alive while the next was computed.
+  - A float32 copy of the ROI signals was always made, even when not saved.
+  - The previous subject's arrays stayed referenced while the next subject was processed.
+  - Assembly kept per-subject lists and then concatenated them, so the cohort was held twice.
+  - `atomic_savez` built the whole compressed archive in RAM.
+  - `GraphStore.validate` ran `allclose(a, aᵀ)` over whole cohort arrays (about 3–4× their
+    size in temporaries), at assembly and at every experiment load.
+- **Unmonitored:** memory was not recorded anywhere.
+
+**Problem discovered**
+- No out-of-memory risk at AD-LEB sizes:
+  - worst-case peaks were about 0.3 GB for loading and preprocessing, and 1.5 GB for
+    connectivity and PSD;
+  - Colab has about 12.7 GB.
+- The connectivity peak was still about 9× the ROI signal size. Assembly and validation
+  scaled at 2–4× the cohort size, which matters for longer recordings or larger cohorts.
+- Without memory logging, an OOM kill could not be diagnosed afterwards.
+
+**Final implementation** (no scientific parameter changed; outputs verified identical)
+- **Loading:** EDFs are opened lazily; only the used channels are picked and then loaded.
+- **Connectivity:**
+  - `band_analytic(..., chunk_rows=8)` filters and Hilbert-transforms 8 ROIs at a time into
+    one preallocated array. ROIs are independent, so the values are identical.
+  - Each band's analytic signal is released before the next band.
+- **ROI copy:** the float32 ROI time series is made only when `save_roi_timeseries` is true.
+- **Between subjects:** a subject's arrays are deleted after its checkpoint is saved, and
+  garbage is collected (`MemoryTracker`).
+- **Assembly:**
+  - pass 1 reads the small per-subject CSVs to size the cohort;
+  - the cohort arrays are preallocated once;
+  - pass 2 copies one subject at a time, with shape checks.
+- **Saving:** `atomic_savez` and `atomic_save_npy` stream into a temp file (fsync, rename),
+  so the compressed archive is never held in RAM.
+- **Validation:** adjacency and signed-ciPLV checks run in blocks of 256 windows. The checks
+  are the same; the temporaries are bounded.
+- **Monitoring (`adgraph.memory`):**
+  - current RSS, peak RSS (VmHWM, reset per unit through `/proc/self/clear_refs`), and
+    available and total system memory;
+  - per subject: `mem_*` columns in `subject.json` and `subjects.csv`, and a log line;
+  - per run: `memory_log.csv` with one row each for the operator, every subject and the
+    assembly, appended across sessions.
+- **After an OOM kill:**
+  - completed units are untouched (marker last; payload validated by SHA-256);
+  - the interrupted unit has no valid marker and is recomputed;
+  - leftover temp files of killed writes are removed at the start of the next run
+    (`cleanup_temp_files`; never part of a unit).
+
+**Measured effect** (same synthetic worst case)
+- Load peak: 323 → 181 MB.
+- Connectivity and PSD peak: 1 492 → 772 MB, now about the continuous ROI signals plus one
+  band's analytic signal, which is the unavoidable floor for continuous-signal filtering.
+- Assembly peak: below 1.5× the cohort arrays (was above 2×).
+
+**Alternatives considered**
+- **complex64 analytic signals.** Rejected: halves memory but changes numerical precision.
+- **Windowed (not continuous) filtering.** Rejected: changes the method (methods decision #21).
+- **Memory-mapped cohort arrays.** Not needed at this size; compressed `npz` cannot be
+  memory-mapped.
+
+**Effect on interpretation**
+- None. Results are identical within floating-point tolerance (tested).
+
+**Code / config**
+- `src/adgraph/memory.py`, `src/adgraph/pipeline.py` (`process_recording`, `run`,
+  `assemble`, `MemoryLog`)
+- `src/adgraph/connectivity/plv.py`, `src/adgraph/io/eeg.py`
+- `src/adgraph/checkpoint.py` (`_atomic_stream`, `cleanup_temp_files`),
+  `src/adgraph/graphs/store.py`
+
+**Validating tests** (`tests/test_memory.py`, synthetic only)
+- Chunked band-analytic and bounded `process_recording` are identical to the unbounded path.
+- Lazy EDF loading reads identical samples.
+- The per-recording peak stays below 4.5× the ROI signal size.
+- Retained memory does not grow across subjects.
+- Memory QC columns and `memory_log.csv` are written.
+- Assembly peak stays below 1.5× the cohort arrays, with identical content.
+- A real SIGKILL during a subject write: completed units are byte-identical after the restart,
+  only the killed and pending subjects are recomputed, and leftover temp files are removed.
+
+**Approval status**
+- Author-specified audit (2026-10-13). Implementation approved in principle: no scientific
+  parameter changed.
 
 ---
 

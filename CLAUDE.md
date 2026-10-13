@@ -271,6 +271,12 @@ with *Runtime → Run all* and needs no editing.
   missing dependency fails the session (`tests/dependency_guard.py`).
 - **Figures** only read final, validated experiment outputs and never train.
   Superseded and unfinished results are ignored.
+- **Memory (methodology log entry 34).** Graph construction holds one subject at a
+  time and releases it after its checkpoint is saved. Recordings only ever go through
+  the 68×30 operator (no full source time series). Band-pass + Hilbert run in ROI
+  chunks, one band at a time. Assembly preallocates the cohort once. Peak RAM per
+  subject is in `subjects.csv` (`mem_*`) and in the run's `memory_log.csv`. Do not
+  trade memory for changed numerics (e.g. complex64, windowed filtering).
 
 ## Conventions
 

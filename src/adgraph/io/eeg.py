@@ -62,7 +62,9 @@ def load_raw(path: str | Path, dataset: str, cfg: dict):
     """
     import mne
 
-    raw = mne.io.read_raw_edf(path, preload=True, verbose="error")
+    # Header only first; only the channels that are used are then read into memory
+    # (identical samples, without loading ECG/EOG/mastoids at the original sampling rate).
+    raw = mne.io.read_raw_edf(path, preload=False, verbose="error")
     recorded = cfg["channels"]["recorded"]
     mapping, unknown = channel_mapping(raw.ch_names, recorded)
     raw.pick(list(mapping))
@@ -75,6 +77,7 @@ def load_raw(path: str | Path, dataset: str, cfg: dict):
     raw.set_channel_types({ch: "eeg" for ch in raw.ch_names})
     raw.pick(keep)
     raw.reorder_channels(keep)
+    raw.load_data(verbose="error")
 
     scale = float(cfg["units"]["scale"][dataset])
     if scale != 1.0:

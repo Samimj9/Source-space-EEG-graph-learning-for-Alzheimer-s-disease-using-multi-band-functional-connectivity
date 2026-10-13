@@ -30,8 +30,9 @@ from .io.participants import load_participants
 from .preprocessing.clean import preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
-                         atomic_write_csv, atomic_write_json, check_unit, code_identity, identity_diff, stable_hash,
-                         supersede, write_marker)
+                         atomic_write_csv, atomic_write_json, check_unit, cleanup_temp_files, code_identity,
+                         identity_diff, stable_hash, supersede, write_marker)
+from .memory import MemoryTracker
 from .provenance import git_commit, git_dirty, versions
 from .storage import check_persistent
 from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
@@ -39,6 +40,8 @@ from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
 log = logging.getLogger(__name__)
 
 DATASETS = ("D1", "D2")
+# ROIs band-filtered + Hilbert-transformed together (bounds memory; results identical, see band_analytic)
+ANALYTIC_CHUNK_ROWS = 8
 
 
 def canonical_info(cfg: dict):
@@ -98,10 +101,12 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     ciplv = np.zeros_like(plv)
     ciplv_signed = np.zeros_like(plv)
     # Band-pass + Hilbert once per band on the continuous ROI signals, then cut windows.
+    # One band's analytic signal is in memory at a time (released before the next band).
     for b, (lo, hi) in enumerate(bands.values()):
-        analytic = band_analytic(roi, sfreq, lo, hi)
+        analytic = band_analytic(roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS)
         for w, s in enumerate(kept):
             plv[w, b], ciplv[w, b], ciplv_signed[w, b] = phase_sync(analytic[:, s:s + win_len])
+        del analytic
 
     psd_cfg = cfg["psd"]
     out = {"plv": plv, "ciplv": ciplv}
@@ -124,7 +129,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
         "qc_frac_channels_over_threshold": thr_exceed[kept_idx] if len(starts) else np.empty(0),
         "qc_max_ptp_uv": ptp[kept_idx].max(axis=1) * 1e6 if n_w else np.empty(0),
         "n_windows_total": len(starts), "n_windows_kept": n_w, "rejection_threshold_uv": thr * 1e6,
-        "roi_timeseries": roi.astype(np.float32),
+        # continuous ROI signals only when they will be saved (otherwise a needless full copy)
+        "roi_timeseries": roi.astype(np.float32) if cfg["output"].get("save_roi_timeseries", False) else None,
     })
     return out
 
@@ -357,8 +363,8 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
     n_b, n_r, n_c = len(bands), len(op["roi_names"]), len(op["ch_names"])
     keys = [k for k in DATA_ARRAY_KEYS if (k != "ciplv_signed" or cfg["output"].get("save_signed_ciplv", True))
             and (not k.startswith("sensor") or cfg["psd"].get("sensor", True))]
-    arrays = {k: [] for k in keys}
-    win, subj_rows = [], []
+    # Pass 1 (small files only): subject rows and window tables -> exact cohort size.
+    win, subj_rows, ok_units = [], [], []
     for rec in registry.itertuples():
         unit_dir = run_dir / "subjects" / rec.key
         if rec.key in keys_failed:
@@ -368,13 +374,24 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         subj_rows.append(row)
         if row["status"] != "ok":
             continue
-        z = np.load(unit_dir / "arrays.npz")
-        for k in keys:
-            arrays[k].append(z[k])
         win.append(pd.read_csv(unit_dir / "windows.csv"))
-    shape = {k: (0, n_b, n_r, n_r) for k in ("plv", "ciplv", "ciplv_signed")}
-    stacked = {k: np.concatenate(v) if v else np.empty(shape.get(k, (0, n_b, n_c if "sensor" in k else n_r)),
-                                                        np.float32) for k, v in arrays.items()}
+        ok_units.append((unit_dir, len(win[-1])))
+    # Pass 2: preallocate each cohort array once and copy one subject at a time into its slice
+    # (no per-subject lists + concatenate, which held every array twice).
+    n_total = sum(n for _, n in ok_units)
+    tail = {k: (n_b, n_r, n_r) if k in ("plv", "ciplv", "ciplv_signed") else (n_b, n_c if "sensor" in k else n_r)
+            for k in keys}
+    stacked = {k: np.empty((n_total, *tail[k]), np.float32) for k in keys}
+    pos = 0
+    for unit_dir, n in ok_units:
+        with np.load(unit_dir / "arrays.npz") as z:
+            for k in keys:
+                block = z[k]
+                if block.shape != (n, *tail[k]):
+                    raise ValueError(f"{unit_dir}/arrays.npz[{k}] has shape {block.shape}, expected {(n, *tail[k])}")
+                stacked[k][pos:pos + n] = block
+                del block
+        pos += n
     windows = pd.concat(win, ignore_index=True) if win else pd.DataFrame(columns=list(WINDOW_COLUMNS))
     subjects = pd.DataFrame(subj_rows)
     win_s, step_s = window_samples(cfg["preprocessing"]["sfreq"], cfg["windowing"]["window_s"],
@@ -470,6 +487,9 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     if run_dir.exists() and not resume:
         raise FileExistsError(f"{run_dir} exists; use resume (default) to continue it or force to start fresh")
     run_dir.mkdir(parents=True, exist_ok=True)
+    n_tmp = cleanup_temp_files(run_dir)           # partial writes of a killed session (never part of a unit)
+    if n_tmp:
+        log.warning("removed %d temporary file(s) left by an interrupted session", n_tmp)
     ident_path = run_dir / "run_identity.json"
     ident = {"config_hash": config_hash(cfg), "subset_limit": limit}
     if ident_path.exists():
@@ -487,7 +507,10 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     aux = hash_auxiliary_inputs(paths, hashes)
     log.info("input content hashes: %d files read, %d from cache", hashes.n_hashed,
              len(registry) + len(aux) - hashes.n_hashed)
-    op = get_operator(cfg, subjects_dir, operator_cache, force)
+    mem_log = MemoryLog(run_dir / "memory_log.csv")
+    with MemoryTracker() as m:
+        op = get_operator(cfg, subjects_dir, operator_cache, force)
+    mem_log.add("operator", "from cache" if op.get("from_cache") else "built + verified", m.record())
     table = StatusTable(run_dir / "status.csv")
     table.ensure(registry["key"].tolist())
     save_ts = cfg["output"].get("save_roi_timeseries", False)
@@ -508,7 +531,8 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
             supersede(unit_dir, run_dir)
         table.set(rec.key, "running")
         try:
-            arrays, windows, subject_row, roi_ts = process_subject(rec, cfg, op)
+            with MemoryTracker() as m:            # one subject in memory at a time; released below
+                arrays, windows, subject_row, roi_ts = process_subject(rec, cfg, op)
         except Exception as exc:  # recorded, never silent; KeyboardInterrupt etc. propagate
             log.exception("%s failed", rec.key)
             row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",
@@ -516,7 +540,30 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
             atomic_write_json(unit_dir / "failed.json", {**row, "status": f"error: {exc}"})
             table.set(rec.key, "failed", str(exc)[:500])
             failed[rec.key] = f"error: {exc}"
+            mem_log.add(rec.key, "failed", m.record())
             continue
+        mem = m.record()
+        subject_row.update(mem)                   # memory QC in subjects.csv
         save_subject(unit_dir, sident, arrays, windows, subject_row, roi_ts if save_ts else None)
         table.set(rec.key, "completed")
-    return assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
+        mem_log.add(rec.key, "completed", mem)
+        log.info("%s: peak memory %s MB (available before: %s MB)", rec.key, mem["mem_peak_mb"],
+                 mem["mem_available_before_mb"])
+        del arrays, windows, subject_row, roi_ts  # release this subject before the next one
+    with MemoryTracker() as m:
+        out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
+    mem_log.add("assembly", "done", m.record())
+    return out
+
+
+class MemoryLog:
+    """``memory_log.csv`` in the run directory: one row per operator build, subject and assembly,
+    appended across sessions (informational QC; never used to decide completeness)."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def add(self, unit: str, event: str, mem: dict) -> None:
+        old = pd.read_csv(self.path) if self.path.exists() else pd.DataFrame()
+        row = pd.DataFrame([{"time": datetime.now(timezone.utc).isoformat(), "unit": unit, "event": event, **mem}])
+        atomic_write_csv(self.path, pd.concat([old, row], ignore_index=True))

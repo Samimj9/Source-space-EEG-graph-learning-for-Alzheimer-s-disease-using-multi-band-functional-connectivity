@@ -6,12 +6,26 @@ import numpy as np
 from scipy.signal import hilbert
 
 
-def band_analytic(x: np.ndarray, sfreq: float, l_freq: float, h_freq: float) -> np.ndarray:
-    """Zero-phase FIR band-pass along the last axis, then the analytic signal."""
+def band_analytic(x: np.ndarray, sfreq: float, l_freq: float, h_freq: float,
+                  chunk_rows: int | None = None) -> np.ndarray:
+    """Zero-phase FIR band-pass along the last axis, then the analytic signal.
+
+    Rows (ROIs) are filtered and transformed independently, so with ``chunk_rows`` they are
+    processed a few at a time into one preallocated output: identical values, but the
+    filter and FFT temporaries cover ``chunk_rows`` rows instead of the whole recording."""
     from mne.filter import filter_data
 
-    xf = filter_data(x, sfreq, l_freq, h_freq, method="fir", phase="zero", fir_design="firwin", verbose="error")
-    return hilbert(xf, axis=-1)
+    def one(block):
+        xf = filter_data(block, sfreq, l_freq, h_freq, method="fir", phase="zero", fir_design="firwin",
+                         verbose="error")
+        return hilbert(xf, axis=-1)
+
+    if not chunk_rows or chunk_rows >= x.shape[0]:
+        return one(x)
+    out = np.empty(x.shape, dtype=np.complex128)
+    for i in range(0, x.shape[0], chunk_rows):
+        out[i:i + chunk_rows] = one(np.ascontiguousarray(x[i:i + chunk_rows], dtype=np.float64))
+    return out
 
 
 def phase_sync(analytic: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

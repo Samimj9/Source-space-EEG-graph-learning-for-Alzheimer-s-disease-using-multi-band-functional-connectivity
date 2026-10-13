@@ -61,14 +61,29 @@ def window_id(key: str, window_index: int) -> str:
     return f"{key}-w{window_index:04d}"
 
 
+VALIDATION_BLOCK = 256       # windows checked at a time (bounds temporaries; same outcome)
+
+
+def _blocks(a: np.ndarray):
+    """Views of ``a`` in blocks along the window axis (the whole array if it is a single matrix)."""
+    if a.ndim < 3:
+        yield a
+        return
+    for i in range(0, a.shape[0], VALIDATION_BLOCK):
+        yield a[i:i + VALIDATION_BLOCK]
+
+
 def check_adjacency(a: np.ndarray, name: str = "adjacency", atol: float = 1e-5) -> None:
-    """Adjacency contract: symmetric, zero diagonal, values in [0, 1]. a (..., R, R)."""
-    if not np.allclose(a, np.swapaxes(a, -1, -2), atol=atol):
-        raise ValueError(f"{name}: not symmetric")
-    if np.abs(np.diagonal(a, axis1=-2, axis2=-1)).max() > atol:
-        raise ValueError(f"{name}: non-zero diagonal")
-    if a.min() < -atol or a.max() > 1 + atol:
-        raise ValueError(f"{name}: values outside [0, 1] (signed ciPLV must not be used as an adjacency)")
+    """Adjacency contract: symmetric, zero diagonal, values in [0, 1]. a (..., R, R).
+
+    Checked block by block, so the temporaries of ``allclose`` never cover the whole cohort."""
+    for blk in _blocks(a):
+        if not np.allclose(blk, np.swapaxes(blk, -1, -2), atol=atol):
+            raise ValueError(f"{name}: not symmetric")
+        if np.abs(np.diagonal(blk, axis1=-2, axis2=-1)).max() > atol:
+            raise ValueError(f"{name}: non-zero diagonal")
+        if blk.min() < -atol or blk.max() > 1 + atol:
+            raise ValueError(f"{name}: values outside [0, 1] (signed ciPLV must not be used as an adjacency)")
 
 
 @dataclass
@@ -108,9 +123,9 @@ class GraphStore:
             if name in self.arrays and self.n_windows:
                 check_adjacency(self.arrays[name], name)
         if "ciplv_signed" in self.arrays and self.n_windows:
-            a = self.arrays["ciplv_signed"]
-            if not np.allclose(a, -np.swapaxes(a, -1, -2), atol=1e-5) or np.abs(a).max() > 1 + 1e-5:
-                raise ValueError("ciplv_signed must be antisymmetric with values in [-1, 1]")
+            for blk in _blocks(self.arrays["ciplv_signed"]):
+                if not np.allclose(blk, -np.swapaxes(blk, -1, -2), atol=1e-5) or np.abs(blk).max() > 1 + 1e-5:
+                    raise ValueError("ciplv_signed must be antisymmetric with values in [-1, 1]")
         if self.roi_coords is not None and np.asarray(self.roi_coords).shape != (r, 3):
             raise ValueError(f"roi_coords shape {np.asarray(self.roi_coords).shape} != ({r}, 3)")
         if self.band_edges.shape != (k, 2):

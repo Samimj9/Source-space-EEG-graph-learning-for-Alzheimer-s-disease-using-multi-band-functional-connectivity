@@ -23,7 +23,6 @@ those manual labels remain for documentation only.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -124,16 +123,45 @@ def atomic_write_csv(path, df: pd.DataFrame) -> Path:
     return atomic_write_text(path, df.to_csv(index=False))
 
 
+def _atomic_stream(path, write) -> Path:
+    """Stream ``write(fileobj)`` into a temp file next to ``path``, fsync, then rename.
+
+    Unlike building the bytes in memory first, peak memory stays at the arrays themselves
+    (the compressed archive is never held in RAM). A crash leaves only the temp file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex[:8]}")
+    try:
+        with open(tmp, "wb") as f:
+            write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return path
+
+
 def atomic_savez(path, **arrays) -> Path:
-    buf = io.BytesIO()
-    np.savez_compressed(buf, **arrays)
-    return atomic_write_bytes(path, buf.getvalue())
+    return _atomic_stream(path, lambda f: np.savez_compressed(f, **arrays))
 
 
 def atomic_save_npy(path, array) -> Path:
-    buf = io.BytesIO()
-    np.save(buf, array)
-    return atomic_write_bytes(path, buf.getvalue())
+    return _atomic_stream(path, lambda f: np.save(f, array))
+
+
+def cleanup_temp_files(directory: str | Path) -> int:
+    """Delete leftover ``.<name>.tmp-<id>`` files of interrupted atomic writes under ``directory``.
+
+    They are never part of a completed unit (a marker lists only renamed payload files).
+    Call only when no other process writes to ``directory``. Returns the number removed."""
+    n = 0
+    for p in Path(directory).rglob(".*.tmp-*"):
+        if p.is_file() and "_superseded" not in p.parts:
+            p.unlink(missing_ok=True)
+            n += 1
+    return n
 
 
 # ----------------------------------------------------------------- units

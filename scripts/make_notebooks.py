@@ -232,7 +232,7 @@ Steps (each stops the notebook with a clear message if something is wrong):
 3. EDF header check (all 30 channels used by the pipeline present);
 4. smoke test on the first subject of each dataset (downloads fsaverage into the Drive cache once);
 5. full graph construction for all 43 recordings (several hours; resumable);
-6. quality summary.
+6. quality summary (including peak memory per subject; also saved in `memory_log.csv`).
 
 Then open one experiment notebook in `notebooks/experiments/` (e.g. `Exp0_sensor_psd.ipynb`).
 A GPU is not needed for this notebook."""),
@@ -267,9 +267,13 @@ print(json.dumps(m['summary']['per_dataset'], indent=1))
 print('subjects not ok:', m['summary']['subjects_not_ok'] or 'none')
 fails = gate_failures(GraphStore.load(run, keys=()))
 print('cross-dataset gate (DESIGN.md §7):', 'PASSED' if not fails else 'NOT passed: ' + '; '.join(fails))
+mem = pd.read_csv(run / 'memory_log.csv') if (run / 'memory_log.csv').exists() else None
+if mem is not None:
+    print(f"memory: highest peak {mem['mem_peak_mb'].max():.0f} MB per unit "
+          f"(machine total {mem['mem_total_mb'].max():.0f} MB; lowest available {mem['mem_available_before_mb'].min():.0f} MB)")
 s = pd.read_csv(run / 'subjects.csv')
-s[['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels', 'n_windows_kept',
-   'n_windows_total', 'status']]"""),
+s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'median_std_uv', 'n_bad_channels', 'n_windows_kept',
+   'n_windows_total', 'mem_peak_mb', 'status'] if c in s]]"""),
     ])
 
 
