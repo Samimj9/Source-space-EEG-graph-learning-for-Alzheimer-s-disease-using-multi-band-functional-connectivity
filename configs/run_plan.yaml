@@ -75,3 +75,5 @@ experiments:
   - {config: configs/experiments/exp3_conn_psd_fixedhp_tier2.yaml}
   - {config: configs/experiments/exp5_multiband_fixedhp_tier2.yaml}
   - {config: configs/experiments/exp6_multiband_psd_strength_fixedhp_tier2.yaml}
+  # ---- Experiment 7 (EARM-GNN; exploratory extension, methodology log entry 43)
+  - {config: configs/experiments/exp7_earm_gnn.yaml}

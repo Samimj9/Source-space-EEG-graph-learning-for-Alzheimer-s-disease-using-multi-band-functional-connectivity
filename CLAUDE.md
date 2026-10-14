@@ -211,6 +211,9 @@ with *Runtime → Run all* and needs no editing.
   `gnn_fixed_hparams_v1`, DESIGN.md v1.5, methodology log entry 42): Tier 1 = `*_fixedhp.yaml`
   (10 repeats), Tier 2 = `*_fixedhp_tier2.yaml`. Never add a grid to a fixed-protocol config (it fails
   to load), and never mix nested-CV GNN results (historical `exp2_conn_minimal/`) with fixed ones.
+- **Experiment 7 (EARM-GNN, `docs/earm_gnn.md`, methodology log entry 43)** is an exploratory extension designed
+  after the Tier 1 results: same protocol, ablations fixed adjacency and mean fusion, own code pin
+  (`experiments/exp7_earm_gnn/CODE_COMMIT.txt`). Report it as exploratory; comparisons are descriptive.
 - **Do not run experiments or the pipeline on real data unless the user asks.**
   `--synthetic` and `pytest` are always fine.
 - Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed).

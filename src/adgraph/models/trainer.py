@@ -128,10 +128,16 @@ class GNNModel:
             cov = torch.from_numpy(self.cov_scaler.transform(view.payload["cov"]))
         return torch.from_numpy(np.ascontiguousarray(x)), torch.from_numpy(np.ascontiguousarray(adj)), cov
 
-    def build_net(self, in_dim: int, n_bands: int, n_covariates: int = 0):
+    def build_net(self, in_dim: int, n_bands: int, n_covariates: int = 0, n_rois: int | None = None):
+        cfg = dict(self.model_cfg)
+        if cfg.get("architecture") == "earm_gnn":            # Experiment 7 (methodology log entry 43)
+            from .earm import EARMGNN
+
+            cfg.pop("architecture")
+            cfg.pop("encoder", None)                          # display label only ("earm")
+            return EARMGNN(in_dim=in_dim, n_bands=n_bands, n_rois=n_rois, n_covariates=n_covariates, **cfg)
         from .multiband import MultiBandGNN
 
-        cfg = dict(self.model_cfg)
         return MultiBandGNN(encoder=cfg.pop("encoder"), in_dim=in_dim, n_bands=n_bands, n_covariates=n_covariates,
                             **cfg)
 
@@ -159,7 +165,7 @@ class GNNModel:
         n_cov = 0 if cov is None else cov.shape[1]
         y = torch.from_numpy(fit_view.y.astype(np.float32))
         w = torch.from_numpy(training_weights(fit_view.meta, fit_view.target).astype(np.float32))
-        self.net = self.build_net(x.shape[-1], x.shape[1], n_cov).to(dev)
+        self.net = self.build_net(x.shape[-1], x.shape[1], n_cov, n_rois=x.shape[2]).to(dev)
         opt = torch.optim.Adam(self.net.parameters(), lr=self.train_cfg.get("lr", 1e-3),
                                weight_decay=self.train_cfg.get("weight_decay", 1e-4))
         bs, epochs = self.train_cfg.get("batch_size", 32), self.train_cfg.get("epochs", 100)
@@ -182,6 +188,8 @@ class GNNModel:
                 # weight sum) keeps one vote per subject and class balance across batches
                 bce = F.binary_cross_entropy_with_logits(logits, y[idx], reduction="none")
                 loss = (bce * w[idx]).sum() / len(idx)
+                if hasattr(self.net, "regularization"):          # e.g. EARM-GNN edge-gate penalty
+                    loss = loss + self.net.regularization()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -228,6 +236,23 @@ class GNNModel:
                 weights.append(bw.cpu().numpy())
         p = np.concatenate(probs) if probs else np.empty(0)
         return (p, np.concatenate(weights)) if return_band_weights else p
+
+    def state_arrays(self) -> dict:
+        """Fitted parameters, learned edge gates (if any) and training history, as arrays (for
+        ``evaluation.save_model_state``: one ``units/<fold>.model.npz`` per outer fold)."""
+        out = {f"param__{k}": v.detach().cpu().numpy() for k, v in self.net.state_dict().items()}
+        if hasattr(self.net, "gates"):
+            import torch
+
+            with torch.no_grad():
+                g = self.net.gates()
+            if g is not None:
+                out["edge_gates"] = g.cpu().numpy()
+        out["history_epoch"] = np.array([h["epoch"] for h in self.history])
+        out["history_train_loss"] = np.array([h["train_loss"] for h in self.history])
+        if self.scaler.mean_ is not None:
+            out["node_scaler_mean"], out["node_scaler_std"] = self.scaler.mean_, self.scaler.std_
+        return out
 
     def n_parameters(self) -> int:
         return int(sum(p.numel() for p in self.net.parameters()))

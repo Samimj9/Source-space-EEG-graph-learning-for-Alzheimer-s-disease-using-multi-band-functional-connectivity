@@ -63,6 +63,21 @@ with weighted sum aggregation; same fixed training configuration.)*
 attention by mean fusion, and removing each band in turn (PLV; within-dataset and cross-dataset
 settings).
 
+**Exploratory extension (Experiment 7, EARM-GNN).** After the results of the graph models above had been
+observed, an exploratory architecture was evaluated with the identical protocol (`docs/earm_gnn.md`). Each
+band's EEG adjacency A_k was multiplied elementwise by learnable symmetric edge gates
+G_k = σ(b_k + U diag(s_k) Uᵀ), with U ∈ ℝ^{68×8} shared region embeddings, and propagated as
+D_k^{-1/2}(A_k ⊙ G_k)D_k^{-1/2}, where D_k is the degree of the ungated EEG adjacency; a penalty of 0.01 times
+the mean gate value was added to the loss. Node features (log PSD, relative PSD and node strength of the
+band) were embedded and processed by three residual blocks with separate self and neighbour
+transformations, layer normalization, GELU activation and dropout (0.3), with jumping-knowledge
+concatenation of all block outputs including the input embedding. A shared encoder with a learned band
+embedding processed the four band graphs separately; each band was summarized by attention, mean and max
+pooling over regions, and bands were fused by softmax attention before a two-layer classifier (18,214
+parameters). Two pre-specified ablations replaced the gates by the fixed EEG adjacency and the attention
+fusion by the mean. Training used the same fixed schedule as the other graph models. Comparisons with the
+other models are descriptive (paired by shared cross-validation repeats).
+
 ## 2.x Evaluation
 
 **Subject-level cross-validation.** All splitting was by subject; all windows of a subject were always in

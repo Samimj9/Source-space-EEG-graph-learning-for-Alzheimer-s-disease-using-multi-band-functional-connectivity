@@ -52,7 +52,7 @@ def test_one_notebook_per_experiment_config():
         assert len(cfg) == 1, nb.name
         found[nb.name] = cfg[0]
     assert set(found.values()) == configs
-    main = {f"Exp{k}" for k in range(7)}
+    main = {f"Exp{k}" for k in range(8)}
     assert {n.split("_")[0] for n in (p.name for p in (NB / "experiments").glob("*.ipynb"))} == main
 
 

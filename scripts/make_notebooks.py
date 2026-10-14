@@ -4,7 +4,7 @@
 
 Layout:
     notebooks/01_build_graphs.ipynb                 graphs + QC (run first)
-    notebooks/experiments/Exp<k>_*.ipynb            ONE experiment each (Exp0-Exp6)
+    notebooks/experiments/Exp<k>_*.ipynb            ONE experiment each (Exp0-Exp7)
     notebooks/additional/*.ipynb                    one per secondary analysis (Exp3b, baselines,
                                                     dataset probe, EEG + age)
     notebooks/03_comparative_figures.ipynb          paper figures across experiments
@@ -236,6 +236,161 @@ if RUN_ERROR is not None or len(bad):
     return nb, entry
 
 
+EXP7_CONFIG = "configs/experiments/exp7_earm_gnn.yaml"
+
+
+def exp7_notebook() -> tuple[dict, dict]:
+    """Experiment 7 (EARM-GNN): model check, training/evaluation, comparison, D1/D2 diagnostic."""
+    variants, proto = protocol("exp7_earm_gnn")
+    nb = notebook([
+        md("""# Experiment 7 · EEG-Guided Adaptive Residual Multiband GNN (EARM-GNN)
+
+**Exploratory extension**, developed after the Tier 1 GCN results (Exp 2-4) had been observed
+(methodology log entry 43, `docs/earm_gnn.md`). It is evaluated exactly like the other GNNs: frozen v4
+graph run (1,527 windows, 43 participants), the same subject-level splits and seeds, fixed hyperparameters
+(no search, no inner CV, one fit per outer training fold), PLV and |ciPLV| as separate variants, plus two
+pre-specified ablations: **fixed adjacency** (no learned edge gates) and **mean fusion** (no band attention).
+Nothing is chosen from held-out results, and both datasets are reported.
+
+""" + proto + "\n" + HOWTO + """
+**What this notebook does:** (0) pins Exp7's own code commit, (1) checks the frozen graph run and the
+features, builds every variant, shows layers, parameter counts and tensor shapes and runs a small
+forward/backward smoke test, (2) trains and evaluates every variant and setting (resumable; every outer
+fold is saved to Drive), (3) shows the results, ROC curves and confusion matrices, (4) compares EARM-GNN
+with the GCN experiments and the PSD baselines (saved outputs only; descriptive), (5) runs a short
+read-only D1 / D2 diagnostic, (6) prints a final summary.
+
+Use a **GPU runtime** (*Runtime → Change runtime type → T4 GPU*). Results:
+`<outputs>/experiments/exp7_earm_gnn/` on Drive. Other experiments are never touched."""),
+        code(SETUP),
+        md("""## 0. Exp7 code pin
+Exp7 runs the commit recorded in its own folder (`experiments/exp7_earm_gnn/CODE_COMMIT.txt`, set on the
+first run), so it can run while the other experiments stay on the global pin (`CODE_COMMIT.txt`, unchanged).
+Leave `UPDATE_EXP7_CODE = False`; `True` moves only Exp7's pin to the newest code (unfinished Exp7 work is then
+recomputed)."""),
+        code("""UPDATE_EXP7_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+EXP7_DIR = Path(OUT) / 'experiments' / 'exp7_earm_gnn'
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{BRANCH}'], text=True).strip()
+has_work = EXP7_DIR.exists() and any(EXP7_DIR.rglob('*.done.json'))
+EXP7_COMMIT, _ = resolve_code_pin(EXP7_DIR / 'CODE_COMMIT.txt', head, update=UPDATE_EXP7_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP7_COMMIT])
+for f in ('src/adgraph/models/earm.py', 'scripts/exp7_earm.py', 'configs/experiments/exp7_earm_gnn.yaml'):
+    if not Path('/content/repo', f).exists():
+        raise RuntimeError(f'Exp7 pin {EXP7_COMMIT[:10]} lacks {f}: set UPDATE_EXP7_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from the Exp7 commit
+from adgraph.colab import sh
+print('Exp7 code commit:', EXP7_COMMIT)
+print('global pin of the other experiments (unchanged):', (Path(OUT) / 'CODE_COMMIT.txt').read_text().split()[0])"""),
+        md("""## 1. Frozen graph run, features, architecture and smoke test
+Checks that the selected graph run is the frozen v4 run (`graph_run_id 6d75de9975f0d9ae`), that PLV,
+|ciPLV|, log and relative PSD are present, finite and valid, and that node strength equals the strength of
+each band's own EEG adjacency. Builds every variant and prints its parameter count, the layer structure,
+the trainable parameters, tensor shapes of one forward pass, and runs two training epochs on a quarter of
+the participants to confirm finite losses and gradients reaching the edge gates. This is NOT an evaluation."""),
+        code(f"""CONFIG = '{EXP7_CONFIG}'   # this notebook's experiment
+EXPERIMENT = 'exp7_earm_gnn'
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+if not torch.cuda.is_available():
+    print('NOTE: no GPU. It works on CPU but is much slower (Runtime > Change runtime type > T4 GPU).')
+sh("python scripts/exp7_earm.py inspect")
+sh(f"python scripts/experiment.py status --config {{CONFIG}}")"""),
+        md("""## 2. Train and evaluate (resumable)
+Every completed outer fold (predictions, fitted parameters, learned edge gates, training history) is saved
+to Drive at once; after a disconnect, *Run all* again and only unfinished folds are computed."""),
+        code("""RUN_ERROR = None
+try:
+    sh(f"python scripts/experiment.py run --config {CONFIG}")
+except RuntimeError as exc:
+    RUN_ERROR = exc
+    print('\\nSome units failed or are incompatible; details at the end of the notebook.')"""),
+        md("""## 3. Results of Experiment 7 (saved outputs only)
+Subject-level metrics: mean ± SD over CV repeats, subject-bootstrap 95 % CI; ROC curves, confusion matrices
+and subject scores per setting; runtime per unit."""),
+        code("""sh(f"python scripts/experiment.py report --config {CONFIG}")
+import pandas as pd
+from IPython.display import Image, display
+report = sorted((EXP7_DIR / '_reports').glob('report_*'))[-1]
+pd.set_option('display.max_rows', 500, 'display.width', 250)
+table = pd.read_csv(report / 'results_summary.csv')
+display(table) if len(table) else print('no completed results yet')
+status = pd.read_csv(EXP7_DIR / '_run_status.csv') if (EXP7_DIR / '_run_status.csv').exists() else pd.DataFrame()
+if len(status):
+    display(status[['variant', 'setting', 'state', 'seconds', 'mem_peak_mb', 'message']])
+for png in sorted((report / 'figures').glob('D[123]_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+        md("""## 4. Comparison with the GCN experiments and the PSD baselines
+Saved outputs only (nothing retrained): EARM-GNN full and its two ablations, Exp 6 / 5 / 4 GCN, Exp 1 and
+Exp 0 PSD models. Paired differences use only the CV repeats both results share (identical subject splits);
+they are **descriptive** (no significance test). Experiments not run yet are simply absent."""),
+        code("""sh("python scripts/exp7_earm.py compare")
+cmp = sorted((EXP7_DIR / '_comparison').glob('comparison_*'))[-1]
+read = lambda name: pd.read_csv(cmp / name) if (cmp / name).stat().st_size > 1 else pd.DataFrame()
+display(pd.read_csv(cmp / 'auc_by_setting.csv', index_col=0).round(3))
+full = read('comparison_table.csv')
+if len(full):
+    display(full[['model', 'connectivity', 'setting', 'n_repeats', 'roc_auc_mean', 'roc_auc_sd', 'roc_auc_ci95_low',
+                  'roc_auc_ci95_high', 'balanced_accuracy_mean', 'sensitivity_mean', 'specificity_mean', 'f1_mean',
+                  'n_parameters', 'fit_seconds_mean']].round(3))
+diff = read('paired_differences.csv')
+if len(diff):
+    print('EARM-GNN full minus comparator (subject-level ROC AUC, per shared repeat; descriptive):')
+    display(diff[diff['metric'] == 'roc_auc'].drop(columns=['reference', 'metric']).round(3))
+for png in sorted((cmp / 'figures').glob('E7_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+        md("""## 5. Short D1 / D2 diagnostic (read-only)
+Recording quality and interpolated (e.g. persistently flat) channels per dataset, feature distributions and
+dataset shift, class separability of simple features **without a model**, and whether poor D1 results are
+near-constant, reversed or non-discriminating predictions. Nothing is reprocessed or excluded; D1 stays in
+every analysis. Written to `<outputs>/diagnostics/dataset_shift_<time>/`."""),
+        code("""sh("python scripts/exp7_earm.py diagnose")"""),
+        md("""## 6. Final summary
+Subject-level ROC AUC [95 % CI] per setting for EARM-GNN, its ablations, the GCN experiments and the PSD
+baselines, and the training-loss histories of EARM-GNN. Within-D2 results are one dataset's
+cross-validation, not independent validation."""),
+        code("""import numpy as np
+import matplotlib.pyplot as plt
+if len(full):
+    f = full.assign(auc=full.apply(lambda r: f"{r.roc_auc_mean:.3f} [{r.roc_auc_ci95_low:.2f}, {r.roc_auc_ci95_high:.2f}]",
+                                   axis=1))
+    order = [s for s in ['within_D1', 'within_D2', 'pooled', 'cross_D1_to_D2', 'cross_D2_to_D1'] if s in set(f['setting'])]
+    display(f.pivot_table(index=['model', 'connectivity'], columns='setting', values='auc', aggfunc='first',
+                          sort=False).reindex(columns=order))
+hist = {}
+for npz in EXP7_DIR.glob('*__full/*/units/fold_*.model.npz'):
+    hist.setdefault((npz.parts[-4], npz.parts[-3]), []).append(np.load(npz)['history_train_loss'])
+if hist:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for (variant, setting), curves in sorted(hist.items()):
+        ax.plot(np.mean(curves, 0), label=f'{variant} / {setting} ({len(curves)} folds)')
+    ax.set_xlabel('epoch'); ax.set_ylabel('weighted training loss (mean over folds)'); ax.legend(fontsize=7)
+    ax.set_title('EARM-GNN full: training loss (training subjects only)')
+    plt.show()
+print('\\n'.join([
+    'How to read this:',
+    '* EARM-GNN is an exploratory extension designed after the Tier 1 GCN results were seen; report it as such.',
+    '* Ablation A (fixed adjacency) and B (mean fusion) each differ from the full model in one component;',
+    '  the paired differences are descriptive. No permutation test was run: claim no significance.',
+    '* Both datasets are primary (S1, S2). Poor D1 performance is a result, not a reason to drop D1 (section 5).',
+    '* Fixed hyperparameters, set before any Exp7 result; nothing was tuned on test subjects.']))"""),
+        code("""bad = status[status['state'].isin(['failed', 'incompatible'])] if len(status) else status
+if RUN_ERROR is not None or len(bad):
+    raise RuntimeError(f"{len(bad)} unit(s) of {EXPERIMENT} did not complete (see {EXP7_DIR / '_run_status.csv'}); "
+                       "completed units are saved. Fix the cause, then Run all again: only incomplete units are recomputed.")
+print('Experiment 7 complete.')"""),
+    ], gpu=True)
+    entry = {"folder": "experiments", "name": "Exp7_EARM_GNN", "title": "Experiment 7 · EARM-GNN",
+             "config": EXP7_CONFIG, "gpu": True}
+    return nb, entry
+
+
 def build_graphs_notebook() -> dict:
     return notebook([
         md("# 01 · Build source-space graphs (pipeline v4, boundary-aware)\n" + HOWTO + """
@@ -435,6 +590,10 @@ DRIVE_LAYOUT = """\
 │       ├── _run_status.csv         state, runtime (s) and peak memory (MB) per variant and setting
 │       ├── _estimates/             (only if `experiment.py estimate` is run manually)
 │       └── _reports/report_<time>/ results_summary.csv progress.csv README.txt figures/ (diagnostics D1-D4)
+│   └── exp7_earm_gnn/              Experiment 7 (EARM-GNN): as above, plus CODE_COMMIT.txt (Exp7's own code pin),
+│                                   units/fold_*.model.npz (fitted parameters, edge gates, training history),
+│                                   _inspect/ (model check), _comparison/comparison_<time>/ (tables + figures)
+├── diagnostics/dataset_shift_<time>/  read-only D1 / D2 diagnostic (Exp7 notebook)
 └── figures/figures_<time>/         comparative paper figures (notebook 03): figure files, data,
                                     metadata, figure_manifest.json
 """
@@ -483,6 +642,9 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
         nb, entry = experiment_notebook(folder, name, cfg, title, desc)
         outputs[nbdir / folder / f"{name}.ipynb"] = nb
         entries.append(entry)
+    nb, entry = exp7_notebook()
+    outputs[nbdir / "experiments" / "Exp7_EARM_GNN.ipynb"] = nb
+    entries.append(entry)
     outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook([e["config"] for e in entries])
     for path, nb in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)

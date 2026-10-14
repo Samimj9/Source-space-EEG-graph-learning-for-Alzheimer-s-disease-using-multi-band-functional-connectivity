@@ -42,6 +42,7 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 | [additional/Age_Exp5_multiband.ipynb](https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/ecstatic-davinci-a2e8mh/notebooks/additional/Age_Exp5_multiband.ipynb) | `configs/experiments/age/exp5_multiband_fixedhp_plus_age.yaml` | GPU (T4) |
 | [additional/Age_Exp6_multiband_psd_strength.ipynb](https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/ecstatic-davinci-a2e8mh/notebooks/additional/Age_Exp6_multiband_psd_strength.ipynb) | `configs/experiments/age/exp6_multiband_psd_strength_fixedhp_plus_age.yaml` | GPU (T4) |
 | [additional/Age_Baseline_connectivity_classical.ipynb](https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/ecstatic-davinci-a2e8mh/notebooks/additional/Age_Baseline_connectivity_classical.ipynb) | `configs/experiments/age/baseline_conn_classical_plus_age.yaml` | CPU |
+| [experiments/Exp7_EARM_GNN.ipynb](https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/ecstatic-davinci-a2e8mh/notebooks/experiments/Exp7_EARM_GNN.ipynb) | `configs/experiments/exp7_earm_gnn.yaml` | GPU (T4) |
 
 ## Google Drive output structure
 
@@ -75,6 +76,10 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 │       ├── _run_status.csv         state, runtime (s) and peak memory (MB) per variant and setting
 │       ├── _estimates/             (only if `experiment.py estimate` is run manually)
 │       └── _reports/report_<time>/ results_summary.csv progress.csv README.txt figures/ (diagnostics D1-D4)
+│   └── exp7_earm_gnn/              Experiment 7 (EARM-GNN): as above, plus CODE_COMMIT.txt (Exp7's own code pin),
+│                                   units/fold_*.model.npz (fitted parameters, edge gates, training history),
+│                                   _inspect/ (model check), _comparison/comparison_<time>/ (tables + figures)
+├── diagnostics/dataset_shift_<time>/  read-only D1 / D2 diagnostic (Exp7 notebook)
 └── figures/figures_<time>/         comparative paper figures (notebook 03): figure files, data,
                                     metadata, figure_manifest.json
 ```

@@ -2664,6 +2664,45 @@ schedule, deferred permutation tests).
 
 ---
 
+## 43. Experiment 7: EARM-GNN (exploratory extension after the Tier 1 GCN results)
+
+Version 1.0, 2026-10-14. Author request. Full specification: `docs/earm_gnn.md`.
+
+**Situation.** Tier 1 results observed before this decision: Exp 2 (constant node features) near AUC 0.5
+in D1 and D2; Exp 3 alpha2 within-D2 AUC 0.857 (PLV) / 0.865 (|ciPLV|) but within-D1 0.319 / 0.303;
+Exp 4 D1 0.440 / 0.424, D2 0.855 / 0.864, pooled 0.663 / 0.656, cross-dataset 0.30–0.48. The code
+inspection of the GCN (weighted, fixed normalization D̃^{-1/2}(A + I)D̃^{-1/2} on dense graphs) indicated
+strong smoothing and no learned edge relevance.
+
+**Decision.** Add Experiment 7, EARM-GNN, as an exploratory extension with the same protocol as the other
+GNNs (fixed hyperparameters, no search, one fit per outer fold, 10 repeats with the shared splits, all five
+settings, PLV and |ciPLV| separate):
+- A: EEG-guided adaptive adjacency A ⊙ G, G = σ(b_k + U diag(s_k) Uᵀ) (rank 8, symmetric), propagation
+  normalized by the ungated EEG degree (bounded operator), gate penalty λ = 0.01 · mean gate;
+- B: three residual blocks with separate self / neighbour transforms, LayerNorm, GELU, dropout, and
+  jumping knowledge including the node-wise input embedding;
+- C/D: per band [log PSD, relative PSD, node strength], four separate band graphs, shared encoder with a
+  band embedding;
+- E: softmax attention fusion over bands (weights saved per window);
+- F: attention + mean + max pooling, small MLP head. 18,214 parameters (full).
+- Pre-specified ablations: fixed adjacency (no gates) and mean fusion. No other ablations.
+- Short read-only D1 / D2 diagnostic (QC, interpolated channels, feature shift and separability,
+  prediction behaviour); no exclusion of D1, no pipeline change.
+- Engineering: a model can add a training penalty (`regularization()`); `evaluation.save_model_state`
+  saves fitted parameters, gates and the training history per outer fold (off for every earlier
+  experiment, whose behaviour is unchanged); Exp 7 has its own code pin so it can run while Exp 2–6
+  continue on the global pin.
+
+**Reporting rules.** EARM-GNN is reported as an exploratory model developed after observing the GCN's
+limitations; no novelty or superiority is claimed without evidence; comparisons with earlier experiments
+are descriptive (paired by shared CV repeats); both datasets are reported; within-D2 results are not
+independent validation.
+
+**Approval status.** Requested by the author on 2026-10-14; fixed EARM hyperparameters set before any Exp 7
+result.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

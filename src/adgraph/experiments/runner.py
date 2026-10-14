@@ -180,9 +180,12 @@ class ExperimentCheckpoint:
             emb = {k: z[k] for k in z.files}
         return pd.read_csv(self.units / f"{name}.pred.csv"), meta["folds"], meta["hparams"], emb
 
-    def save_fold(self, name, ident, pred: pd.DataFrame, folds: list, hp: dict, emb: dict | None):
+    def save_fold(self, name, ident, pred: pd.DataFrame, folds: list, hp: dict, emb: dict | None,
+                  model_state: dict | None = None):
         files = [atomic_write_csv(self.units / f"{name}.pred.csv", pred),
                  atomic_write_json(self.units / f"{name}.meta.json", {"folds": folds, "hparams": hp})]
+        if model_state:                               # evaluation.save_model_state (fitted model of this fold)
+            files.append(atomic_savez(self.units / f"{name}.model.npz", **model_state))
         if emb is not None:
             files.append(atomic_savez(self.units / f"{name}.emb.npz", **emb))
         write_marker(self.units, name, ident, files)
@@ -310,6 +313,8 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
             t0 = time.perf_counter()
             model = make_model(apply_hparams(v, params), seed).fit(data.view(tr_g, "train"))
             fit_seconds = time.perf_counter() - t0
+            model_state = (model.state_arrays() if ev.get("save_model_state") and hasattr(model, "state_arrays")
+                           else None)
             test = data.view(te_g, "test")      # created only after fitting
             out = test.meta[["window_id", "key", "dataset", "subject_id"]].copy()
             out["y"] = test.y
@@ -347,7 +352,7 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
                 ckpt.status.set(name, "failed", f"{type(exc).__name__}: {exc}"[:500])
             raise
         if ckpt is not None:
-            ckpt.save_fold(name, ident, out, fold_rows, hp_row, emb)
+            ckpt.save_fold(name, ident, out, fold_rows, hp_row, emb, model_state)
             ckpt.status.set(name, "completed")
             done_here.append(time.perf_counter() - t_fold)
             remaining = len(splits) - i_sp - 1

@@ -1,0 +1,57 @@
+# Experiment 7: EEG-Guided Adaptive Residual Multiband GNN (EARM-GNN). EXPLORATORY EXTENSION developed
+# after the Tier 1 GCN results (Exp 2-4) had been observed (methodology log entry 43, DESIGN.md v1.6).
+# Model: src/adgraph/models/earm.py. Same frozen v4 graph run, subject-level splits and seeds,
+# fixed-hyperparameter protocol (no search, no inner CV, one fit per outer training fold) as Exp 2-6.
+#
+# Variants (PLV and |ciPLV| always separate):
+#   full             adaptive EEG-guided edge gates + residual encoder + attention band fusion
+#   fixed_adjacency  ablation A: gates disabled (A used as is), everything else identical
+#   mean_fusion      ablation B: mean instead of attention band fusion, everything else identical
+extends: base.yaml
+experiment: exp7_earm_gnn
+input: graph
+protocol:
+  name: gnn_fixed_hparams_v1
+  hyperparameter_search: none
+hparams: null
+graph:
+  connectivity: plv
+  bands: [theta, alpha1, alpha2, beta]
+  band_mode: multi                 # four separate band graphs; adjacency never averaged
+node_features:
+  components: [psd, strength]      # per ROI and band: [log PSD, relative PSD, node strength] (F = 3)
+  psd_kinds: [log, rel]
+  psd_bands: matched
+  scaling: node                    # z-score per (band, ROI, feature), fitted on training windows only
+sparsify:
+  method: none                     # no thresholding / top-k: the gates are continuous
+model:
+  architecture: earm_gnn
+  encoder: earm                    # display label in result tables
+  hidden: 32
+  n_blocks: 3
+  dropout: 0.3
+  adaptive_adjacency: true
+  gate_rank: 8                     # U: 68 x 8 ROI embeddings shared across bands
+  gate_init_bias: 2.0              # gates start at sigmoid(2) = 0.88 (close to the EEG prior)
+  gate_l1: 0.01                    # lambda: penalty on the mean gate value (added to the loss)
+  band_embedding: true
+  pool_hidden: 16
+  fusion: attention
+  mlp_hidden: 32
+training:                          # same fixed schedule as the Tier 1 GNNs (gnn_fixed_base.yaml)
+  lr: 0.001
+  weight_decay: 0.0001
+  epochs: 60
+  batch_size: 32
+  early_stopping:
+    enabled: false
+evaluation:
+  n_repeats: 10                    # repeats 0-9: same subject splits as every other experiment
+  save_model_state: true           # fitted parameters, edge gates, training history per outer fold
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  full: {}
+  fixed_adjacency: {model.adaptive_adjacency: false}
+  mean_fusion: {model.fusion: mean}

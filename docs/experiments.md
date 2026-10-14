@@ -11,6 +11,10 @@ search or inner CV: one fit per outer training fold. The Tier 1 GNN configs are
 earlier nested-CV GNN configs (`exp2_conn_minimal.yaml` … `exp6_multiband_psd_strength.yaml`) are kept
 only as historical records and are not run.
 
+**Experiment 7 (exploratory):** EARM-GNN (`configs/experiments/exp7_earm_gnn.yaml`,
+`src/adgraph/models/earm.py`, `docs/earm_gnn.md`), same runner and protocol; notebook
+`notebooks/experiments/Exp7_EARM_GNN.ipynb`; helpers `scripts/exp7_earm.py inspect|compare|diagnose`.
+
 ## 1. Data flow
 
 Graph construction and the experiments are separate. Their only interface is the
