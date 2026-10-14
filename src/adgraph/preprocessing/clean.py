@@ -58,7 +58,8 @@ def resample_and_bandpass(raw, cfg: dict):
 
     pp = cfg["preprocessing"]
     raw.resample(pp["sfreq"], verbose="error", **filter_pad(cfg))
-    raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error", **filter_pad(cfg))
+    if pp.get("bandpass", True):          # false: provider-filtered data (Dataset 3), never filtered twice
+        raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error", **filter_pad(cfg))
     return raw
 
 
@@ -68,6 +69,8 @@ def bandpass_half_length(cfg: dict) -> int:
     import mne
 
     pp = cfg["preprocessing"]
+    if not pp.get("bandpass", True):
+        return 0
     h = mne.filter.create_filter(None, pp["sfreq"], pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
     return len(h) // 2
 
@@ -107,6 +110,10 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
        the analysed interval of the final signal (0.1-45 Hz, interpolated, average reference),
        i.e. the signal the windows are cut from.
 
+    Dataset 3 (OpenNeuro ds004504 derivatives, methodology log entry 44): ``preprocessing.bandpass: false``
+    (the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given; nothing is filtered twice) and
+    ``interpolate_bads: false`` (the bad-channel rules are evaluated and reported, nothing is interpolated).
+
     Window rejection (``process_recording``) is unchanged. ``qc["channels"]`` holds the
     per-channel quantities; ``bad_channels_whole_recording`` (QC only) what step 3 would flag
     on the whole recording.
@@ -139,6 +146,10 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     raw.info["bads"] = list(bads)
     if bads and pp["interpolate_bads"]:
         raw.interpolate_bads(reset_bads=True, verbose="error")
+    elif not pp["interpolate_bads"]:
+        # Dataset 3 (provider-cleaned, entry 44): flagged channels are reported only; every channel stays in
+        # the signal, the average reference and the source model
+        raw.info["bads"] = []
 
     raw.set_eeg_reference(pp["reference"], projection=True, verbose="error")
     raw.apply_proj(verbose="error")

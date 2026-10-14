@@ -1,0 +1,5 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 44): age-only baseline (DESIGN.md §5).
+extends: ../baseline_age.yaml
+experiment: d3_baseline_age
+graph_family: D3
+settings: [within_D3]

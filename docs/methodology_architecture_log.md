@@ -2703,6 +2703,53 @@ result.
 
 ---
 
+## 44. Dataset 3: OpenNeuro ds004504 (AD vs HC), provider-preprocessed, source space
+
+Version 1.0, 2026-10-14. Author decisions. Full record: `docs/dataset_d3.md`.
+
+**Decisions (author, 2026-10-14).**
+1. Add OpenNeuro ds004504 (release 1.0.9) as **Dataset 3**: the 36 AD and 29 HC participants, from the
+   provider's preprocessed derivatives. The 23 FTD participants are excluded by design and are never
+   downloaded.
+2. **Role:** third cohort with its own within-dataset evaluation (`within_D3`), reported next to D1/D2.
+   Cross-dataset tests with D1/D2 come later; they need a combined store and a revised §7 gate.
+3. **Preprocessing:** minimal, nothing repeated.
+   - The provider's 0.5–45 Hz Butterworth, A1–A2 reference, ASR and ICA are used as given.
+   - Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same windows,
+     rejection, source model, ROIs, bands, connectivity and PSD as D1/D2.
+   - No second band-pass (`preprocessing.bandpass: false`).
+   - Bad-channel rules are evaluated and reported but never acted on (`interpolate_bads: false`).
+   - Boundary margin = analytic-kernel half-length only (412 samples).
+4. **Representation:** source space as for D1/D2 (fsaverage, 68 DK ROIs). The operator is rebuilt for
+   the 19-channel montage.
+5. **First experiments:**
+   - Exp 0 and Exp 1 (LR, SVM);
+   - age-only baseline;
+   - Exp 6 full GCN (PLV, |ciPLV|);
+   - Exp 7 EARM-GNN with two ablations.
+
+   All use the existing protocols: classical 20 repeats with nested C; GNNs fixed hyperparameters,
+   10 repeats.
+
+**Engineering.**
+- Pipeline configs may declare:
+  - `datasets` (default D1, D2);
+  - `run_prefix` (`graphsD3`: D3 runs are never selected for D1/D2);
+  - `input.format` (`eeglab`);
+  - `channels.verify_layout`;
+  - `preprocessing.bandpass`.
+- Experiment configs may declare `graph_family: D3`. Such configs read `graphsD3_v*` runs and write
+  `experiments_D3/`, so every results root holds one graph run.
+- D3 notebooks share their own code pin (`D3_CODE_COMMIT.txt`).
+- The D1/D2 pipeline config, graph run, experiments and notebooks are unchanged.
+- Download: resumable, verified by size and MD5 against the OpenNeuro listing. The release DOI, the
+  CHANGES line and a SHA-256 per file are recorded in `download_manifest.json`.
+
+**Approval status.** Approved by the author (role, preprocessing, representation, first experiments)
+on 2026-10-14.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

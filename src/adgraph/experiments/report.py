@@ -25,7 +25,7 @@ from ..evaluation.splits import CROSS_SETTINGS
 from ..visualization.figures import make_figures
 from ..visualization.results import index_results, read_manifest, read_summary
 
-SETTING_ORDER = ["within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1"]
+SETTING_ORDER = ["within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1", "within_D3"]
 CHUNK = 6                                   # variants per ROC / confusion / score figure
 METRICS = ["balanced_accuracy", "roc_auc", "sensitivity", "specificity", "f1", "mcc"]
 README = """Single-experiment diagnostics ({experiment})

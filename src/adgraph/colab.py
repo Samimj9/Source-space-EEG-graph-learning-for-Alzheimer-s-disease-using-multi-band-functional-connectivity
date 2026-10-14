@@ -115,6 +115,9 @@ def write_paths_yaml(repo: str | Path, data_root: str | Path, output_root: str |
         "dataset2": {"eeg_dir": "{drive_root}/EEGs/Dataset 2 (2019)/RestingState",
                      "participants": "{drive_root}/Info participants/Info Participants_2019.xlsx"},
         "electrode_layout": layout,
+        # Dataset 3 (OpenNeuro ds004504, AD/HC derivatives), downloaded by notebooks/d3/D3_01 into the
+        # user's own Drive (public CC0 data; outputs still go to processed_dir)
+        "dataset3": {"root": str(Path(DRIVE) / "MyDrive" / "OpenNeuro" / "ds004504")},
         "processed_dir": str(output_root),
         "cache_dir": str(Path(output_root) / "cache"),
     }

@@ -58,20 +58,29 @@ def crop_edges(raw, cfg: dict) -> dict:
             "orig_duration_s": dur}
 
 
+def sensor_bandpass_applied(cfg: dict) -> bool:
+    """False for provider-preprocessed data (Dataset 3: ``preprocessing.bandpass: false``)."""
+    return bool(cfg["preprocessing"].get("bandpass", True))
+
+
 def sensor_filter_half(cfg: dict) -> int:
-    """Half-length (samples at preprocessing.sfreq) of the 0.1-45 Hz sensor band-pass."""
+    """Half-length (samples at preprocessing.sfreq) of the 0.1-45 Hz sensor band-pass (0 if none is applied)."""
     import mne
 
     pp = cfg["preprocessing"]
+    if not sensor_bandpass_applied(cfg):
+        return 0
     return len(mne.filter.create_filter(None, pp["sfreq"], pp["l_freq"], pp["h_freq"], fir_design="firwin",
                                         verbose="error")) // 2
 
 
 def sensor_lowpass_half(cfg: dict) -> int:
-    """Half-length of the low-pass (h_freq) part of the sensor band-pass alone."""
+    """Half-length of the low-pass (h_freq) part of the sensor band-pass alone (0 if none is applied)."""
     import mne
 
     pp = cfg["preprocessing"]
+    if not sensor_bandpass_applied(cfg):
+        return 0
     return len(mne.filter.create_filter(None, pp["sfreq"], None, pp["h_freq"], fir_design="firwin",
                                         verbose="error")) // 2
 
@@ -121,8 +130,9 @@ def report(cfg: dict) -> dict:
     m = margins(cfg)
     return {**cfg["boundary"], **m,
             "edge_trim_s": cfg["windowing"]["edge_trim_s"],
-            "sensor_bandpass_taps": 2 * sensor_filter_half(cfg) + 1,
-            "sensor_lowpass_taps": 2 * sensor_lowpass_half(cfg) + 1,
+            "sensor_bandpass_applied": sensor_bandpass_applied(cfg),
+            "sensor_bandpass_taps": 2 * sensor_filter_half(cfg) + 1 if sensor_bandpass_applied(cfg) else 0,
+            "sensor_lowpass_taps": 2 * sensor_lowpass_half(cfg) + 1 if sensor_bandpass_applied(cfg) else 0,
             "analytic_kernels": {b: analytic_kernel_report(sf, float(lo), float(hi), tbw)
                                  for b, (lo, hi) in cfg["connectivity"]["bands"].items()},
             "window_grid": "start at the first sample of [margin, n - margin) of the cropped signal; "

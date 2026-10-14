@@ -1,0 +1,20 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 44): Experiment 6 full model only (multi-band
+# GCN, shared encoder, attention fusion, nodes = [log PSD, rel PSD, strength] per band), PLV and |ciPLV|,
+# fixed-hyperparameter protocol (gnn_fixed_base.yaml), 10 repeats.
+extends: ../gnn_fixed_base.yaml
+experiment: d3_exp6_gcn_full
+graph_family: D3
+settings: [within_D3]
+graph:
+  band_mode: multi
+  bands: [theta, alpha1, alpha2, beta]
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+  fusion: attention
+variants:
+  plv__full: {graph.connectivity: plv}
+  ciplv__full: {graph.connectivity: ciplv}

@@ -40,10 +40,11 @@ parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--run-dir", help="graph run directory (default: latest assembled full run)")
 parser.add_argument("--reference-audit", help="audit part2 folder with per-recording summaries (old window counts)")
 parser.add_argument("--allow-dirty", action="store_true", help="synthetic tests only: accept uncommitted code")
+parser.add_argument("--prefix", default="graphs", help="graph-run family: graphs (D1/D2) or graphsD3 (Dataset 3)")
 args = parser.parse_args()
 
 paths = load_paths(args.paths)
-run = Path(args.run_dir) if args.run_dir else latest_complete_graph_run(paths["processed_dir"])
+run = Path(args.run_dir) if args.run_dir else latest_complete_graph_run(paths["processed_dir"], args.prefix)
 checks: list[dict] = []
 
 
@@ -86,7 +87,7 @@ for prefix in ("psd", "sensor_psd"):
               bool((ab > 0).all() and np.allclose(np.log10(ab), lg, atol=1e-3) and (rl >= 0).all() and (rl <= 1).all()))
 
 w, subj = store.windows, store.subjects
-reg = build_registry(paths)[0]
+reg = build_registry(paths, cfg=cfg)[0]
 win_len = manifest["segmentation"]["window_samples"]
 step = manifest["segmentation"]["step_samples"]
 check("every registered recording has a subject row", set(reg["key"]) <= set(subj["key"]),

@@ -54,7 +54,7 @@ BAND_STYLE = {
     "beta": {"color": OKABE_ITO["purple"], "hatch": "xx", "marker": "D"},
 }
 SETTING_LABEL = {"within_D1": "Within D1", "within_D2": "Within D2", "pooled": "Pooled D1+D2",
-                 "cross_D1_to_D2": "D1 → D2", "cross_D2_to_D1": "D2 → D1"}
+                 "cross_D1_to_D2": "D1 → D2", "cross_D2_to_D1": "D2 → D1", "within_D3": "Within D3 (ds004504)"}
 METRIC_LABEL = {"balanced_accuracy": "Balanced accuracy", "roc_auc": "ROC-AUC", "f1": "F1 (AD)",
                 "sensitivity": "Sensitivity", "specificity": "Specificity", "accuracy": "Accuracy", "mcc": "MCC"}
 

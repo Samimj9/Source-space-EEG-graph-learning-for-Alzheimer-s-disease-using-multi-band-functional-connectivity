@@ -12,6 +12,7 @@ file records structure, counts and issues only.
 | D2 (2019) resting | `EEGs/Dataset 2 (2019)/RestingState/` | 23 (`<id>_<DDMYYYY>_1.edf`) | EDF, ~20–37 MB | 32 incl. M1/M2 → 30 after mastoid drop (v2) | yes |
 | D2 (2019) picture naming | `.../PictureNaming/` | `<id>_<date>_2.gdf` | GDF, ~170 MB | n/a | no |
 | D2 (2019) button press | `.../ButtonPress/` | `<id>_<date>_3.gdf` | GDF, ~50–80 MB | n/a | no |
+| D3 ds004504 (OpenNeuro, public CC0) | `My Drive/OpenNeuro/ds004504/derivatives/sub-XXX/eeg/` (downloaded by `notebooks/d3/D3_01`) | 65 used (36 AD `A`, 29 HC `C`); 23 FTD `F` not downloaded | EEGLAB `.set` (provider-preprocessed), ~20–40 MB, 500 Hz | 19 (10-20) | yes, AD/HC only (`docs/dataset_d3.md`) |
 
 `electrodes_positions_32.loc`: EEGLAB polar layout (template, not digitized):
 Fp1 Fpz Fp2 F7 F3 Fz F4 F8 FC5 FC1 FC2 FC6 M1 T7 C3 Cz C4 T8 M2 CP5 CP1 CP2 CP6

@@ -1,0 +1,6 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 44): Experiment 1, source-space PSD
+# (68 ROIs x 4 bands x [log, rel]), LR and SVM. Same protocol as exp1_source_psd.
+extends: ../exp1_source_psd.yaml
+experiment: d3_exp1_source_psd
+graph_family: D3
+settings: [within_D3]

@@ -1,0 +1,6 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 44): Experiment 0, electrode-level PSD
+# (19 channels x 4 bands x [log, rel]), LR and SVM. Same protocol as exp0_sensor_psd (20 repeats, nested C grid).
+extends: ../exp0_sensor_psd.yaml
+experiment: d3_exp0_sensor_psd
+graph_family: D3
+settings: [within_D3]

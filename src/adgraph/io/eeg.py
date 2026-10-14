@@ -84,17 +84,32 @@ def mapping_mode(mapping: dict[str, str]) -> str:
     return "indexed" if mapping and all(indexed_number(ch) is not None for ch in mapping) else "named"
 
 
+FORMATS = ("edf", "eeglab")
+
+
+def read_header(path: str | Path, fmt: str = "edf"):
+    """Header-only reader for the configured input format (``input.format``; default EDF).
+
+    ``eeglab``: EEGLAB ``.set`` files (Dataset 3, OpenNeuro ds004504 derivatives); MNE converts the stored
+    microvolts to volts."""
+    import mne
+
+    if fmt == "edf":
+        return mne.io.read_raw_edf(path, preload=False, verbose="error")
+    if fmt == "eeglab":
+        return mne.io.read_raw_eeglab(path, preload=False, verbose="error")
+    raise ValueError(f"unknown input format {fmt!r}; choose from {FORMATS}")
+
+
 def load_raw(path: str | Path, dataset: str, cfg: dict):
-    """Read an EDF, keep the configured EEG channels in canonical order, apply the unit scale.
+    """Read a recording, keep the configured EEG channels in canonical order, apply the unit scale.
 
     Returns ``(raw, info)`` where ``info`` records what was done for the manifest.
     Raises if any of the common (non-dropped) channels is missing.
     """
-    import mne
-
     # Header only first; only the channels that are used are then read into memory
     # (identical samples, without loading ECG/EOG/mastoids at the original sampling rate).
-    raw = mne.io.read_raw_edf(path, preload=False, verbose="error")
+    raw = read_header(path, cfg.get("input", {}).get("format", "edf"))
     recorded = cfg["channels"]["recorded"]
     mapping, unknown = channel_mapping(raw.ch_names, recorded)
     raw.pick(list(mapping))

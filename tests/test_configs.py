@@ -14,7 +14,10 @@ EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minima
                    "exp4_band_mean_fixedhp": 2, "exp5_multiband_fixedhp": 4, "exp6_multiband_psd_strength_fixedhp": 9,
                    "exp2_conn_minimal_fixedhp_tier2": 16, "exp3_conn_psd_fixedhp_tier2": 16,
                    "exp5_multiband_fixedhp_tier2": 12, "exp6_multiband_psd_strength_fixedhp_tier2": 7,
-                   "exp7_earm_gnn": 6}
+                   "exp7_earm_gnn": 6,
+                   # Dataset 3 (ds004504, methodology log entry 44)
+                   "d3_exp0_sensor_psd": 2, "d3_exp1_source_psd": 2, "d3_baseline_age": 1, "d3_exp6_gcn_full": 2,
+                   "d3_exp7_earm_gnn": 6}
 
 
 @pytest.mark.parametrize("path", EXPERIMENTS, ids=lambda p: p.stem)

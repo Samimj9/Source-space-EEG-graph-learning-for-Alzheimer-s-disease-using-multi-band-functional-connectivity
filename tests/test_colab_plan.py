@@ -158,6 +158,8 @@ def test_committed_plan_covers_every_config():
     # nested-CV GNN configs are historical records (methodology log entry 42) and are never planned
     historical = {c for c in every if (lambda v: v["input"] == "graph" and not v.get("protocol"))(
         load_experiment(REPO / c))}
+    # Dataset 3 experiments use their own graph runs (graph_family D3) and are never part of the D1/D2 plan
+    every -= {c for c in every if load_experiment(REPO / c).get("graph_family") == "D3"}
     assert historical and listed == every - historical
     units = plan_units(entries, REPO)
     assert len({(u[2]["name"], u[3]) for u in units}) == len(units)     # no unit twice

@@ -1,0 +1,126 @@
+# Graph-construction pipeline for Dataset 3: OpenNeuro ds004504 (Miltiadous et al., 2023), AD and HC only,
+# provider-preprocessed derivatives (methodology log entry 44, docs/dataset_d3.md). Version 4 boundary handling.
+# Every section not marked "D3:" is identical to configs/pipeline.yaml (the frozen D1/D2 pipeline), so
+# windows, rejection, source model, ROIs, bands, connectivity and PSD definitions match D1/D2 exactly.
+version: 4
+datasets: [D3]
+run_prefix: graphsD3              # D3: runs live in <processed>/graphsD3_v4_<config hash>/ (never mixed with D1/D2)
+
+input:
+  format: eeglab                  # D3: derivatives/sub-XXX/eeg/sub-XXX_task-eyesclosed_eeg.set (EEGLAB; MNE: uV -> V)
+
+channels:
+  # D3: the 19 channels of ds004504 (10-20 system, provider order; T3/T4/T5/T6 = T7/T8/P7/P8 positions), all used.
+  recorded: [Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz]
+  drop: []
+  montage: standard_1020
+  verify_layout: false            # D3: named BIDS channels; the D1/D2 .loc index layout does not apply
+
+units:
+  plausible_std_v: [1.0e-7, 2.0e-4]
+  gross_robust_std_v: [1.0e-7, 1.0e-3]
+  scale:
+    D3: 1.0                       # D3: MNE converts the EEGLAB microvolts to volts
+
+preprocessing:
+  sfreq: 250
+  # D3: the provider already band-pass filtered (Butterworth 0.5-45 Hz), re-referenced to A1-A2, cleaned with ASR
+  # and ICA (ICLabel: eye and jaw components removed). None of this is repeated: no second band-pass
+  # (bandpass: false); l_freq / h_freq document the provider passband (used for the relative-PSD range check).
+  bandpass: false
+  l_freq: 0.5
+  h_freq: 45.0
+  bad_channels:                   # evaluated and reported (qc_channels.csv), never acted on (interpolate_bads: false)
+    flat_std_v: 1.0e-7
+    robust_z_log_std: 5.0
+    min_neighbor_corr: 0.4
+    max_fraction_warn: 0.2
+  interpolate_bads: false         # D3: provider-cleaned data; no channel interpolation added
+  reference: average              # A1-A2 -> common average (required by the inverse model, as for D1/D2)
+
+boundary:
+  # Boundary-Aware Filtering and Hilbert Phase Estimation (methodology log entry 41; docs/boundary_processing.md).
+  # 1. The edge_trim_s at each end is discarded at the original sampling rate BEFORE resampling and filtering,
+  #    so the discarded samples (large start/end transients) never enter any filter.
+  # 2. Every FIR on the cropped continuous signal pads explicitly with filter_pad (mirror image about the end
+  #    sample, limited to the signal length, then zeros; MNE 'reflect_limited').
+  # 3. The analytic signal is a finite complex FIR: the band-pass kernel plus its Hilbert transform truncated to
+  #    the same 825 taps (connectivity.plv.band_analytic_fir); no FFT wrap-around.
+  # 4. Windows lie at least the margin inside the cropped signal; full_support = half-length of the 0.1-45 Hz
+  #    sensor band-pass (4125 samples, 16.5 s) + half-length of the analytic kernel (412 samples, 1.648 s), so no
+  #    sample of an accepted window depends on padding through any FIR. feature_band = analytic half-length +
+  #    half-length of the 45 Hz low-pass part only.
+  # 5. The 20 s / 10 s window grid starts at the first valid sample.
+  crop_before_filtering: true
+  filter_pad: reflect_limited
+  analytic: fir
+  margin_policy: full_support
+  # D3: no sensor band-pass is applied here, so full_support = the analytic-kernel half-length only
+  # (412 samples, 1.648 s). The provider's filtering, ASR and ICA ran on the whole recording before release.
+
+windowing:
+  # FROZEN primary segmentation, identical for D1 and D2: 20 s windows, 50 % overlap.
+  # At 250 Hz: 5000-sample windows, 2500-sample step. Filtering is applied to the
+  # continuous signal before segmentation. Other lengths stay configurable.
+  window_s: 20.0
+  step_s: 10.0
+  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (settling, start/end transients).
+                                # v4: cropped before any filtering; windows then keep the boundary margin, so
+                                # n = floor((T - 2*trim - 2*margin - window) / step) + 1 candidate windows
+                                # (v3: n = floor((T - 2*trim - window) / step) + 1)
+  rejection:
+    mad_k: 5.0                  # threshold = median + k * MAD of this subject's peak-to-peak values
+    max_bad_channel_fraction: 0.15
+  min_windows: 5                # pipeline rule; subjects below are reported, not silently dropped
+
+source:
+  subject: fsaverage
+  spacing: ico5
+  bem: fsaverage-5120-5120-5120-bem-sol.fif
+  mindist_mm: 5.0
+  noise_cov: ad_hoc             # diagonal, no baseline available in resting state
+  method: MNE
+  loose: 0.2
+  depth: 0.8
+  lambda2: 0.1111111111111111   # 1 / SNR^2, SNR = 3
+  pick_ori: normal              # signed normal component: keeps phase for PLV
+  parcellation: aparc           # Desikan-Killiany, 68 cortical ROIs
+  roi_mode: mean_flip
+
+connectivity:
+  bands:
+    theta: [4.0, 8.0]
+    alpha1: [8.0, 10.0]
+    alpha2: [10.0, 13.0]
+    beta: [13.0, 30.0]
+  metrics: [plv, ciplv]         # plv = primary (Paper 1); ciplv = |ciPLV|, leakage-robust sensitivity, never merged
+  # Band-pass for phase (MNE FIR, zero phase, firwin/Hamming, applied to the continuous ROI signals):
+  # the same transition width on every band edge (lower edge capped at l_freq); nominal bands above
+  # unchanged. 1.0 Hz keeps alpha1/alpha2 cross-band leakage at the noise floor with 3.3 s filters
+  # (half-length 1.65 s < edge_trim_s). null = MNE 'auto' widths (2-7.5 Hz; design before
+  # methodology log entry 36). See docs/band_filters.md.
+  transition_bandwidth_hz: 1.0
+
+psd:
+  # Band power for the same bands as connectivity, per window, for the 68 ROIs and
+  # (sensor: true) for the 30 electrodes (Experiment 0). See adgraph/features/psd.py.
+  method: welch                 # welch | multitaper | periodogram
+  welch:
+    segment_s: 2.0              # 0.5 Hz resolution
+    overlap: 0.5
+    window: hann
+    average: mean
+  multitaper:
+    bandwidth_hz: 1.0
+  periodogram:
+    window: hann
+  relative_range: [1.0, 45.0]   # denominator of relative power, half-open [1, 45) Hz. Must lie inside the
+                                # preprocessing passband (0.1-45 Hz, passband edges; -0.04 dB at 45 Hz,
+                                # -6 dB at 50.6 Hz): enforced by check_relative_range, never auto-adjusted.
+  sensor: true
+
+output:
+  save_roi_timeseries: false    # true: roi_timeseries/<key>.npy (continuous, float32) per subject
+  save_signed_ciplv: true       # keep antisymmetric signed ciPLV as `ciplv_signed` (never an adjacency)
+
+seed: 0

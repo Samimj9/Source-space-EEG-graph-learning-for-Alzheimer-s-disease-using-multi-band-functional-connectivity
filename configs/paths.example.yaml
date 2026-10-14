@@ -11,6 +11,10 @@ dataset2:
 
 electrode_layout: "{drive_root}/electrodes_positions_32.loc"
 
+# Dataset 3: OpenNeuro ds004504 (BIDS root; AD/HC derivatives downloaded by notebooks/d3/D3_01)
+dataset3:
+  root: /content/drive/MyDrive/OpenNeuro/ds004504
+
 # All outputs, checkpoints and caches: must be on the mounted Drive (never /content); never overwritten
 processed_dir: "{drive_root}/processed"
 cache_dir: "{drive_root}/processed/cache"

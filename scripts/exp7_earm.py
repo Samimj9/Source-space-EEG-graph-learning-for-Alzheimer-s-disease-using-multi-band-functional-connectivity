@@ -7,6 +7,7 @@ splits, checkpoints and result writers as every experiment).
     python scripts/exp7_earm.py compare   # comparison tables + ROC / confusion / performance figures
                                          # (EARM-GNN vs GCN experiments vs PSD baselines), saved outputs only
     python scripts/exp7_earm.py diagnose  # short read-only D1 / D2 diagnostic (QC, features, predictions)
+    python scripts/exp7_earm.py compare --family D3   # Dataset 3 (ds004504) comparison, results in experiments_D3/
 
 ``--synthetic`` uses a synthetic graph store (tests only). Nothing here changes the graph run or any result.
 """
@@ -38,6 +39,7 @@ parser.add_argument("--results", help="experiments root (default: <processed_dir
 parser.add_argument("--out", help="output folder (default: inside the experiment / diagnostics folder)")
 parser.add_argument("--expect-graph-run-id", default=EXPECTED_GRAPH_RUN_ID)
 parser.add_argument("--synthetic", action="store_true", help="synthetic graph store (tests only)")
+parser.add_argument("--family", choices=["D3"], help="compare: Dataset 3 experiments (results in experiments_D3/)")
 parser.add_argument("--allow-ephemeral-storage", action="store_true")
 args = parser.parse_args()
 pd.set_option("display.width", 250, "display.max_rows", 500, "display.max_colwidth", 80)
@@ -200,7 +202,7 @@ def inspect():
 
 # ====================================================================== compare / diagnose
 def results_root(paths):
-    return Path(args.results or f"{paths['processed_dir']}/experiments")
+    return Path(args.results or f"{paths['processed_dir']}/experiments" + ("_D3" if args.family == "D3" else ""))
 
 
 def compare():
@@ -212,12 +214,13 @@ def compare():
 
         paths = load_paths(args.paths)
     root = Path(args.results) if args.results else results_root(paths)
-    out = Path(args.out) if args.out else root / EXP / "_comparison" / f"comparison_{stamp}"
+    out = Path(args.out) if args.out else (root if args.family == "D3" else root / EXP) / "_comparison" \
+        / f"comparison_{stamp}"
     if not args.synthetic:
         from adgraph.storage import check_persistent
 
         check_persistent({"comparison": out}, allow_ephemeral=args.allow_ephemeral_storage)
-    res = write_comparison(root, out, "configs/figures/style.yaml")
+    res = write_comparison(root, out, "configs/figures/style.yaml", family=args.family)
     section("Comparison: subject-level ROC AUC (mean over CV repeats; cross-dataset: one train/test)")
     print(res["pivot"].round(3).to_string() if len(res["pivot"]) else "no results yet")
     t = res["table"]

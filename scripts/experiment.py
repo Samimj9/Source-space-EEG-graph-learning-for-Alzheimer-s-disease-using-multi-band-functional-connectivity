@@ -42,16 +42,20 @@ parser.add_argument("action", choices=["estimate", "run", "status", "report"])
 parser.add_argument("--config", required=True)
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--graphs", help="graph run (default: latest assembled full run in processed_dir)")
-parser.add_argument("--out", help="results root (default: <processed_dir>/experiments)")
+parser.add_argument("--out", help="results root (default: <processed_dir>/experiments, D3: experiments_D3)")
 parser.add_argument("--allow-ephemeral-storage", action="store_true")
 args = parser.parse_args()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 pd.set_option("display.width", 250, "display.max_rows", 500, "display.max_colwidth", 60)
 paths = load_paths(args.paths)
-graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(paths["processed_dir"])
-out = Path(args.out or f"{paths['processed_dir']}/experiments")
 cfg = load_experiment(args.config)
+# graph family: D1/D2 (default) or Dataset 3 (`graph_family: D3`: graph runs graphsD3_v*, results in
+# experiments_D3/), never mixed: every results root holds the results of one graph run
+d3 = cfg.get("graph_family") == "D3"
+graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(
+    paths["processed_dir"], prefix="graphsD3" if d3 else "graphs")
+out = Path(args.out or f"{paths['processed_dir']}/experiments" + ("_D3" if d3 else ""))
 experiment = cfg["experiment"]
 entries = experiment_entries(args.config)
 exp_dir = out / experiment

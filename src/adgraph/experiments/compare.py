@@ -36,11 +36,29 @@ MODELS = [
 ]
 REFERENCE = "EARM-GNN full"
 
+# Dataset 3 (OpenNeuro ds004504; methodology log entry 44): within-D3 only, its own experiments
+SETTINGS_D3 = ["within_D3"]
+MODELS_D3 = [
+    ("EARM-GNN full", "d3_exp7_earm_gnn", {"model.adaptive_adjacency": True, "model.fusion": "attention"}),
+    ("EARM-GNN fixed adjacency (abl. A)", "d3_exp7_earm_gnn", {"model.adaptive_adjacency": False}),
+    ("EARM-GNN mean fusion (abl. B)", "d3_exp7_earm_gnn", {"model.adaptive_adjacency": True, "model.fusion": "mean"}),
+    ("Exp6 GCN full", "d3_exp6_gcn_full", {}),
+    ("Exp1 source PSD SVM", "d3_exp1_source_psd", {"model.name": "svm"}),
+    ("Exp1 source PSD LR", "d3_exp1_source_psd", {"model.name": "logreg"}),
+    ("Exp0 sensor PSD SVM", "d3_exp0_sensor_psd", {"model.name": "svm"}),
+    ("Exp0 sensor PSD LR", "d3_exp0_sensor_psd", {"model.name": "logreg"}),
+    ("Age only", "d3_baseline_age", {}),
+]
 
-def model_rows(index: pd.DataFrame) -> pd.DataFrame:
-    """The saved results of MODELS (one row per label, condition, setting)."""
+
+def family_models(family: str | None) -> tuple[list, list]:
+    return (MODELS_D3, SETTINGS_D3) if family == "D3" else (MODELS, SETTINGS)
+
+
+def model_rows(index: pd.DataFrame, models: list | None = None) -> pd.DataFrame:
+    """The saved results of ``models`` (default MODELS; one row per label, condition, setting)."""
     rows = []
-    for label, exp, where in MODELS:
+    for label, exp, where in models or MODELS:
         sel = index[(index["experiment"] == exp)]
         sel = sel[[matches(c, where) for c in sel["config"]]] if len(sel) else sel
         for _, r in sel.iterrows():
@@ -52,7 +70,8 @@ def model_rows(index: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def comparison_table(rows: pd.DataFrame) -> pd.DataFrame:
+def comparison_table(rows: pd.DataFrame, models: list | None = None,
+                     settings: list | None = None) -> pd.DataFrame:
     out = []
     for _, r in rows.iterrows():
         s = read_summary(r)
@@ -77,8 +96,8 @@ def comparison_table(rows: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame(out)
     if df.empty:
         return df
-    order = {m[0]: i for i, m in enumerate(MODELS)}
-    df["_m"], df["_s"] = df["model"].map(order), df["setting"].map({s: i for i, s in enumerate(SETTINGS)})
+    order = {m[0]: i for i, m in enumerate(models or MODELS)}
+    df["_m"], df["_s"] = df["model"].map(order), df["setting"].map({s: i for i, s in enumerate(settings or SETTINGS)})
     return df.sort_values(["_s", "_m", "connectivity"]).drop(columns=["_m", "_s"]).reset_index(drop=True)
 
 
@@ -110,12 +129,32 @@ def paired_differences(rows: pd.DataFrame, metric: str = "roc_auc", reference: s
     return pd.DataFrame(out)
 
 
-def auc_pivot(table: pd.DataFrame) -> pd.DataFrame:
+def auc_pivot(table: pd.DataFrame, settings: list | None = None) -> pd.DataFrame:
     if table.empty:
         return table
     t = table.assign(row=table["model"] + " [" + table["connectivity"] + "]")
     return t.pivot_table(index="row", columns="setting", values="roc_auc_mean", sort=False).reindex(
-        columns=[s for s in SETTINGS if s in set(t["setting"])])
+        columns=[s for s in settings or SETTINGS if s in set(t["setting"])])
+
+
+def figure_config_d3() -> dict:
+    """Dataset 3: ROC, confusion and performance figures (within-D3 only)."""
+    def ent(label, conditions=None):
+        exp, where = next((e, w) for lab, e, w in MODELS_D3 if lab == label)
+        return {"label": label, "experiment": exp, "where": where, **({"conditions": conditions} if conditions else {})}
+
+    figs = []
+    for cond in ("plv", "ciplv"):
+        graph = [ent(x, [cond]) for x in ("EARM-GNN full", "EARM-GNN fixed adjacency (abl. A)",
+                                          "EARM-GNN mean fusion (abl. B)", "Exp6 GCN full")]
+        base = [ent("Exp1 source PSD SVM"), ent("Exp0 sensor PSD SVM"), ent("Age only")]
+        figs += [{"id": f"D3_roc_{cond}", "family": "roc", "status": "diagnostic", "setting": "within_D3",
+                  "bootstrap_band": 200, "entries": graph[:1] + graph[3:] + base},
+                 {"id": f"D3_confusion_{cond}", "family": "confusion", "status": "diagnostic", "setting": "within_D3",
+                  "entries": graph[:1] + graph[3:] + base[:2]},
+                 {"id": f"D3_performance_{cond}", "family": "performance", "status": "diagnostic", "width": "double",
+                  "settings": SETTINGS_D3, "metrics": ["roc_auc", "balanced_accuracy"], "entries": graph + base}]
+    return {"figures": figs, "duplicates": "latest"}
 
 
 def figure_config() -> dict:
@@ -141,16 +180,18 @@ def figure_config() -> dict:
     return {"figures": figs, "duplicates": "latest"}
 
 
-def write_comparison(results_root: str | Path, out_dir: str | Path, style_path: str | Path | None = None) -> dict:
-    """Tables (+ figures) under ``out_dir``; returns the tables."""
+def write_comparison(results_root: str | Path, out_dir: str | Path, style_path: str | Path | None = None,
+                     family: str | None = None) -> dict:
+    """Tables (+ figures) under ``out_dir``; returns the tables. ``family`` D3: Dataset 3 experiments only."""
     from ..visualization.figures import make_figures
 
+    models, settings = family_models(family)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=False)
     index = index_results(results_root, duplicates="latest")
-    rows = model_rows(index)
-    table = comparison_table(rows) if len(rows) else pd.DataFrame()
-    pivot = auc_pivot(table)
+    rows = model_rows(index, models)
+    table = comparison_table(rows, models, settings) if len(rows) else pd.DataFrame()
+    pivot = auc_pivot(table, settings)
     diffs = pd.concat([paired_differences(rows, m) for m in ("roc_auc", "balanced_accuracy")],
                       ignore_index=True) if len(rows) else pd.DataFrame()
     table.to_csv(out / "comparison_table.csv", index=False)
@@ -164,8 +205,9 @@ def write_comparison(results_root: str | Path, out_dir: str | Path, style_path: 
         "  splits). DESCRIPTIVE: no significance test. Cross-dataset settings have one repeat.\n"
         "EARM-GNN is an exploratory extension developed after the Tier 1 GCN results were observed.\n")
     figures, skipped = [], []
-    if len(rows) and (rows["experiment"] == "exp7_earm_gnn").any():
-        w = make_figures(figure_config(), out / "figures", results_root, None,
+    exp7 = "d3_exp7_earm_gnn" if family == "D3" else "exp7_earm_gnn"
+    if len(rows) and (rows["experiment"] == exp7).any():
+        w = make_figures(figure_config_d3() if family == "D3" else figure_config(), out / "figures", results_root, None,
                          style_path=style_path if style_path and Path(style_path).exists() else None,
                          synthetic=any(read_manifest(r).get("graph_run", {}).get("config_hash") == "synthetic"
                                        for _, r in rows.iterrows()))

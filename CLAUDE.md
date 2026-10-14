@@ -83,6 +83,19 @@ subject key is the leading integer. Dataset 1 is `sub<N>.edf`. Subject IDs
 overlap between datasets, so the unique key is always `(dataset, subject_id)`,
 e.g. `D1-3`, `D2-3`.
 
+### Dataset 3 (OpenNeuro ds004504; `docs/dataset_d3.md`, methodology log entry 44)
+
+- 36 AD + 29 HC, provider-preprocessed derivatives; FTD excluded by design (never downloaded).
+- Downloaded by `notebooks/d3/D3_01_download_and_build_graphs.ipynb` to `My Drive/OpenNeuro/ds004504`
+  (`paths.yaml: dataset3.root`).
+- Pipeline `configs/pipeline_d3.yaml`:
+  - no second band-pass;
+  - bad channels reported only;
+  - runs in `graphsD3_v4_*`.
+- Experiments `configs/experiments/d3/` (`graph_family: D3`, setting `within_D3`); results in `experiments_D3/`.
+- Own code pin `D3_CODE_COMMIT.txt`.
+- Never mix D3 graph runs or results with D1/D2 ones. Cross-dataset D3 ↔ D1/D2 is not implemented yet.
+
 ## Repository layout
 
 ```

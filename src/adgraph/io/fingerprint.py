@@ -43,13 +43,18 @@ class InputHashes:
         return sha
 
 
-def auxiliary_inputs(paths: dict) -> dict[str, str]:
+def auxiliary_inputs(paths: dict, datasets=("D1", "D2"), layout: bool = True) -> dict[str, str]:
     """Non-EEG input files that are part of a run's provenance (those present in ``paths``)."""
     files = {}
-    for i in (1, 2):
-        ds = paths.get(f"dataset{i}", {})
+    for ds_name in datasets:
+        if ds_name == "D3":                       # OpenNeuro ds004504 (BIDS)
+            root = Path(paths.get("dataset3", {}).get("root", ""))
+            files["participants_D3"] = str(root / "participants.tsv")
+            files["dataset_description_D3"] = str(root / "dataset_description.json")
+            continue
+        ds = paths.get(f"dataset{ds_name[1]}", {})
         if ds.get("participants"):
-            files[f"participants_D{i}"] = ds["participants"]
-    if paths.get("electrode_layout"):
+            files[f"participants_{ds_name}"] = ds["participants"]
+    if layout and paths.get("electrode_layout"):
         files["electrode_layout"] = paths["electrode_layout"]
     return files

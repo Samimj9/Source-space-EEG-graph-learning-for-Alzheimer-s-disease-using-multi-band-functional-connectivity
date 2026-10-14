@@ -168,6 +168,9 @@ def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict
     experiment = variants[0]["experiment"]
     gnn = variants[0]["input"] == "graph"
     config = f"configs/experiments/{cfg_path}.yaml"
+    d3 = variants[0].get("graph_family") == "D3"
+    results = "experiments_D3" if d3 else "experiments"
+    pin = [md(D3_PIN_MD), code(D3_PIN)] if d3 else []
     nb = notebook([
         md(f"# {title}\n\n{desc}\n\n**Runs only this experiment** (`{config}`): every predefined variant and "
            f"setting, with subject-level cross-validation, evaluation and checkpointing. It never starts another "
@@ -178,14 +181,17 @@ setting, repeat and fold, inner-CV trial (if any){", training epoch" if gnn else
 resumed / failed / skipped units. An ETA is shown only for the current variant and setting, from folds
 computed in this session.{" Large GNN experiments take several Colab sessions: just *Run all* again after each disconnect." if gnn else ""}
 
-Results are saved under `<outputs>/experiments/{experiment}/` on Drive: per-fold/repeat checkpoints,
+Results are saved under `<outputs>/{results}/{experiment}/` on Drive: per-fold/repeat checkpoints,
 window and subject predictions, metrics per repeat, selected hyperparameters, summaries, manifests,
 runtime and peak memory per unit (`_run_status.csv`), and a report folder (results table +
 **single-experiment diagnostic figures**). The comparative paper figures across experiments are made
 separately (`03_comparative_figures.ipynb`).
 
-Requires the graphs from `01_build_graphs.ipynb`."""),
+Requires the graphs from `""" + ("d3/D3_01_download_and_build_graphs.ipynb" if d3 else "01_build_graphs.ipynb")
+           + "`." + (" Dataset 3 (OpenNeuro ds004504, AD vs HC): graph runs `graphsD3_v4_*`, results in "
+                     "`experiments_D3/`, never mixed with D1/D2." if d3 else "")),
         code(SETUP),
+        *pin,
         md("## 1. This experiment: progress so far (from the checkpoints on Drive)"),
         code(f"""CONFIG = '{config}'   # this notebook's experiment
 EXPERIMENT = '{experiment}'
@@ -212,7 +218,7 @@ except RuntimeError as exc:
 from pathlib import Path
 import pandas as pd
 from IPython.display import Image, display
-exp_dir = Path(OUT) / 'experiments' / EXPERIMENT
+exp_dir = Path(OUT) / '""" + results + """' / EXPERIMENT
 report = sorted((exp_dir / '_reports').glob('report_*'))[-1]
 print('report folder on Drive:', report)
 pd.set_option('display.max_rows', 500, 'display.width', 250)
@@ -389,6 +395,138 @@ print('Experiment 7 complete.')"""),
     entry = {"folder": "experiments", "name": "Exp7_EARM_GNN", "title": "Experiment 7 · EARM-GNN",
              "config": EXP7_CONFIG, "gpu": True}
     return nb, entry
+
+
+# ============================================================================ Dataset 3 (ds004504)
+D3_EXPERIMENTS = [
+    ("D3_Exp0_sensor_psd", "d3/d3_exp0_sensor_psd", "D3 · Experiment 0 · sensor PSD (LR, SVM)",
+     "Dataset 3 (ds004504, AD vs HC): electrode band power (19 channels × 4 bands × {log, relative})."),
+    ("D3_Exp1_source_psd", "d3/d3_exp1_source_psd", "D3 · Experiment 1 · source PSD (LR, SVM)",
+     "Dataset 3: source ROI band power (68 ROIs × 4 bands × {log, relative})."),
+    ("D3_Baseline_age_only", "d3/d3_baseline_age", "D3 · Baseline · age only",
+     "Dataset 3: age as the only predictor (DESIGN.md §5)."),
+    ("D3_Exp6_GCN_full", "d3/d3_exp6_gcn_full", "D3 · Experiment 6 · multi-band GCN, full model",
+     "Dataset 3: four band graphs, nodes = [log PSD, relative PSD, strength], attention fusion; PLV and |ciPLV|."),
+    ("D3_Exp7_EARM_GNN", "d3/d3_exp7_earm_gnn", "D3 · Experiment 7 · EARM-GNN (+ two ablations)",
+     "Dataset 3: EARM-GNN full, fixed adjacency and mean fusion; PLV and |ciPLV| (exploratory, docs/earm_gnn.md)."),
+]
+
+D3_PIN = """# Dataset 3 code pin: every D3 notebook (download, graphs, experiments) runs the commit recorded in
+# <outputs>/D3_CODE_COMMIT.txt (set on the first D3 run), independent of the D1/D2 pin in CODE_COMMIT.txt.
+UPDATE_D3_CODE = False   # leave False; True moves only the D3 pin to the newest code
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{BRANCH}'], text=True).strip()
+d3_work = (any(Path(OUT).glob('graphsD3_v*/subjects/*/subject.done.json'))
+           or any(Path(OUT).glob('experiments_D3/**/*.done.json')))
+D3_COMMIT, _ = resolve_code_pin(Path(OUT) / 'D3_CODE_COMMIT.txt', head, update=UPDATE_D3_CODE, has_work=d3_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', D3_COMMIT])
+for f in ('src/adgraph/io/bids.py', 'configs/pipeline_d3.yaml', 'scripts/d3_data.py'):
+    if not Path('/content/repo', f).exists():
+        raise RuntimeError(f'D3 pin {D3_COMMIT[:10]} lacks {f}: set UPDATE_D3_CODE = True and run again')
+_run([sys.executable, '-m', 'pip', 'install', '-q', '-r', '/content/repo/requirements.txt'])
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                      # this notebook's own imports now come from the D3 commit
+from adgraph.colab import choose_output_root, find_data_root, sh, write_paths_yaml
+from adgraph.config import load_paths
+_root = find_data_root()
+write_paths_yaml('/content/repo', _root, choose_output_root(_root))   # adds the Dataset 3 location
+PATHS = load_paths('/content/repo/configs/paths.yaml')
+print('D3 code commit:', D3_COMMIT)
+print('D1/D2 pin (unchanged):', (Path(OUT) / 'CODE_COMMIT.txt').read_text().split()[0])
+print('Dataset 3 folder:', PATHS['dataset3']['root'])"""
+
+D3_PIN_MD = """## 0. Dataset 3 code pin
+All Dataset 3 notebooks run one commit, recorded in `<outputs>/D3_CODE_COMMIT.txt` on the first D3 run; the
+D1/D2 experiments keep their own pin (`CODE_COMMIT.txt`, unchanged). Leave `UPDATE_D3_CODE = False`."""
+
+
+def d3_build_notebook() -> dict:
+    return notebook([
+        md("""# D3 · 01 · Download ds004504 and build its source-space graphs
+
+**Dataset 3** = OpenNeuro **ds004504** (Miltiadous et al., 2023; doi:10.18112/openneuro.ds004504, CC0): eyes-closed
+resting-state EEG, 19 channels (10-20), 500 Hz. Used: the **36 AD and 29 HC** participants, from the provider's
+**preprocessed derivatives**; the 23 FTD participants are excluded by design and never downloaded
+(methodology log entry 44, `docs/dataset_d3.md`).
+
+Processing (`configs/pipeline_d3.yaml`): the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given
+(nothing repeated). Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
+50 % windows, window rejection, fsaverage source model, 68 Desikan-Killiany ROIs, bands, PLV / |ciPLV| and PSD
+as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation added).
+""" + HOWTO + """
+**Steps:** 0. D3 code pin · 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
+2. input check (36 AD / 29 HC, 19 channels in every file) · 3. smoke test (first subject) and its inspection ·
+4. full graph construction (65 recordings, resumable) · 5. validation and completion report · 6. summary.
+Output: `<outputs>/graphsD3_v4_<config hash>/` (never mixed with the D1/D2 graph runs). Experiments on D3:
+`notebooks/d3/experiments/`. A GPU is not needed for this notebook."""),
+        code(SETUP),
+        md(D3_PIN_MD),
+        code(D3_PIN),
+        md("## 1. Download ds004504 (AD and HC derivatives only)"),
+        code('sh("python scripts/d3_data.py download")'),
+        md("## 2. Input check (participants and recording headers; no signal is read)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 3. Smoke test: first subject, then its inspection (diagnostics, not paper figures)"),
+        code("""sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --limit 1")
+sh("python scripts/inspect_graph_subjects.py --config configs/pipeline_d3.yaml --limit 1")
+from IPython.display import Image, display
+from adgraph.config import load_yaml
+from adgraph.pipeline import graph_run_dir
+smoke = graph_run_dir(OUT, load_yaml('configs/pipeline_d3.yaml'), 1)
+for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
+    display(Image(str(png)))"""),
+        md("## 4. Full graph construction (resumable)\nProgress is saved per subject. If the runtime stops, *Run all* again."),
+        code('sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --status")\n'
+             'sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml")'),
+        md("## 5. Validate the D3 graph dataset and write the completion report"),
+        code('sh("python scripts/validate_graph_run.py --prefix graphsD3")'),
+        md("## 6. Summary"),
+        code("""import json
+import pandas as pd
+from adgraph.pipeline import latest_complete_graph_run
+run = latest_complete_graph_run(OUT, 'graphsD3')
+m = json.load(open(run / 'manifest.json'))
+print('graph run:', run)
+print('graph_run_id', m['graph_run_id'], '| commit', m['git_commit'], '| operator error',
+      m['source_operator']['verification_rel_error'])
+print('per dataset:', m['summary']['per_dataset'])
+print('excluded by design:', len(m['registry'].get('excluded_by_design', {}).get('D3', [])), 'FTD participants')
+s = pd.read_csv(run / 'subjects.csv')
+display(s[[c for c in ['key', 'label', 'duration_s', 'median_std_uv', 'n_bad_channels', 'n_windows_kept',
+                       'n_windows_total', 'qc_spatial_rho', 'status'] if c in s]])
+print(s.groupby('label')['n_windows_kept'].agg(['count', 'sum', 'median']))"""),
+    ])
+
+
+def d3_comparison_notebook() -> dict:
+    return notebook([
+        md("""# D3 · 99 · Comparison of the Dataset 3 experiments (saved outputs only)
+
+Subject-level results on Dataset 3 (ds004504, 36 AD / 29 HC, within-D3 cross-validation): EARM-GNN and its two
+ablations, the multi-band GCN, source and sensor PSD models and the age-only baseline. Tables, ROC curves,
+confusion matrices and per-repeat paired differences (descriptive; no significance test). Nothing is trained.
+Run after the D3 experiment notebooks; missing experiments are simply absent.""" + HOWTO),
+        code(SETUP),
+        md(D3_PIN_MD),
+        code(D3_PIN),
+        md("## 1. Comparison"),
+        code("""sh("python scripts/exp7_earm.py compare --family D3")
+import pandas as pd
+from IPython.display import Image, display
+cmp = sorted((Path(OUT) / 'experiments_D3' / '_comparison').glob('comparison_*'))[-1]
+display(pd.read_csv(cmp / 'auc_by_setting.csv', index_col=0).round(3))
+t = pd.read_csv(cmp / 'comparison_table.csv') if (cmp / 'comparison_table.csv').stat().st_size > 1 else pd.DataFrame()
+if len(t):
+    display(t[['model', 'connectivity', 'n_repeats', 'roc_auc_mean', 'roc_auc_sd', 'roc_auc_ci95_low',
+               'roc_auc_ci95_high', 'balanced_accuracy_mean', 'sensitivity_mean', 'specificity_mean', 'f1_mean',
+               'n_parameters', 'fit_seconds_mean']].round(3))
+for png in sorted((cmp / 'figures').glob('D3_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+    ])
 
 
 def build_graphs_notebook() -> dict:
@@ -645,7 +783,14 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     nb, entry = exp7_notebook()
     outputs[nbdir / "experiments" / "Exp7_EARM_GNN.ipynb"] = nb
     entries.append(entry)
-    outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook([e["config"] for e in entries])
+    d1d2_configs = [e["config"] for e in entries]
+    outputs[nbdir / "d3" / "D3_01_download_and_build_graphs.ipynb"] = d3_build_notebook()
+    for name, cfg, title, desc in D3_EXPERIMENTS:
+        nb, entry = experiment_notebook("d3/experiments", name, cfg, title, desc)
+        outputs[nbdir / "d3" / "experiments" / f"{name}.ipynb"] = nb
+        entries.append(entry)
+    outputs[nbdir / "d3" / "D3_99_comparison.ipynb"] = d3_comparison_notebook()
+    outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook(d1d2_configs)   # D1/D2 paper figures
     for path, nb in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")

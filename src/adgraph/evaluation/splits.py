@@ -20,6 +20,8 @@ SETTINGS = {
     "pooled": (("D1", "D2"), None, ("dataset", "y")),
     "cross_D1_to_D2": (("D1",), "D2", ("y",)),
     "cross_D2_to_D1": (("D2",), "D1", ("y",)),
+    # Dataset 3 (OpenNeuro ds004504, AD/HC; methodology log entry 44): its own graph runs (graphsD3_v*)
+    "within_D3": (("D3",), None, ("y",)),
 }
 CROSS_SETTINGS = ("cross_D1_to_D2", "cross_D2_to_D1")
 

@@ -47,7 +47,8 @@ def test_one_notebook_per_experiment_config():
     configs = {c for c in configs if not (lambda v: v["input"] == "graph" and not v.get("protocol"))(
         load_experiment(REPO / c))}
     found = {}
-    for nb in list((NB / "experiments").glob("*.ipynb")) + list((NB / "additional").glob("*.ipynb")):
+    for nb in [*(NB / "experiments").glob("*.ipynb"), *(NB / "additional").glob("*.ipynb"),
+               *(NB / "d3" / "experiments").glob("*.ipynb")]:
         cfg = [ln.split("'")[1] for src in _code(nb) for ln in src.splitlines() if ln.startswith("CONFIG = ")]
         assert len(cfg) == 1, nb.name
         found[nb.name] = cfg[0]
@@ -57,7 +58,8 @@ def test_one_notebook_per_experiment_config():
 
 
 def test_experiment_notebooks_run_only_their_experiment():
-    for nb in list((NB / "experiments").glob("*.ipynb")) + list((NB / "additional").glob("*.ipynb")):
+    for nb in [*(NB / "experiments").glob("*.ipynb"), *(NB / "additional").glob("*.ipynb"),
+               *(NB / "d3" / "experiments").glob("*.ipynb")]:
         src = "\n".join(_code(nb))
         assert "run_plan" not in src and "run_experiment.py" not in src, nb.name
         runs = [ln for ln in src.splitlines() if "scripts/experiment.py run" in ln]

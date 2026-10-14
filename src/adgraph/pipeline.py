@@ -46,6 +46,17 @@ from .source.inverse import build_roi_operator, fetch_fsaverage, load_labels
 log = logging.getLogger(__name__)
 
 DATASETS = ("D1", "D2")
+
+
+def datasets_of(cfg: dict | None) -> tuple[str, ...]:
+    """Datasets a pipeline config builds (``datasets``; default D1 and D2, the frozen v4 run)."""
+    return tuple((cfg or {}).get("datasets", DATASETS))
+
+
+def run_prefix(cfg: dict | None) -> str:
+    """Directory prefix of a config's graph runs: ``graphs`` (D1/D2) or e.g. ``graphsD3`` (Dataset 3), so a
+    run of another dataset family is never selected by ``latest_complete_graph_run`` of this one."""
+    return str((cfg or {}).get("run_prefix", "graphs"))
 ASSEMBLY_FILES = ("graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "assembly.done.json")
 
 # ROIs band-filtered + Hilbert-transformed together (bounds memory; results identical, see band_analytic)
@@ -196,15 +207,37 @@ DATA_ARRAY_KEYS = ("plv", "ciplv", "ciplv_signed", "psd_abs", "psd_log", "psd_re
 
 def graph_run_dir(out_root: str | Path, cfg: dict, limit: int | None = None) -> Path:
     """Deterministic run directory for a configuration (so an interrupted run can be resumed)."""
-    return Path(out_root) / (f"graphs_v{cfg['version']}_{config_hash(cfg)}" + (f"_limit{limit}" if limit else ""))
+    return Path(out_root) / (f"{run_prefix(cfg)}_v{cfg['version']}_{config_hash(cfg)}"
+                             + (f"_limit{limit}" if limit else ""))
 
 
-def build_registry(paths: dict, limit: int | None = None, hashes: InputHashes | None = None):
-    """Recordings joined to participant metadata (all subjects used as provided).
+def design_exclusions(paths: dict, cfg: dict | None = None) -> dict:
+    """Recordings excluded by a pre-specified design rule (not by results): Dataset 3 FTD participants."""
+    if "D3" not in datasets_of(cfg):
+        return {}
+    from .io import bids
+
+    _, excluded = bids.load_participants_tsv(bids.participants_path(paths["dataset3"]["root"]))
+    return {"D3": excluded.to_dict("records")}
+
+
+def build_registry(paths: dict, limit: int | None = None, hashes: InputHashes | None = None, cfg: dict | None = None):
+    """Recordings joined to participant metadata (all subjects of the config's datasets used as provided;
+    Dataset 3: AD and HC only, FTD excluded by design, ``design_exclusions``).
 
     With ``hashes``, a ``sha256`` column holds each used recording's content hash."""
     recs, meta = [], []
-    for ds in DATASETS:
+    for ds in datasets_of(cfg):
+        if ds == "D3":
+            from .io import bids
+
+            root = paths["dataset3"]["root"]
+            kept, excluded = bids.load_participants_tsv(bids.participants_path(root))
+            bids.check_cohort(kept)
+            r = bids.list_recordings(root)
+            recs.append(r[~r["key"].isin(excluded["key"])])          # FTD recordings are never used
+            meta.append(kept)
+            continue
         recs.append(list_recordings(paths[f"dataset{ds[1]}"]["eeg_dir"], ds))
         meta.append(load_participants(paths[f"dataset{ds[1]}"]["participants"], ds))
     recs, meta = pd.concat(recs, ignore_index=True), pd.concat(meta, ignore_index=True)
@@ -226,10 +259,12 @@ def build_registry(paths: dict, limit: int | None = None, hashes: InputHashes | 
     return registry, recs, no_meta, no_rec
 
 
-def hash_auxiliary_inputs(paths: dict, hashes: InputHashes) -> dict:
+def hash_auxiliary_inputs(paths: dict, hashes: InputHashes, cfg: dict | None = None) -> dict:
     """Content hashes of the participant sheets and electrode layout (those that exist)."""
     return {name: {"path": str(p), "sha256": hashes.sha256(p)}
-            for name, p in auxiliary_inputs(paths).items() if Path(p).exists()}
+            for name, p in auxiliary_inputs(paths, datasets_of(cfg),
+                                            (cfg or {}).get("channels", {}).get("verify_layout", True)).items()
+            if Path(p).exists()}
 
 
 def default_hash_cache(run_dir: Path) -> Path:
@@ -461,7 +496,7 @@ def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = Non
 
     (Input files not yet in the hash cache are hashed: identities depend on their content.)"""
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
-    registry, *_ = build_registry(paths, limit, InputHashes(input_hash_cache or default_hash_cache(run_dir)))
+    registry, *_ = build_registry(paths, limit, InputHashes(input_hash_cache or default_hash_cache(run_dir)), cfg)
     ident = operator_identity(cfg)
     op_id = stable_hash(ident)
     cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
@@ -480,7 +515,8 @@ def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = Non
 
 # ---------------------------------------------------------------------- assembly
 def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dict, op: dict,
-             no_meta: list, no_rec: list, limit: int | None, keys_failed: dict, aux_inputs: dict | None = None) -> Path:
+             no_meta: list, no_rec: list, limit: int | None, keys_failed: dict, aux_inputs: dict | None = None,
+             exclusions: dict | None = None) -> Path:
     """Concatenate completed subject units into the cohort store (skipped if already assembled).
 
     Refuses (``GraphRunIncomplete``) a cohort with failed subjects or without any graph: an
@@ -556,7 +592,7 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         .to_dict("records"),
         "auxiliary_inputs": aux_inputs or {},
         "registry": {"recordings_without_metadata": no_meta, "metadata_without_recording": no_rec,
-                     "subset_limit": limit},
+                     "subset_limit": limit, **({"excluded_by_design": exclusions} if exclusions else {})},
         "source_operator": {"operator_id": op["operator_id"], "from_cache": op.get("from_cache", False),
                             "compared_with_cached": op.get("compared_with_cached", []),
                             "shape": list(np.asarray(op["W"]).shape), "n_sources": op["n_sources"],
@@ -574,7 +610,7 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
             "subjects_not_ok": subjects.loc[subjects["status"] != "ok", ["key", "status"]].to_dict("records"),
             "per_dataset": {ds: {"subjects": int((subjects["dataset"].eq(ds) & subjects["status"].eq("ok")).sum()),
                                  "graphs": int(windows["dataset"].eq(ds).sum()) if len(windows) else 0}
-                            for ds in DATASETS},
+                            for ds in datasets_of(cfg)},
         },
         "outputs": ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json", "subjects/<key>/"],
     }
@@ -594,10 +630,11 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
 
 
 # ---------------------------------------------------------------------- discovery
-def list_graph_runs(processed_dir: str | Path) -> pd.DataFrame:
-    """All graph run directories with their state (assembled or not, smoke test or full)."""
+def list_graph_runs(processed_dir: str | Path, prefix: str = "graphs") -> pd.DataFrame:
+    """All graph run directories of one family (``prefix``: ``graphs`` = D1/D2, ``graphsD3`` = Dataset 3)
+    with their state (assembled or not, smoke test or full)."""
     rows = []
-    for d in sorted(Path(processed_dir).glob("graphs_v*")):
+    for d in sorted(Path(processed_dir).glob(f"{prefix}_v*")):
         if not d.is_dir():
             continue
         man = d / "manifest.json"
@@ -611,10 +648,11 @@ def list_graph_runs(processed_dir: str | Path) -> pd.DataFrame:
                                        "graph_run_id", "config_hash", "version"])
 
 
-def latest_complete_graph_run(processed_dir: str | Path) -> Path:
+def latest_complete_graph_run(processed_dir: str | Path, prefix: str = "graphs") -> Path:
     """Assembled full (non-smoke-test) graph run of the highest pipeline version, most recent first; raises
-    if there is none. Experiments use this run unless --graphs names another."""
-    runs = list_graph_runs(processed_dir)
+    if there is none. Experiments use this run unless --graphs names another. ``prefix`` selects the dataset
+    family (``graphs`` = D1/D2, default; ``graphsD3`` = Dataset 3); families are never mixed."""
+    runs = list_graph_runs(processed_dir, prefix)
     # the highest pipeline version first (v4 boundary-aware graphs are never mixed with or replaced by an
     # older version), then the most recently assembled
     runs = runs[runs["assembled"] & ~runs["limit_smoke_test"]].sort_values(["version", "assembled_at"])
@@ -651,7 +689,7 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
                  "(%.2f s, policy %s)", m["margin_samples"], m["margin_s"], m["policy"])
     else:
         check_filters_fit_edge_trim(cfg)
-    if paths.get("electrode_layout"):           # index-only EDF labels rely on this order (log entry 37)
+    if paths.get("electrode_layout") and cfg["channels"].get("verify_layout", True):   # D1/D2 index-only labels
         layout = check_layout(paths, cfg["channels"]["recorded"])
         log.info("electrode layout %s (sha256 %s) matches channels.recorded", layout["path"], layout["sha256"][:12])
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
@@ -678,11 +716,11 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
                                        "git_commit": git_commit(), "config": cfg})   # commit: to resume, pin it
 
     hashes = InputHashes(input_hash_cache, rehash=rehash_inputs)
-    registry, recs, no_meta, no_rec = build_registry(paths, limit, hashes)
+    registry, recs, no_meta, no_rec = build_registry(paths, limit, hashes, cfg)
     unlabelled = registry.loc[registry["label"].isna(), "key"].tolist()
     if unlabelled:                                # never build graphs without a diagnosis label
         raise ValueError(f"recordings without a participant row (no AD/HC label): {unlabelled}")
-    aux = hash_auxiliary_inputs(paths, hashes)
+    aux = hash_auxiliary_inputs(paths, hashes, cfg)
     log.info("input content hashes: %d files read, %d from cache", hashes.n_hashed,
              len(registry) + len(aux) - hashes.n_hashed)
     mem_log = MemoryLog(run_dir / "memory_log.csv")
@@ -702,7 +740,8 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
         _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar)
     check_run_complete(run_dir, registry, failed)
     with MemoryTracker() as m:
-        out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux)
+        out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux,
+                       design_exclusions(paths, cfg))
     mem_log.add("assembly", "done", m.record())
     return out
 

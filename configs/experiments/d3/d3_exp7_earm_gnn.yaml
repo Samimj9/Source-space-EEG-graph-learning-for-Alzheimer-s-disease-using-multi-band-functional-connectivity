@@ -1,0 +1,6 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 44): Experiment 7, EARM-GNN (full, fixed
+# adjacency, mean fusion) x {PLV, |ciPLV|}, identical model and protocol to exp7_earm_gnn.yaml.
+extends: ../exp7_earm_gnn.yaml
+experiment: d3_exp7_earm_gnn
+graph_family: D3
+settings: [within_D3]

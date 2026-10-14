@@ -47,7 +47,7 @@ def variant_matches(v: dict, filters) -> bool:
     return False
 
 
-SETTING_PASSES = (("within_D1", "within_D2"), ("pooled",), ("cross_D1_to_D2", "cross_D2_to_D1"))
+SETTING_PASSES = (("within_D1", "within_D2", "within_D3"), ("pooled",), ("cross_D1_to_D2", "cross_D2_to_D1"))
 
 
 def experiment_entries(config: str | Path, config_root: str | Path = ".") -> list[dict]:

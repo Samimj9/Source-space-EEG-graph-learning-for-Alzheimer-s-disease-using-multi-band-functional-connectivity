@@ -27,7 +27,8 @@ from pathlib import Path
 
 import yaml
 
-SETTING_NAMES = ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1")
+SETTING_NAMES = ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1", "within_D3")
+GRAPH_FAMILIES = (None, "D3")          # graph-run family an experiment reads (None = D1/D2)
 
 
 def deep_merge(base: dict, over: dict) -> dict:
@@ -117,6 +118,11 @@ def validate(v: dict) -> None:
     if (v.get("protocol") or {}).get("hyperparameter_search") == "none" and len(hparam_grid(v)) != 1:
         raise ValueError(f"{v.get('name')}: protocol {v['protocol'].get('name')!r} forbids hyperparameter search, "
                          f"but the config defines a grid {v.get('hparams')}")
+    if v.get("graph_family") not in GRAPH_FAMILIES:
+        raise ValueError(f"{v.get('name')}: graph_family must be one of {GRAPH_FAMILIES}")
+    d3 = {s for s in v.get("settings") or [] if s.endswith("D3")}
+    if (v.get("graph_family") == "D3") != bool(d3) or (d3 and set(v["settings"]) != d3):
+        raise ValueError(f"{v.get('name')}: D3 settings and graph_family D3 go together and are never mixed with D1/D2")
     unknown = set(v.get("settings") or []) - set(SETTING_NAMES)
     if unknown:
         raise ValueError(f"{v.get('name')}: unknown settings {sorted(unknown)}")
