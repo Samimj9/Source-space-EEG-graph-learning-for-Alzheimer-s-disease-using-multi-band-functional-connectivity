@@ -91,6 +91,10 @@ How runs and results are kept apart:
   leakage-robust sensitivity analysis.
 - **Filtering before our crop:** the provider filtered and cleaned whole recordings before release. Our
   10 s crop and margin cover our own filters, not the provider's.
+- **Possible discontinuities:** if the provider's cleaning removed data segments, the `.set` files
+  contain EEGLAB "boundary" events. `scripts/d3_data.py check` counts them per recording. The pipeline
+  does not yet exclude windows that span one: if any are found, that is reported and decided before
+  graphs are built.
 - **Relative-PSD range:** the provider's Butterworth low-pass is about −3 dB at 45 Hz, the top of our
   relative-PSD range [1, 45) Hz.
 - **Literature on this dataset:** many published results on ds004504 split windows rather than subjects.

@@ -4,7 +4,7 @@
     python scripts/d3_data.py check      # participants (36 AD / 29 HC, FTD excluded) + header of every recording
 
 Resumable and verified (size + MD5 against the OpenNeuro bucket). FTD recordings are never downloaded or used.
-The check reads headers only (channel names, sampling rate, duration) and writes
+The check reads headers only (channel names, sampling rate, duration, discontinuity events) and writes
 ``<processed>/d3_header_report_<time>.csv``; it exits 1 if a recording is missing or lacks a channel.
 """
 
@@ -60,7 +60,11 @@ rows = []
 for r in recs.itertuples():
     raw = read_header(r.path, cfg["input"]["format"])
     mapping, unknown = channel_mapping(raw.ch_names, cfg["channels"]["recorded"])
+    desc = [str(d).lower() for d in raw.annotations.description]
     rows.append({"key": r.key, "n_channels": len(raw.ch_names), "sfreq": raw.info["sfreq"],
+                 # EEGLAB "boundary" events mark discontinuities (e.g. data removed by cleaning): a 20 s
+                 # window must not span one; reported here, decided by the author (methodology log entry 44)
+                 "n_boundary_events": sum(d == "boundary" for d in desc), "n_annotations": len(desc),
                  "duration_s": round(raw.n_times / raw.info["sfreq"], 1),
                  "missing_channels": ",".join(c for c in cfg["channels"]["recorded"] if c not in mapping.values()),
                  "unrecognised": ",".join(unknown), "size_mb": round(r.size_bytes / 1e6, 1)})
@@ -72,8 +76,17 @@ print(rep.groupby("label").agg(recordings=("key", "size"), sfreq=("sfreq", lambd
 bad = rep[rep["missing_channels"] != ""]
 problems = ([f"missing recordings: {missing}"] if missing else []) + \
            ([f"recordings without all 19 channels: {bad['key'].tolist()}"] if len(bad) else [])
+disc = rep[rep["n_boundary_events"] > 0]
+if len(disc):
+    print(f"\nWARNING: {len(disc)} recording(s) contain EEGLAB 'boundary' events (discontinuities): "
+          f"{disc[['key', 'n_boundary_events']].to_dict('records')}. The pipeline does not yet exclude windows that "
+          "span them; report this before building graphs (a decision for the author, not applied automatically).")
+else:
+    print("\nno discontinuity ('boundary') events in any recording: continuous data, windows are valid as cut")
 print(f"\nheader report: {out}")
 if problems:
     print("FAILED: " + "; ".join(problems))
     sys.exit(1)
-print(f"OK: {len(rep)} recordings (36 AD + 29 HC), all with the 19 configured channels")
+counts = rep["label"].value_counts().to_dict()
+print(f"OK: {len(rep)} recordings ({counts.get('AD', 0)} AD + {counts.get('HC', 0)} HC), all with the "
+      f"{len(cfg['channels']['recorded'])} configured channels")
