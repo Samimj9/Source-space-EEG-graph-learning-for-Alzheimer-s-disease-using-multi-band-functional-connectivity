@@ -2462,6 +2462,40 @@ AD-LEB EDF, which are 20–39 MB)
 
 ---
 
+## 40. Pre-specified dataset-wide QC audit (bad channels, connectivity boundary sensitivity)
+
+**Context (2026-10-14).** The real-data edge-sensitivity check at `7fd5a69` reproduced the stored
+smoke-test graphs exactly. It found:
+- D1-1: A vs B PLV max 0.027, max subject-mean difference 0.0005;
+- D2-2: A vs B PLV max 0.215, max subject-mean difference 0.020, theta most affected, five
+  interpolated channels (F7, FC1, T7, T8, CP5).
+
+**Decision.** Before any pipeline change, run a read-only audit of all 43 recordings:
+- Part 1, bad channels;
+- Part 2, production A vs reflected-edge B with identical accepted windows.
+
+The plan, metrics and decision criteria are in `docs/qc_boundary_audit.md` and were written and
+committed **before** any dataset-wide result.
+
+**Key choices:**
+- Subjects are the units.
+- B is not ground truth: synthetic ground truth showed that B's own reflection dominates the
+  boundary-touching windows, while interior differences track the true dependence on non-analysed data.
+- The primary boundary criterion is relative to the between-subject spread of each connection.
+- Interpolation and boundary sensitivity are assessed separately.
+- No decision may use classification performance.
+
+**Implementation.** `scripts/audit_quality_boundary.py`:
+- read-only against the production code at `7fd5a69`, which is checked at start-up;
+- resumable per recording;
+- writes only to a separate Drive folder.
+
+The production modules, the graphs, the cached operators and the experiments are untouched.
+
+**Approval status.** Audit requested by the author. Decisions on options A–E follow the results.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
