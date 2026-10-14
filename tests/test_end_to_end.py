@@ -6,6 +6,7 @@ import pytest
 from adgraph.config import common_channels, load_yaml
 from adgraph.io.eeg import load_raw
 from adgraph.pipeline import process_recording
+from adgraph.preprocessing.boundary import crop_edges, expected_valid_windows
 from adgraph.preprocessing.clean import preprocess
 
 mne = pytest.importorskip("mne")
@@ -36,15 +37,17 @@ def test_pipeline_on_synthetic_edf(tmp_path, dataset, unit):
 
     raw, load_qc = load_raw(path, dataset, CFG)
     assert raw.ch_names == common_channels(CFG) and load_qc["unrecognised_channels"] == ["ECG"]
+    crop_edges(raw, CFG)                         # pipeline v4: edges discarded before filtering (entry 41)
     raw, qc = preprocess(raw, CFG)
     # analysed interval after average reference: the shared 10 Hz sine is removed, ~4 µV of filtered noise remains
     assert raw.info["sfreq"] == 250 and 2 < qc["median_std_uv"] < 20 and 5 < qc["gross_robust_std_uv"] < 20
     assert list(qc["bad_channels"]) == ["F3"]  # index 4 of the recorded list
 
     W = np.random.default_rng(1).standard_normal((68, 30))
-    res = process_recording(raw, W, CFG)
+    res = process_recording(raw, W, CFG, offset=2500)
     n = res["n_windows_kept"]
-    assert res["n_windows_total"] == 12 and 1 <= n <= 12  # (150 - 2*10 - 20) / 10 + 1
+    # v4: floor((150 - 2*10 - 2*18.148 - 20) / 10) + 1 = 8 candidate windows (v3: 12)
+    assert res["n_windows_total"] == expected_valid_windows(150, CFG) == 8 and 1 <= n <= 8
     assert res["plv"].shape == res["ciplv"].shape == (n, 4, 68, 68)
     for k in ("abs", "log", "rel"):
         assert res[f"psd_{k}"].shape == (n, 4, 68) and res[f"sensor_psd_{k}"].shape == (n, 4, 30)

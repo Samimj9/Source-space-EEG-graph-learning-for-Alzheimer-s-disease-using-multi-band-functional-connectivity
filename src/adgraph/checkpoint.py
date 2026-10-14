@@ -38,7 +38,7 @@ from .provenance import git_commit
 
 CODE_VERSIONS = {
     "operator": "operator-1",          # sensor -> ROI operator (forward, inverse, mean_flip)
-    "graph_subject": "graph-subject-2",  # per-subject preprocessing/source/PSD/connectivity (2: band transitions)
+    "graph_subject": "graph-subject-3",  # per-subject preprocessing/source/PSD/connectivity (3: boundary-aware, entry 41)
     "graph_assembly": "graph-assembly-1",
     "experiment": "experiment-1",      # outer-fold training/prediction, evaluation
     "inner_trial": "inner-trial-1",    # one hyperparameter combination on one inner fold

@@ -2507,6 +2507,74 @@ The production modules, the graphs, the cached operators and the experiments are
 
 ---
 
+## 41. Boundary-Aware Filtering and Hilbert Phase Estimation for Source-Space EEG Functional Connectivity
+
+Version 1.0, 2026-10-14. The full decision record (original design, audit evidence, new algorithm,
+unchanged items, effect on the dataset, reproducibility, limitations, Methods and Supplementary text,
+before/after table) is `docs/boundary_processing.md`.
+
+**Decision (author, after the completed 43-recording audit of entry 40).**
+- Correct the boundary processing and rebuild all graphs as pipeline v4, in a new directory
+  `graphs_v4_<config hash>/`.
+- The 30-channel montage and subject-specific interpolation are kept. No reduced-montage experiment.
+
+**Original (v3).** The 10 s at each end were excluded from the windows but processed with everything
+else:
+- FFT resampling and the 33 s (8251-tap) 0.1–45 Hz FIR ran on the whole recording;
+- the band-pass ran on the whole ROI signal;
+- the analytic signal came from an FFT Hilbert transform of the whole recording, which is non-local
+  and assumes the recording is periodic.
+
+**Evidence.**
+- The largest maximum subject-mean PLV differences between production and reflected-edge handling
+  were 0.177 (D1-8), 0.164 (D2-12) and 0.117 (D1-14).
+- Theta was the most sensitive band in 29 of 43 recordings.
+- Sensitivity was associated with band-specific edge severity (ρ = 0.755) but not with the number of
+  interpolated channels (ρ = 0.248, p = 0.109).
+- Boundary windows were the most sensitive (median p95 0.0218 at distance 0 vs 0.00085 at ≥ 6 steps).
+- D2 was more sensitive than D1 (p = 0.0066), and edge characteristics differed: D1 transients at the
+  start, D2 at the end.
+- These are sensitivities to boundary handling, not errors relative to a ground truth.
+
+**New (v4).**
+1. Discard 10 s per side at the original rate before resampling and filtering.
+2. Explicit `reflect_limited` padding for resampling and every FIR.
+3. A finite analytic kernel g = h + i𝓗{h} (825 taps; Hilbert-kernel energy outside the support
+   ≤ 3.8e-7; negative-frequency leakage ≤ −76 dB), applied by linear convolution.
+4. A margin of 4125 + 412 = 4537 samples (18.148 s) from the cropped ends (`margin_policy:
+   full_support`). Accepted windows then depend on no padded sample through any FIR.
+5. The 20 s / 10 s window grid starts at the first valid sample.
+
+Identical for D1 and D2.
+
+**Verified by implementation tests** (`tests/test_boundary_processing.py`, synthetic):
+- outputs are bit-identical under any change confined to the discarded edges, at 1000 and 1024 Hz;
+- interior agreement with the v3 analytic signal: PLV/|ciPLV| within 1e-4;
+- the analytic FIR is local, while the FFT Hilbert transform is not;
+- margins and window grid;
+- end-to-end run with the validation script.
+
+**Unchanged.**
+- Recordings, labels, montage and interpolation.
+- 250 Hz resampling, the 0.1–45 Hz FIR and the average reference.
+- Source model, operator, ROIs and bands.
+- Band-pass kernels, PLV/ciPLV definitions and PSD features.
+- 20 s / 50 % windows, rejection and the minimum-window rule.
+
+**Effect.**
+- 3–4 fewer candidate windows per recording, from the margin.
+- The graph counts (v3: 1,640) are recorded in `validation.json` after the rebuild and entered in
+  `docs/boundary_processing.md` §5.
+- v3 checkpoints are never reused: the configuration hash, `CODE_VERSIONS["graph_subject"]` and the code
+  identity all change.
+
+**Approval status.**
+- The correction and rebuild were approved by the author.
+- Implementation choices to confirm before launch: margin policy, window-grid anchoring, QC on the
+  cropped signal, operator rebuild with comparison (`docs/boundary_processing.md` §9).
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

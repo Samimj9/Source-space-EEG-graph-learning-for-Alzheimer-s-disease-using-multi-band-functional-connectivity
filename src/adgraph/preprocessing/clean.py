@@ -49,10 +49,16 @@ def detect_bad_channels(data: np.ndarray, ch_names: list[str], rules: dict) -> d
 
 
 def resample_and_bandpass(raw, cfg: dict):
-    """First preprocessing step (in place): resample to ``sfreq``, band-pass ``l_freq``-``h_freq``."""
+    """First preprocessing step (in place): resample to ``sfreq``, band-pass ``l_freq``-``h_freq``.
+
+    Pipeline v4 (``boundary`` in the config) makes the padding of both operations explicit
+    (``boundary.filter_pad``, MNE's default value, so the numbers are unchanged); the recording has
+    then already been cropped to the analysed interval (``preprocessing.boundary.crop_edges``)."""
+    from .boundary import filter_pad
+
     pp = cfg["preprocessing"]
-    raw.resample(pp["sfreq"], verbose="error")
-    raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error")
+    raw.resample(pp["sfreq"], verbose="error", **filter_pad(cfg))
+    raw.filter(pp["l_freq"], pp["h_freq"], fir_design="firwin", verbose="error", **filter_pad(cfg))
     return raw
 
 
@@ -69,6 +75,10 @@ def bandpass_half_length(cfg: dict) -> int:
 def analysed_interval(n_samples: int, sfreq: float, cfg: dict) -> slice:
     """Samples that can enter windows: the recording without ``windowing.edge_trim_s`` at each
     end (the same rounding as ``window_starts``)."""
+    from .boundary import boundary_aware
+
+    if boundary_aware(cfg):                       # v4: the edges were cropped before any filtering
+        return slice(0, n_samples)
     trim = int(round(cfg["windowing"]["edge_trim_s"] * sfreq))
     if n_samples - 2 * trim < 1:
         raise ValueError(f"recording of {n_samples / sfreq:.1f} s is not longer than twice the edge trim "
@@ -100,7 +110,14 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     Window rejection (``process_recording``) is unchanged. ``qc["channels"]`` holds the
     per-channel quantities; ``bad_channels_whole_recording`` (QC only) what step 3 would flag
     on the whole recording.
+
+    Pipeline v4 (methodology log entry 41): the recording reaching this function has already been
+    cropped to the analysed interval (``boundary.crop_edges``), so every step, including the unit
+    safeguard, sees only the analysed interval, and every filter pads explicitly
+    (``boundary.filter_pad``). ``bad_channels_whole_recording`` then equals ``bad_channels``.
     """
+    from .boundary import filter_pad
+
     pp = cfg["preprocessing"]
     resample_and_bandpass(raw, cfg)
     data = raw.get_data()
@@ -113,7 +130,7 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
                          "(whole 0.1-45 Hz recording): the EDF unit scale is wrong by orders of magnitude; "
                          "run scripts/diagnose_amplitude.py")
 
-    hp = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error").get_data()
+    hp = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error", **filter_pad(cfg)).get_data()
     rules = pp["bad_channels"]
     metrics = channel_metrics(hp[:, iv], rules)
     bads = detect_bad_channels(hp[:, iv], raw.ch_names, rules)

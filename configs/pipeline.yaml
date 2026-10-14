@@ -1,6 +1,7 @@
-# Graph-construction pipeline, v3 (harmonized D1/D2; 20 s / 50 % windows; PSD features). Every value here is a
-# methods decision; changes must be logged in docs/methods_decisions.md.
-version: 3
+# Graph-construction pipeline, v4 (harmonized D1/D2; 20 s / 50 % windows; PSD features; boundary-aware filtering
+# and Hilbert phase estimation, methodology log entry 41). Every value here is a methods decision; changes must be
+# logged in docs/methods_decisions.md. v3 = the same file without the `boundary` section and with version: 3.
+version: 4
 
 channels:
   # Order and names from AD-LEB/electrodes_positions_32.loc (both datasets record these 32).
@@ -36,15 +37,34 @@ preprocessing:
   interpolate_bads: true        # spherical spline, before re-referencing
   reference: average            # as projection, over the common 30-channel set
 
+boundary:
+  # Boundary-Aware Filtering and Hilbert Phase Estimation (methodology log entry 41; docs/boundary_processing.md).
+  # 1. The edge_trim_s at each end is discarded at the original sampling rate BEFORE resampling and filtering,
+  #    so the discarded samples (large start/end transients) never enter any filter.
+  # 2. Every FIR on the cropped continuous signal pads explicitly with filter_pad (mirror image about the end
+  #    sample, limited to the signal length, then zeros; MNE 'reflect_limited').
+  # 3. The analytic signal is a finite complex FIR: the band-pass kernel plus its Hilbert transform truncated to
+  #    the same 825 taps (connectivity.plv.band_analytic_fir); no FFT wrap-around.
+  # 4. Windows lie at least the margin inside the cropped signal; full_support = half-length of the 0.1-45 Hz
+  #    sensor band-pass (4125 samples, 16.5 s) + half-length of the analytic kernel (412 samples, 1.648 s), so no
+  #    sample of an accepted window depends on padding through any FIR. feature_band = analytic half-length +
+  #    half-length of the 45 Hz low-pass part only.
+  # 5. The 20 s / 10 s window grid starts at the first valid sample.
+  crop_before_filtering: true
+  filter_pad: reflect_limited
+  analytic: fir
+  margin_policy: full_support
+
 windowing:
   # FROZEN primary segmentation, identical for D1 and D2: 20 s windows, 50 % overlap.
   # At 250 Hz: 5000-sample windows, 2500-sample step. Filtering is applied to the
   # continuous signal before segmentation. Other lengths stay configurable.
   window_s: 20.0
   step_s: 10.0
-  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (filter edges, settling).
-                                # Configurable; this is why a nominal 300 s recording yields 27 (not 29)
-                                # 20 s / 50 % windows: n = floor((T - 2*trim - window) / step) + 1
+  edge_trim_s: 10.0             # discard the first/last 10 s of each recording (settling, start/end transients).
+                                # v4: cropped before any filtering; windows then keep the boundary margin, so
+                                # n = floor((T - 2*trim - 2*margin - window) / step) + 1 candidate windows
+                                # (v3: n = floor((T - 2*trim - window) / step) + 1)
   rejection:
     mad_k: 5.0                  # threshold = median + k * MAD of this subject's peak-to-peak values
     max_bad_channel_fraction: 0.15

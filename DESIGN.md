@@ -5,10 +5,17 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.3 (2026-10-12)**. No classification has been run.
+Status: **frozen v1.4 (2026-10-14)**. No classification has been run. v1.4 changes only the boundary handling of graph construction (pipeline v4); the evaluation design is unchanged.
 
 Changelog:
 
+- **v1.4 (2026-10-14):** graph construction moves to pipeline v4, "Boundary-Aware Filtering and Hilbert Phase Estimation" (methodology log entry 41, `docs/boundary_processing.md`):
+  - the 10 s edges are discarded before any filtering;
+  - padding is explicit;
+  - the analytic signal is a finite complex FIR;
+  - windows keep a boundary margin of 4537 samples (18.148 s), so there are fewer windows per recording.
+
+  The window length, overlap, bands, connectivity definitions, montage, interpolation, source model and every evaluation rule are unchanged. The same rules apply to D1 and D2.
 - **v1.1:** primary segmentation frozen at 20 s windows with 50 % overlap (both
   datasets). Experiment set 0–6 fixed (§10). The code for every setting exists,
   but nothing has been run on real data.
@@ -255,7 +262,7 @@ manifest. Until then, S4 results are not generated.
 
 ### 7.1 Pipeline identity ("must")
 
-| Item | Requirement | Pipeline v3 (`configs/pipeline.yaml`) | Verified by |
+| Item | Requirement | Pipeline v4 (`configs/pipeline.yaml`) | Verified by |
 |---|---|---|---|
 | Channel set | Identical channel names and count entering source modelling for D1 and D2 | ✅ 30 channels in both datasets (M1/M2 dropped), canonical order | loader raises on a missing channel; channel order is asserted against the operator |
 | Electrode positions | Same montage source for both | ✅ `standard_1020` by name (MNE ≥1.13 calls it `colin27_1020`, with identical positions) | |
@@ -263,17 +270,18 @@ manifest. Until then, S4 results are not generated.
 | Bad channels | Same detection and handling rule for both | ✅ the same automatic rule, plus interpolation | per-subject list in `subjects.csv` |
 | Units | Amplitudes verified in volts for both | ✅ the D1 rescale, plus a plausibility check for both datasets | `median_std_uv` in `subjects.csv`, to be compared between D1 and D2 |
 | Resampling / filtering | Same target rate (250 Hz), same filter design and parameters | ✅ | |
-| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ 20 s / 50 % overlap for both | `manifest.segmentation` |
+| Windowing / rejection | Same window length, step, trim, rejection rule and minimum-window rule | ✅ 20 s / 50 % overlap for both; 10 s cropped before filtering and a 4537-sample boundary margin for both (v4) | `manifest.segmentation`, `manifest.boundary_processing` |
+| Boundary handling | Same crop, padding, analytic-signal method and margin for both | ✅ v4: crop at the original rate, `reflect_limited` padding, finite analytic FIR, margin computed from the filters | `manifest.boundary_processing`, `scripts/validate_graph_run.py` |
 | Forward model | Same template, source space, BEM and **same sensor set** | ✅ **one** forward model shared by both datasets | `manifest.source_operator.shared_across_datasets` |
 | Inverse | Same method, `loose`, `depth`, `λ²` and noise covariance | ✅ ad hoc covariance, `pick_ori='normal'`, all recorded | runtime check against the full inverse (`verification_rel_error`) |
 | ROIs | Same parcellation, ROI order and extraction mode | ✅ | `roi_names` in the manifest and `graphs.npz` |
-| Bands | Identical band edges and the same band-pass/Hilbert implementation | ✅ | |
+| Bands | Identical band edges and the same band-pass/Hilbert implementation | ✅ (v4: finite analytic FIR for both) | `manifest.boundary_processing.analytic_kernels` |
 | Graph construction | Same estimator, window length, sparsification, node features and edge normalization | ✅ at build time (dense PLV/ciPLV and band power). Sparsification and node features are fixed at the model stage and applied identically to both datasets | model config |
 | Provenance | Both datasets processed by the same code commit and config hash in one run | ✅ a single `run()` covers D1 and D2 | `git_commit`, `config_hash` in the manifest |
 
 **Gate status:** the 7.1 items are satisfied *by design* since pipeline v2
-(v3 adds 20 s windows and PSD features). The gate is formally passed once a full
-v3 run has completed, with:
+(v3 adds 20 s windows and PSD features; v4 adds the boundary-aware processing). The gate is formally
+passed once a full v4 run has completed, with:
 
 - `verification_rel_error` < 1e-6
 - no subject in error

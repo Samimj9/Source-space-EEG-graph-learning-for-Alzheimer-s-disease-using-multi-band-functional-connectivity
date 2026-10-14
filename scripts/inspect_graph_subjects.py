@@ -114,10 +114,17 @@ for key in keys:
                hatch=["//" if r else "" for r in win["within_edge_filter_reach"]])
         ax.scatter(win["tmin"] + 10, win["max_ptp_uv"], color=col, marker="_", s=200)
         ax.axhline(win["threshold_uv"].iloc[0], color="k", ls="--", lw=0.8, label="rejection threshold")
-        for t0, t1 in ((0, cfg["windowing"]["edge_trim_s"]),
-                       (s["duration_s"] - cfg["windowing"]["edge_trim_s"], s["duration_s"])):
+        trim = cfg["windowing"]["edge_trim_s"]
+        for t0, t1 in ((0, trim), (s["duration_s"] - trim, s["duration_s"])):
             ax.axvspan(t0, t1, color="grey", alpha=0.3)
-        ax.set_xlabel("window centre (s); grey = discarded edges; hatched = within band-pass reach of them")
+        if cfg.get("boundary"):                   # v4: boundary margin inside the cropped signal (entry 41)
+            from adgraph.preprocessing.boundary import margins
+
+            mg = margins(cfg)["margin_s"]
+            for t0, t1 in ((trim, trim + mg), (s["duration_s"] - trim - mg, s["duration_s"] - trim)):
+                ax.axvspan(t0, t1, color="grey", alpha=0.12)
+        ax.set_xlabel("window centre (s); grey = discarded edges, light grey = v4 boundary margin; "
+                      "hatched = within band-pass reach of the edges (v3)")
         ax.set_ylabel("ptp (µV): bar median, tick max")
         ax.set_title(f"{key}: windows ({int(win['kept'].sum())} kept blue / {int((~win['kept']).sum())} rejected red)")
         ax.legend(fontsize=8)

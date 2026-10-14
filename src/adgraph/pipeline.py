@@ -22,13 +22,16 @@ import numpy as np
 import pandas as pd
 
 from .config import common_channels, config_hash
-from .connectivity.plv import band_analytic, check_filters_fit_edge_trim, phase_sync
+from .connectivity.plv import band_analytic, band_analytic_fir, check_filters_fit_edge_trim, phase_sync
 from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, require_complete_cohort, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
 from .io.layout import check_layout, spatial_consistency
 from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
+from .preprocessing.boundary import boundary_aware, crop_edges, valid_window_starts
+from .preprocessing.boundary import margins as boundary_margins
+from .preprocessing.boundary import report as boundary_report
 from .preprocessing.clean import bandpass_half_length, preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
@@ -88,18 +91,32 @@ def verify_operator(op: dict, info, cfg: dict, subjects_dir: str | Path, seed: i
     return float(np.abs(op["W"] @ raw.get_data() - ref).max() / np.abs(ref).max())
 
 
-def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
+def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
     """Windows, rejection and per-window features for one cleaned, continuous recording.
 
     Filtering (sensor band-pass upstream; per-band ROI filtering here) is applied to
     the continuous signal before segmentation.
+
+    Pipeline v4 (``boundary`` in the config; methodology log entry 41): ``raw`` is the recording
+    cropped to the analysed interval; windows tile [margin, n - margin) (``boundary.valid_window_starts``)
+    and the analytic signal is the finite complex FIR ``band_analytic_fir``. ``offset`` (samples at
+    ``sfreq``) is where the cropped signal starts in the original recording; stored start samples and
+    times are relative to the original recording.
     """
+    v4 = boundary_aware(cfg)
     sfreq = raw.info["sfreq"]
     wcfg = cfg["windowing"]
     progress.set(stage="windowing + artifact rejection")
     data = raw.get_data()
     win_len, step = window_samples(sfreq, wcfg["window_s"], wcfg["step_s"])
-    starts = window_starts(data.shape[1], sfreq, wcfg["window_s"], wcfg["step_s"], wcfg["edge_trim_s"])
+    if v4:
+        if offset != int(round(float(wcfg["edge_trim_s"]) * sfreq)):
+            raise ValueError("pipeline v4 expects the recording cropped by boundary.crop_edges before preprocessing "
+                             f"(offset {offset} samples, expected {int(round(float(wcfg['edge_trim_s']) * sfreq))})")
+        margin = boundary_margins(cfg)["margin_samples"]
+        starts = valid_window_starts(data.shape[1], cfg, margin)
+    else:
+        starts = window_starts(data.shape[1], sfreq, wcfg["window_s"], wcfg["step_s"], wcfg["edge_trim_s"])
     keep, thr, ptp = reject_windows(data, starts, win_len, wcfg["rejection"]["mad_k"],
                                     wcfg["rejection"]["max_bad_channel_fraction"])
     kept_idx = np.flatnonzero(keep)
@@ -116,8 +133,9 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     # One band's analytic signal is in memory at a time (released before the next band).
     for b, (name, (lo, hi)) in enumerate(bands.items()):
         progress.set(stage=f"connectivity {name} ({b + 1}/{n_b} bands, {n_w} windows)")
-        analytic = band_analytic(roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS,
-                                 transition_bandwidth_hz=cfg["connectivity"].get("transition_bandwidth_hz"))
+        analytic = (band_analytic_fir if v4 else band_analytic)(
+            roi, sfreq, lo, hi, chunk_rows=ANALYTIC_CHUNK_ROWS,
+            transition_bandwidth_hz=cfg["connectivity"].get("transition_bandwidth_hz"))
         for w, s in enumerate(kept):
             plv[w, b], ciplv[w, b], ciplv_signed[w, b] = phase_sync(analytic[:, s:s + win_len])
         del analytic
@@ -141,13 +159,16 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
     # every candidate window, kept or rejected (QC table saved with the subject). Windows within
     # the 0.1-45 Hz filter's half length of the discarded edges can carry slow (< l_freq) leakage
     # from edge transients; they are marked so their amplitude can be compared with the others.
-    reach = bandpass_half_length(cfg)
-    trim = int(round(wcfg["edge_trim_s"] * sfreq))
-    near = (starts < trim + reach) | (starts + win_len > data.shape[1] - trim - reach)
+    if v4:                                        # by construction no window reaches the padded boundary
+        near = (starts < margin) | (starts + win_len > data.shape[1] - margin)
+    else:
+        reach = bandpass_half_length(cfg)
+        trim = int(round(wcfg["edge_trim_s"] * sfreq))
+        near = (starts < trim + reach) | (starts + win_len > data.shape[1] - trim - reach)
     max_frac = wcfg["rejection"]["max_bad_channel_fraction"]
     qc_windows = pd.DataFrame({
-        "window_index": np.arange(len(starts)), "start_sample": starts, "tmin": starts / sfreq,
-        "tmax": (starts + win_len) / sfreq, "kept": keep,
+        "window_index": np.arange(len(starts)), "start_sample": starts + offset, "tmin": (starts + offset) / sfreq,
+        "tmax": (starts + offset + win_len) / sfreq, "kept": keep,
         "n_channels_over_threshold": (ptp > thr).sum(axis=1) if len(starts) else np.empty(0, int),
         "frac_channels_over_threshold": thr_exceed,
         "max_ptp_uv": ptp.max(axis=1) * 1e6 if len(starts) else np.empty(0),
@@ -156,8 +177,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict) -> dict:
         "decision": np.where(keep, "kept", f"rejected: > {max_frac:.0%} of channels above threshold"),
     })
     out.update({
-        "window_index": kept_idx, "start_sample": kept, "stop_sample": kept + win_len,
-        "tmin": kept / sfreq, "tmax": (kept + win_len) / sfreq,
+        "window_index": kept_idx, "start_sample": kept + offset, "stop_sample": kept + offset + win_len,
+        "tmin": (kept + offset) / sfreq, "tmax": (kept + offset + win_len) / sfreq,
         "qc_frac_channels_over_threshold": thr_exceed[kept_idx] if len(starts) else np.empty(0),
         "qc_max_ptp_uv": ptp[kept_idx].max(axis=1) * 1e6 if n_w else np.empty(0),
         "n_windows_total": len(starts), "n_windows_kept": n_w, "rejection_threshold_uv": thr * 1e6,
@@ -270,7 +291,36 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
                  **({"roi_coords": np.asarray(op["roi_coords"])} if op.get("roi_coords") is not None else {}))
     write_marker(cache_dir, name, ident, [f"{name}.npz"])
     log.info("ROI operator %s built and verified (rel. err %.1e)", op_id, op_err)
-    return {**op, "verification_rel_error": op_err, "operator_id": op_id, "from_cache": False}
+    previous = compare_with_cached_operators(cache_dir, ident, op["W"], exclude=name)
+    for c in previous:
+        log.info("operator %s vs cached %s (same source model, other code version): max |dW| / max |W| = %.1e",
+                 op_id, c["operator_id"], c["max_rel_diff"])
+    return {**op, "verification_rel_error": op_err, "operator_id": op_id, "from_cache": False,
+            "compared_with_cached": previous}
+
+
+def compare_with_cached_operators(cache_dir: Path, ident: dict, W: np.ndarray, exclude: str = "") -> list[dict]:
+    """Cached operators whose identity equals ``ident`` except for the code fingerprint (i.e. the same
+    source model, channels, montage, reference and MNE version), with their max relative difference
+    to ``W``. Documents that a rebuilt operator reproduces the earlier one; nothing is reused or changed."""
+    out = []
+    strip = lambda d: {k: v for k, v in (d or {}).items() if k != "code"}         # noqa: E731
+    for mp in sorted(Path(cache_dir).glob("operator_*.done.json")):
+        name = mp.name.replace(".done.json", "")
+        if name == exclude:
+            continue
+        try:
+            other = json.loads(mp.read_text())
+            if strip(other.get("identity")) != strip(json.loads(json.dumps(ident, default=str))):
+                continue
+            with np.load(Path(cache_dir) / f"{name}.npz") as z:
+                Wo = z["W"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if Wo.shape == W.shape:
+            out.append({"operator_id": name.replace("operator_", ""),
+                        "max_rel_diff": float(np.abs(Wo - W).max() / np.abs(W).max())})
+    return out
 
 
 # ---------------------------------------------------------------------- per-subject units
@@ -313,6 +363,10 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                                          "mmse", "acer", "comment", "path", "size_bytes")}
     progress.set(stage="loading EDF")
     raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+    crop, offset = {}, 0
+    if boundary_aware(cfg):                       # v4: discard the edges before any filtering (entry 41)
+        crop = crop_edges(raw, cfg)
+        offset = int(round(crop["crop_start_s"] * cfg["preprocessing"]["sfreq"]))
     progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
     raw, pp_qc = preprocess(raw, cfg)
     # QC of the channel-to-electrode mapping only (changes nothing): nearby electrodes must
@@ -324,7 +378,7 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                     "check the channel mapping (%s labels)", rec.key, rho, load_qc["channel_naming"])
     if raw.ch_names != list(op["ch_names"]):
         raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
-    res = process_recording(raw, op["W"], cfg)
+    res = process_recording(raw, op["W"], cfg, offset=offset)
     n = res["n_windows_kept"]
     status = "ok" if n >= cfg["windowing"]["min_windows"] else "below_min_windows"
     subj_qc = {"median_std_uv": pp_qc["median_std_uv"], "n_bad_channels": pp_qc["n_bad_channels"],
@@ -340,7 +394,8 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                    "whole_recording_std_uv": pp_qc["whole_recording_std_uv"],
                    "bad_channels_whole_recording": json.dumps(pp_qc["bad_channels_whole_recording"]),
                    "n_windows_rejected": res["n_windows_total"] - n,
-                   "qc_edge_window_ptp_ratio": edge_window_ptp_ratio(res["qc_windows"]), "status": status}
+                   "qc_edge_window_ptp_ratio": edge_window_ptp_ratio(res["qc_windows"]),
+                   "sample_offset": offset, "processed_n_samples": int(raw.n_times), **crop, "status": status}
     if subject_row["qc_edge_window_ptp_ratio"] > 2:
         log.warning("%s: kept windows near the recording edges have %.1fx the peak-to-peak of the others; "
                     "inspect qc_windows.csv", rec.key, subject_row["qc_edge_window_ptp_ratio"])
@@ -503,11 +558,15 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         "registry": {"recordings_without_metadata": no_meta, "metadata_without_recording": no_rec,
                      "subset_limit": limit},
         "source_operator": {"operator_id": op["operator_id"], "from_cache": op.get("from_cache", False),
+                            "compared_with_cached": op.get("compared_with_cached", []),
                             "shape": list(np.asarray(op["W"]).shape), "n_sources": op["n_sources"],
                             "channels": list(op["ch_names"]), "shared_across_datasets": True,
                             "verification_rel_error": op["verification_rel_error"],
                             "roi_names": list(op["roi_names"]), "W": np.asarray(op["W"]).tolist()},
         "segmentation": {"window_samples": win_s, "step_samples": step_s},
+        "boundary_processing": (boundary_report(cfg) if boundary_aware(cfg) else
+                                {"version": "v3", "description": "continuous resampling, filtering and FFT Hilbert "
+                                 "transform of the whole recording; windows inside the 10 s edge trim"}),
         "subject_units": {k: v for k, v in units.items()},
         "summary": {
             "n_graphs": int(len(windows)),
@@ -546,15 +605,19 @@ def list_graph_runs(processed_dir: str | Path) -> pd.DataFrame:
         m = json.loads(man.read_text()) if assembled else {}
         rows.append({"run_dir": str(d), "assembled": assembled, "limit_smoke_test": "_limit" in d.name,
                      "forced": "_force" in d.name, "assembled_at": m.get("assembled_at", ""),
-                     "graph_run_id": m.get("graph_run_id", ""), "config_hash": m.get("config_hash", "")})
+                     "graph_run_id": m.get("graph_run_id", ""), "config_hash": m.get("config_hash", ""),
+                     "version": int((m.get("config") or {}).get("version", 0) or 0)})
     return pd.DataFrame(rows, columns=["run_dir", "assembled", "limit_smoke_test", "forced", "assembled_at",
-                                       "graph_run_id", "config_hash"])
+                                       "graph_run_id", "config_hash", "version"])
 
 
 def latest_complete_graph_run(processed_dir: str | Path) -> Path:
-    """Most recently assembled full (non-smoke-test) graph run; raises if there is none."""
+    """Assembled full (non-smoke-test) graph run of the highest pipeline version, most recent first; raises
+    if there is none. Experiments use this run unless --graphs names another."""
     runs = list_graph_runs(processed_dir)
-    runs = runs[runs["assembled"] & ~runs["limit_smoke_test"]].sort_values("assembled_at")
+    # the highest pipeline version first (v4 boundary-aware graphs are never mixed with or replaced by an
+    # older version), then the most recently assembled
+    runs = runs[runs["assembled"] & ~runs["limit_smoke_test"]].sort_values(["version", "assembled_at"])
     if runs.empty:
         raise FileNotFoundError(f"no assembled graph run in {processed_dir}")
     latest = Path(runs["run_dir"].iloc[-1])
@@ -582,7 +645,12 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     """
     pp = cfg["preprocessing"]
     check_relative_range(cfg["psd"]["relative_range"], pp["l_freq"], pp["h_freq"])
-    check_filters_fit_edge_trim(cfg)
+    if boundary_aware(cfg):                       # v4: windows keep a computed margin from the cropped ends
+        m = boundary_margins(cfg)
+        log.info("boundary-aware processing (entry 41): edges cropped before filtering; margin %d samples "
+                 "(%.2f s, policy %s)", m["margin_samples"], m["margin_s"], m["policy"])
+    else:
+        check_filters_fit_edge_trim(cfg)
     if paths.get("electrode_layout"):           # index-only EDF labels rely on this order (log entry 37)
         layout = check_layout(paths, cfg["channels"]["recorded"])
         log.info("electrode layout %s (sha256 %s) matches channels.recorded", layout["path"], layout["sha256"][:12])

@@ -12,7 +12,12 @@ from adgraph.preprocessing.clean import bandpass_half_length, detect_bad_channel
 
 mne = pytest.importorskip("mne")
 
+# These tests document the amplitude / bad-channel / rejection QC of entry 39 on UNCROPPED recordings,
+# i.e. the pipeline-v3 path (analysed interval = edge-trimmed part of the processed recording). The QC
+# logic is shared with v4, where the recording is cropped first; v4 is covered by test_boundary_processing.
 CFG = load_yaml("configs/pipeline.yaml")
+CFG.pop("boundary", None)
+CFG["version"] = 3
 CH = common_channels(CFG)
 SF, T = 500, 150
 W = np.random.default_rng(1).standard_normal((68, 30))

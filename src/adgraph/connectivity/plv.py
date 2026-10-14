@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
 from scipy.signal import hilbert
 
@@ -38,6 +40,69 @@ def band_analytic(x: np.ndarray, sfreq: float, l_freq: float, h_freq: float,
     out = np.empty(x.shape, dtype=np.complex128)
     for i in range(0, x.shape[0], chunk_rows):
         out[i:i + chunk_rows] = one(np.ascontiguousarray(x[i:i + chunk_rows], dtype=np.float64))
+    return out
+
+
+@lru_cache(maxsize=None)
+def analytic_kernel(sfreq: float, l_freq: float, h_freq: float,
+                    transition_bandwidth_hz: float | None = None) -> np.ndarray:
+    """Finite complex (analytic) band-pass kernel g = h + i * H{h} (methodology log entry 41).
+
+    ``h`` is exactly the zero-phase FIR band-pass of ``band_analytic`` (MNE firwin; same length L, odd).
+    ``H{h}`` is its Hilbert transform, computed exactly by FFT on a 64 L zero-padded copy of ``h`` and
+    truncated to the same L taps (centre-aligned). Because the Hilbert transform is linear and shift
+    invariant, x * g is the analytic signal of the band-passed x (x * h) up to the truncation of H{h}
+    (energy outside L taps < 1e-6 of the total for the configured bands, ``analytic_kernel_report``).
+    Each output sample then depends only on the L input samples centred on it: no circular FFT
+    wrap-around and no dependence on distant samples, unlike an FFT Hilbert transform of the whole
+    signal."""
+    import mne
+
+    h = mne.filter.create_filter(None, sfreq, l_freq, h_freq, method="fir", phase="zero", fir_design="firwin",
+                                 verbose="error", **transition_kwargs(l_freq, h_freq, transition_bandwidth_hz))
+    L, c = len(h), len(h) // 2
+    n = 64 * L
+    hp = np.zeros(n)
+    hp[n // 2 - c:n // 2 + c + 1] = h
+    hh = np.imag(hilbert(hp))
+    g = h + 1j * hh[n // 2 - c:n // 2 + c + 1]
+    g.setflags(write=False)
+    return g
+
+
+def analytic_kernel_report(sfreq: float, l_freq: float, h_freq: float,
+                           transition_bandwidth_hz: float | None = None) -> dict:
+    """Numerical properties of ``analytic_kernel`` (recorded in the graph-run manifest)."""
+    g = analytic_kernel(sfreq, l_freq, h_freq, transition_bandwidth_hz)
+    h = np.real(g)
+    L, c = len(h), len(h) // 2
+    n = 64 * L
+    hp = np.zeros(n)
+    hp[n // 2 - c:n // 2 + c + 1] = h
+    hh_full = np.imag(hilbert(hp))
+    outside = 1 - float(np.sum(np.imag(g) ** 2) / np.sum(hh_full ** 2))
+    nfft = 1 << 18
+    G = np.fft.fft(g, nfft)
+    f = np.fft.fftfreq(nfft, 1 / sfreq)
+    neg_db = 20 * np.log10(np.abs(G[f < 0]).max() / np.abs(G[f > 0]).max())
+    return {"taps": L, "half_length_samples": c, "half_length_s": c / sfreq,
+            "hilbert_kernel_energy_outside_support": outside, "negative_frequency_leakage_db": float(neg_db)}
+
+
+def band_analytic_fir(x: np.ndarray, sfreq: float, l_freq: float, h_freq: float, chunk_rows: int | None = None,
+                      transition_bandwidth_hz: float | None = None) -> np.ndarray:
+    """Analytic signal of the band-passed rows of ``x`` by linear (not circular) convolution with the
+    finite analytic kernel (``analytic_kernel``). Output sample t depends only on x[t - c .. t + c]
+    (c = kernel half-length); samples within c of either end see the implicit zeros beyond the signal
+    and must not enter a window (the boundary margin, ``preprocessing.boundary``)."""
+    from scipy.signal import fftconvolve
+
+    g = analytic_kernel(float(sfreq), float(l_freq), float(h_freq), transition_bandwidth_hz)
+    rows = chunk_rows or x.shape[0]
+    out = np.empty(x.shape, dtype=np.complex128)
+    for i in range(0, x.shape[0], rows):
+        blk = np.ascontiguousarray(x[i:i + rows], dtype=np.float64)
+        out[i:i + rows] = fftconvolve(blk, g[None, :], mode="same", axes=-1)
     return out
 
 

@@ -152,7 +152,10 @@ class GraphStore:
         if not path.exists():
             path = self.root / "roi_timeseries" / f"{row['key']}.npy"
         ts = np.load(path, mmap_mode="r")
-        return np.asarray(ts[:, int(row["start_sample"]):int(row["stop_sample"])])
+        off = 0                                    # v4: the saved series starts at the crop (entry 41)
+        if not self.subjects.empty and "sample_offset" in self.subjects:
+            off = int(self.subjects.set_index("key").loc[row["key"], "sample_offset"])
+        return np.asarray(ts[:, int(row["start_sample"]) - off:int(row["stop_sample"]) - off])
 
     # ---- persistence ----
     def save(self, out_dir: str | Path) -> Path:

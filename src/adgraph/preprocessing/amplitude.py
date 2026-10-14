@@ -258,10 +258,13 @@ def _nanmedian(x) -> float | None:
 def pipeline_checks(raw, cfg: dict) -> dict:
     """Run ``preprocess`` (on a copy of the loaded recording) and report its two amplitude checks,
     bad channels and per-channel table; a failing check is reported, not raised."""
+    from .boundary import boundary_aware, crop_edges
     from .clean import preprocess, resample_and_bandpass, robust_std
 
     glo, ghi = cfg["units"]["gross_robust_std_v"]
     lo, hi = cfg["units"]["plausible_std_v"]
+    if boundary_aware(cfg):                       # v4: the pipeline crops the edges before preprocessing
+        crop_edges(raw, cfg)
     gross = float(np.median(robust_std(resample_and_bandpass(raw.copy(), cfg).get_data())))
     out = {"unit_safeguard": {"value_uv": gross * 1e6, "range_uv": [round(glo * 1e6, 6), round(ghi * 1e6, 6)],
                               "passes": bool(glo <= gross <= ghi),

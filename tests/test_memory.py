@@ -27,16 +27,19 @@ from adgraph.connectivity.plv import band_analytic
 from test_checkpoint import CFG, cohort  # noqa: F401  (fixture)
 
 REPO = Path(__file__).resolve().parents[1]
+OFFSET = int(CFG["windowing"]["edge_trim_s"] * CFG["preprocessing"]["sfreq"])   # v4 crop offset (entry 41)
 
 
 def _recording(tmp_path, seconds=None):
     from adgraph.io.eeg import load_raw
+    from adgraph.preprocessing.boundary import crop_edges
     from adgraph.preprocessing.clean import preprocess
     from test_end_to_end import _write_edf
 
     path = tmp_path / "rec.edf"
     _write_edf(path, CFG["channels"]["recorded"] + ["ECG"], "uV")
     raw, _ = load_raw(path, "D2", CFG)
+    crop_edges(raw, CFG)                         # pipeline v4: edges discarded before filtering (entry 41)
     raw, _ = preprocess(raw, CFG)
     return path, raw
 
@@ -54,14 +57,14 @@ def test_bounded_process_recording_is_identical(tmp_path, monkeypatch):
 
     _, raw = _recording(tmp_path)
     W = np.random.default_rng(1).standard_normal((68, len(common_channels(CFG))))
-    bounded = pl.process_recording(raw, W, CFG)
+    bounded = pl.process_recording(raw, W, CFG, offset=OFFSET)
     monkeypatch.setattr(pl, "ANALYTIC_CHUNK_ROWS", None)                  # previous, unchunked path
-    full = pl.process_recording(raw, W, CFG)
+    full = pl.process_recording(raw, W, CFG, offset=OFFSET)
     for k in ("plv", "ciplv", "ciplv_signed", "psd_abs", "psd_log", "psd_rel", "sensor_psd_rel"):
         assert np.allclose(bounded[k], full[k], rtol=0, atol=1e-6), k
     assert bounded["roi_timeseries"] is None                               # not saved -> not copied
     cfg = {**CFG, "output": {**CFG["output"], "save_roi_timeseries": True}}
-    assert pl.process_recording(raw, W, cfg)["roi_timeseries"].dtype == np.float32
+    assert pl.process_recording(raw, W, cfg, offset=OFFSET)["roi_timeseries"].dtype == np.float32
 
 
 def test_lazy_edf_loading_reads_identical_samples(tmp_path):
@@ -88,7 +91,7 @@ def test_recording_peak_memory_is_bounded(tmp_path):
     tracemalloc.start()
     try:
         tracemalloc.reset_peak()
-        pl.process_recording(raw, W, CFG)
+        pl.process_recording(raw, W, CFG, offset=OFFSET)
         peak = tracemalloc.get_traced_memory()[1]
     finally:
         tracemalloc.stop()

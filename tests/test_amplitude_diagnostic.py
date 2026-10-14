@@ -50,6 +50,9 @@ def test_stages_units_and_agreement_with_preprocess(tmp_path):
     assert np.isclose(s["median_std_uv"]["mne"], s["median_std_uv"]["scaled"] * 1e6, rtol=1e-6)
     assert 10 < s["median_std_uv"]["scaled"] < 16                    # sqrt(10^2 + 10^2/2) = 12.2 µV
     raw, _ = load_raw(p, "D1", CFG)
+    if CFG.get("boundary"):                      # pipeline v4 crops the edges before preprocessing (entry 41)
+        from adgraph.preprocessing.boundary import crop_edges
+        crop_edges(raw, CFG)
     _, qc = preprocess(raw, CFG)
     ck = s["checks"]                                                 # the pipeline's own checks, same values
     assert np.isclose(ck["plausibility"]["value_uv"], qc["median_std_uv"], rtol=1e-9)

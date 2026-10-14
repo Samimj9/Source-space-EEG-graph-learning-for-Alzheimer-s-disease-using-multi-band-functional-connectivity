@@ -51,14 +51,16 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 │   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
 │   ├── input_sha256.json           content hashes of EDFs and sheets
 │   └── tests_passed/<commit>_<env>.txt            test-suite pass record
-├── graphs_v3_<config hash>_limit1/ smoke test (never used for analysis)
-├── graphs_v3_<config hash>/        graph run used by the experiments
+├── graphs_v3_<config hash>_limit1/ earlier smoke tests (pipeline v3; kept, never used for analysis)
+├── graphs_v4_<config hash>_limit1/ smoke test of the boundary-aware pipeline (never used for analysis)
+├── graphs_v4_<config hash>/        graph run used by the experiments (highest version, entry 41)
 │   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
 │   │                               qc_channels.csv qc_windows.csv (failed.json: the error of a failed subject)
 │   ├── inspection_<time>/          read-only per-subject QC figures (notebook 01, step 4b)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
 │   │                               (only when every subject succeeded and the cohort is not empty)
+│   ├── validation_<time>/          dataset_report.csv validation.json (notebook 01, step 5b)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)
 ├── experiments/
 │   └── <experiment>/               one folder per experiment notebook

@@ -211,13 +211,20 @@ if RUN_ERROR is not None or len(bad):
 
 def build_graphs_notebook() -> dict:
     return notebook([
-        md("# 01 · Build source-space graphs (pipeline v3)\n" + HOWTO + """
+        md("# 01 · Build source-space graphs (pipeline v4, boundary-aware)\n" + HOWTO + """
+Pipeline v4 (methodology log entry 41, `docs/boundary_processing.md`): the 10 s at each end are discarded
+before any filtering, every filter pads explicitly, the analytic signal is a finite complex FIR, and
+windows keep a computed boundary margin. Outputs go to a NEW directory `graphs_v4_<config hash>/`;
+earlier graph runs, checkpoints, experiments and audits are not touched.
+
 Steps (each stops the notebook with a clear message if something is wrong):
 1. setup and input check: 20 + 23 recordings, labels 10 AD / 10 HC and 10 AD / 13 HC;
 2. synthetic test suite (once per code version, about 10–15 min);
 3. EDF header check (all 30 channels used by the pipeline present);
 4. smoke test on the first subject of each dataset (downloads fsaverage into the Drive cache once);
 5. full graph construction for all 43 recordings (several hours; resumable);
+5b. validation of the assembled dataset (shapes, finite values, ranges, symmetry, window margins) and
+    the completion report (`validation_<time>/dataset_report.csv`, `validation.json`);
 6. quality summary (including peak memory per subject; also saved in `memory_log.csv`).
 
 **Progress** is shown as updating bars: input hashing, the source operator (built once, then loaded
@@ -269,6 +276,14 @@ for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
            "*Run all* again."),
         code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --status")\n'
              'sh("python scripts/build_graphs.py --paths configs/paths.yaml")'),
+        md("## 5b. Validate the graph dataset and write the completion report\nImplementation checks only "
+           "(shapes, finite values, ranges, symmetry, window grid and boundary margins, manifest). With the "
+           "boundary audit folder present, the accepted windows of the audited production run are listed next "
+           "to the new counts. Stops the notebook if any check fails."),
+        code("""from pathlib import Path
+AUDIT_PART2 = Path('/content/drive/MyDrive/AD-LEB-audit/qc_boundary_audit_7fd5a69/part2')   # optional reference
+ref = f" --reference-audit '{AUDIT_PART2}'" if AUDIT_PART2.is_dir() else ''
+sh("python scripts/validate_graph_run.py --paths configs/paths.yaml" + ref)"""),
         md("## 6. Quality summary"),
         code("""import json
 import pandas as pd
@@ -373,14 +388,16 @@ DRIVE_LAYOUT = """\
 │   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
 │   ├── input_sha256.json           content hashes of EDFs and sheets
 │   └── tests_passed/<commit>_<env>.txt            test-suite pass record
-├── graphs_v3_<config hash>_limit1/ smoke test (never used for analysis)
-├── graphs_v3_<config hash>/        graph run used by the experiments
+├── graphs_v3_<config hash>_limit1/ earlier smoke tests (pipeline v3; kept, never used for analysis)
+├── graphs_v4_<config hash>_limit1/ smoke test of the boundary-aware pipeline (never used for analysis)
+├── graphs_v4_<config hash>/        graph run used by the experiments (highest version, entry 41)
 │   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
 │   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
 │   │                               qc_channels.csv qc_windows.csv (failed.json: the error of a failed subject)
 │   ├── inspection_<time>/          read-only per-subject QC figures (notebook 01, step 4b)
 │   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
 │   │                               (only when every subject succeeded and the cohort is not empty)
+│   ├── validation_<time>/          dataset_report.csv validation.json (notebook 01, step 5b)
 │   └── _superseded/<time>/         replaced checkpoints (never deleted)
 ├── experiments/
 │   └── <experiment>/               one folder per experiment notebook

@@ -98,13 +98,14 @@ def test_pipeline_applies_the_configured_transition_width(monkeypatch):
     import adgraph.pipeline as pl
 
     seen = []
-    real = pl.band_analytic
+    name = "band_analytic_fir" if CFG.get("boundary") else "band_analytic"      # v4: finite analytic FIR (entry 41)
+    real = getattr(pl, name)
 
     def spy(*a, **k):
         seen.append(k.get("transition_bandwidth_hz"))
         return real(*a, **k)
 
-    monkeypatch.setattr(pl, "band_analytic", spy)
+    monkeypatch.setattr(pl, name, spy)
 
     class Raw:
         info = {"sfreq": SF}
@@ -112,5 +113,6 @@ def test_pipeline_applies_the_configured_transition_width(monkeypatch):
         def get_data(self):
             return np.random.default_rng(0).standard_normal((30, int(80 * SF))) * 1e-5
 
-    pl.process_recording(Raw(), np.random.default_rng(1).standard_normal((68, 30)), CFG)
+    pl.process_recording(Raw(), np.random.default_rng(1).standard_normal((68, 30)), CFG,
+                         offset=int(CFG["windowing"]["edge_trim_s"] * SF))
     assert seen == [1.0] * len(BANDS)

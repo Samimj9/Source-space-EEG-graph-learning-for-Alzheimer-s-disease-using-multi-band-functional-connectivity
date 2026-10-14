@@ -153,7 +153,7 @@ with *Runtime → Run all* and needs no editing.
   - an ETA appears only from items processed in this session;
   - `adgraph.colab.sh` forwards `\r` redraws so the bar updates in place in Colab.
 
-## Graph construction (pipeline v3)
+## Graph construction (pipeline v4, boundary-aware)
 
 - Parameters: `configs/pipeline.yaml`. Code: `src/adgraph/pipeline.py`.
   Colab driver: `notebooks/01_build_graphs.ipynb`.
@@ -163,7 +163,16 @@ with *Runtime → Run all* and needs no editing.
 - **Frozen primary segmentation:** 20 s windows, 50 % overlap (5000 / 2500
   samples at 250 Hz), same for both datasets, cut after all filtering of the
   continuous signal.
-- Each run writes `processed/graphs_v3_<config hash>/` with
+- **Boundary handling (v4; methodology log entry 41, `docs/boundary_processing.md`):**
+  - the 10 s edges are cropped before any filtering;
+  - padding is explicit (`reflect_limited`);
+  - the analytic signal is a finite complex FIR (`band_analytic_fir`), never an FFT Hilbert transform
+    of the whole recording;
+  - windows keep the computed margin (4537 samples) from the cropped ends.
+  
+  Do not reintroduce whole-recording filtering or FFT Hilbert transforms in the v4 path. The v3 path is
+  kept only for reproducing earlier results.
+- Each run writes `processed/graphs_v4_<config hash>/` with
   `subjects/<key>/` (per-subject checkpoints), `status.csv`, and after
   assembly `graphs.npz`, `windows.csv`, `subjects.csv` and `manifest.json`
   (with `graph_run_id`). The schema is
