@@ -50,6 +50,15 @@ from adgraph.storage import check_persistent
 AUDIT_VERSION = "qc-boundary-audit-1"
 SCRIPT_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 SMOKE_LIMIT = 1                    # the smoke-test run whose stored outputs are used for verification
+# Normalised boundary metric (report 2, [2.9]): |subject-mean A - subject-mean B| / between-subject SD of the
+# subject-mean A of the same (band, ROI pair), the SD computed WITHIN the recording's own dataset (D1 or D2).
+# Floor on that SD (PLV / |ciPLV| units): a connection that barely varies between subjects would otherwise
+# turn a tiny absolute difference into a huge ratio. The share of floored cells is reported.
+SD_FLOOR = 0.005
+# Provisional QC categories for the normalised metric (per-recording 95th percentile). They are QC flags
+# chosen before the results, not validated physiological cut-offs; the absolute differences are always
+# reported alongside and the recommendation weighs magnitudes, not categories.
+PROVISIONAL_RATIO = (0.10, 0.25)
 
 
 # ------------------------------------------------------------------------------------------- setup
@@ -64,6 +73,7 @@ def parse():
     p.add_argument("--allow-other-commit", action="store_true")
     p.add_argument("--allow-ephemeral-storage", action="store_true")
     p.add_argument("--n-perm", type=int, default=20000, help="permutations for the stratified group tests")
+    p.add_argument("--n-boot", type=int, default=5000, help="bootstrap resamples for confidence intervals")
     return p.parse_args()
 
 
@@ -258,6 +268,52 @@ def strat_perm(df: pd.DataFrame, col: str, n_perm: int, seed: int = 0) -> dict:
     return {"AD_minus_HC_within_dataset": obs, "p_stratified_perm": float((np.sum(np.abs(null) >= abs(obs)) + 1) / (n_perm + 1))}
 
 
+def compare_two(a, b, n_boot: int, seed: int = 0) -> dict:
+    """Two independent groups of subjects: medians, median difference (a - b) with a percentile bootstrap
+    95 % CI (subjects resampled within each group), rank-biserial correlation (+1: every a > every b) and
+    the Mann-Whitney p. A p < 0.05 is a flag for investigation, never a decision."""
+    from scipy.stats import mannwhitneyu
+
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    a, b = a[np.isfinite(a)], b[np.isfinite(b)]
+    if not len(a) or not len(b):
+        return {"n_a": len(a), "n_b": len(b)}
+    rng = np.random.default_rng(seed)
+    boot = np.median(rng.choice(a, (n_boot, len(a))), axis=1) - np.median(rng.choice(b, (n_boot, len(b))), axis=1)
+    u = mannwhitneyu(a, b)
+    return {"n_a": len(a), "n_b": len(b), "median_a": float(np.median(a)), "median_b": float(np.median(b)),
+            "median_diff": float(np.median(a) - np.median(b)), "ci95_low": float(np.percentile(boot, 2.5)),
+            "ci95_high": float(np.percentile(boot, 97.5)),
+            "rank_biserial": float(2 * u.statistic / (len(a) * len(b)) - 1), "p_mwu": float(u.pvalue),
+            "flag": "investigate (p < 0.05)" if u.pvalue < 0.05 else ""}
+
+
+def ad_hc_within_dataset(df: pd.DataFrame, col: str, n_perm: int, n_boot: int, seed: int = 0) -> list[dict]:
+    """AD vs HC for ``col`` at the subject level: per dataset (compare_two) and combined within dataset
+    (dataset-weighted AD - HC difference in means, stratified bootstrap 95 % CI resampling subjects within
+    dataset x diagnosis, permutation p with labels permuted within dataset)."""
+    out = []
+    for ds, g in df.groupby("dataset"):
+        out.append({"comparison": f"AD vs HC within {ds}", "statistic": col,
+                    **compare_two(g.loc[g["label"] == "AD", col], g.loc[g["label"] == "HC", col], n_boot, seed)})
+    sp = strat_perm(df, col, n_perm, seed)
+    if sp:
+        rng = np.random.default_rng(seed + 1)
+        d = df.dropna(subset=[col])
+        cells = {(ds, lab): g[col].to_numpy(float) for (ds, lab), g in d.groupby(["dataset", "label"])}
+        dsets = [ds for ds in sorted(d["dataset"].unique()) if (ds, "AD") in cells and (ds, "HC") in cells]
+        w = np.array([len(cells[(ds, "AD")]) + len(cells[(ds, "HC")]) for ds in dsets], float)
+        w /= w.sum()
+        boot = [sum(wi * (rng.choice(cells[(ds, "AD")], len(cells[(ds, "AD")])).mean()
+                          - rng.choice(cells[(ds, "HC")], len(cells[(ds, "HC")])).mean()) for wi, ds in zip(w, dsets))
+                for _ in range(n_boot)]
+        out.append({"comparison": "AD vs HC, within-dataset combined", "statistic": col,
+                    "mean_diff": sp["AD_minus_HC_within_dataset"], "ci95_low": float(np.percentile(boot, 2.5)),
+                    "ci95_high": float(np.percentile(boot, 97.5)), "p_perm": sp["p_stratified_perm"],
+                    "flag": "investigate (p < 0.05)" if sp["p_stratified_perm"] < 0.05 else ""})
+    return out
+
+
 def mwu(a, b) -> float:
     from scipy.stats import mannwhitneyu
 
@@ -327,7 +383,7 @@ def cmd_report1(args, paths, cfg, reg, out, commit):
         lambda L: float(np.mean([len(nbrs[c] & set(L)) / len(nbrs[c]) for c in L])) if L else 0.0)
     print("\n[1.1] interpolated channels per recording (analysed-interval detection; 'whole' = QC only):")
     print(ok[cols].round(2).to_string(index=False))
-    atomic_write_csv(rep / "per_recording.csv", ok[cols + ["bad_reasons"]].astype(str))
+    atomic_write_csv(rep / "per_recording.csv", ok.astype(str))          # every field, not only the shown ones
     chans = cfg["channels"]["recorded"]
     used = [c for c in chans if c not in cfg["channels"]["drop"]]
     freq = []
@@ -353,20 +409,25 @@ def cmd_report1(args, paths, cfg, reg, out, commit):
                                                                   lambda v: int((v > 0).sum())])
     grp.columns = ["n_subjects", "median", "mean", "max", "n_with_any"]
     print(grp.round(2).to_string())
-    tests = {ds: mwu(g.loc[g["label"] == "AD", "n_interpolated"], g.loc[g["label"] == "HC", "n_interpolated"])
-             for ds, g in ok.groupby("dataset")}
-    sp = strat_perm(ok, "n_interpolated", args.n_perm)
-    print(f"Mann-Whitney p within dataset: {json.dumps({k: round(v, 4) for k, v in tests.items()})}; "
-          f"stratified permutation (within dataset): {json.dumps({k: round(v, 4) for k, v in sp.items()})}")
-    print("D1 vs D2 Mann-Whitney p (n_interpolated):",
-          round(mwu(ok.loc[ok.dataset == "D1", "n_interpolated"], ok.loc[ok.dataset == "D2", "n_interpolated"]), 4))
+    comp = []
+    for col in ("n_interpolated", "largest_cluster", "edge_rms_ratio_max", "median_std_uv"):
+        comp += ad_hc_within_dataset(ok, col, args.n_perm, args.n_boot)
+        comp.append({"comparison": "D1 vs D2", "statistic": col,
+                     **compare_two(ok.loc[ok.dataset == "D1", col], ok.loc[ok.dataset == "D2", col], args.n_boot)})
+    comp = pd.DataFrame(comp)
+    print("effect sizes with uncertainty (subjects are the units; a = first group named; p < 0.05 = flag for "
+          "investigation, not a decision):")
+    print(comp.round(4).fillna("").to_string(index=False))
+    atomic_write_csv(rep / "group_comparisons.csv", comp)
     print("\n[1.4b] recordings meeting the pre-specified recording-level flags (docs/qc_boundary_audit.md, R1-R3):")
     flags = ok[(ok["n_interpolated"] > cfg["preprocessing"]["bad_channels"]["max_fraction_warn"] * len(used))
                | (ok["largest_cluster"] >= 3) | (ok["n_windows_kept"] < cfg["windowing"]["min_windows"])]
     print(flags[["key", "dataset", "label", "n_interpolated", "interpolated", "largest_cluster", "n_windows_kept"]]
           .to_string(index=False) if len(flags) else "none")
     print("largest interpolated cluster per recording:", pd.crosstab(ok["largest_cluster"], ok["dataset"]).to_dict())
-    print("\n[1.5] systematic electrodes (pre-specified: flagged in >= 30 % of the recordings of a dataset):")
+    print("\n[1.5] systematic electrodes (pre-specified: interpolated in >= 30 % of the recordings of a dataset). "
+          "This triggers TESTING a reduced common montage (same retained channels in D1 and D2, source operator "
+          "recomputed), never automatic removal:")
     sysm = f[f["pct"] >= 30]
     print(sysm.to_string(index=False) if len(sysm) else "none")
     if "D2-2" in set(ok["key"]):
@@ -603,12 +664,14 @@ def cmd_report2(args, paths, cfg, reg, out, commit):
                 for dd, m1, m2 in zip(z["dist"], mx, p95):
                     prof.append({"metric": k, "key": r["key"], "dist": int(min(dd, 6)), "max": m1, "p95": m2})
     prof = pd.DataFrame(prof)
+    atomic_write_csv(rep / "per_window_by_distance.csv", prof)
     print(prof.groupby(["metric", "dist"])[["p95", "max"]].agg(["median", lambda v: np.percentile(v, 90), "max"])
           .round(5).rename(columns={"<lambda_0>": "p90"}).to_string())
     print("(dist 6 = 6 or more steps)")
     print("\n[2.4] position summary (first / middle / last accepted window), median and max over recordings:")
     pos = pd.DataFrame([{"metric": k, "position": p, **v} for r in rows for k in ("plv", "ciplv")
                         for p, v in r[k]["by_position"].items()])
+    atomic_write_csv(rep / "by_position.csv", pos)
     print(pos.groupby(["metric", "position"])[["median", "p95", "max"]].agg(["median", "max"]).round(5).to_string())
     print("\n[2.5] associations across recordings (Spearman; subjects are the units):")
     assoc = []
@@ -620,24 +683,25 @@ def cmd_report2(args, paths, cfg, reg, out, commit):
                     rr = spearmanr(ok[xcol], ok[y])
                     assoc.append({"y": y, "x": xcol, "scope": scope, "n": len(ok), "rho": rr.statistic, "p": rr.pvalue})
     print(pd.DataFrame(assoc).round(4).to_string(index=False))
-    print("\n[2.6] D1 vs D2 and AD vs HC (per-recording statistics; no window is a unit):")
+    atomic_write_csv(rep / "associations.csv", pd.DataFrame(assoc))
+    print("\n[2.6] D1 vs D2 and AD vs HC (per-recording statistics; no window is a unit). Effect sizes with 95 % "
+          "bootstrap CIs; p < 0.05 is a flag for investigation, never an automatic rebuild:")
     grp = []
-    for y in ("plv_all_p95", "plv_all_subject_mean_max", "plv_excl_boundary_max", "ciplv_all_subject_mean_max",
-              "edge_rms_ratio_max", "n_interpolated"):
-        sp = strat_perm(t, y, args.n_perm)
-        grp.append({"statistic": y, "D1_median": t.loc[t.dataset == "D1", y].median(),
-                    "D2_median": t.loc[t.dataset == "D2", y].median(),
-                    "p_D1_vs_D2_MWU": mwu(t.loc[t.dataset == "D1", y], t.loc[t.dataset == "D2", y]),
-                    "AD_median": t.loc[t.label == "AD", y].median(), "HC_median": t.loc[t.label == "HC", y].median(),
-                    **{f"p_AD_vs_HC_MWU_{ds}": mwu(g.loc[g.label == "AD", y], g.loc[g.label == "HC", y])
-                       for ds, g in t.groupby("dataset")}, **sp})
-    print(pd.DataFrame(grp).round(5).to_string(index=False))
-    print("\n[2.7] unusually sensitive recordings (pre-specified: robust z of log subject-mean max > 3.5, or "
-          "subject-mean max > 0.01, or excl.-boundary max > 0.05):")
+    for y in ("plv_all_p95", "plv_all_subject_mean_max", "plv_excl_boundary_max", "plv_excl_boundary2_p95",
+              "ciplv_all_subject_mean_max", "ciplv_excl_boundary_max", "edge_rms_ratio_max", "n_interpolated"):
+        grp.append({"comparison": "D1 vs D2", "statistic": y,
+                    **compare_two(t.loc[t.dataset == "D1", y], t.loc[t.dataset == "D2", y], args.n_boot)})
+        grp += ad_hc_within_dataset(t, y, args.n_perm, args.n_boot)
+    grp = pd.DataFrame(grp)
+    print(grp.round(5).fillna("").to_string(index=False))
+    atomic_write_csv(rep / "group_comparisons.csv", grp)
+    print("\n[2.7] unusually sensitive recordings, for investigation (pre-specified flags: robust z of log "
+          "subject-mean max > 3.5, or subject-mean max > 0.01, or excl.-boundary max > 0.05):")
     lv = np.log10(t["plv_all_subject_mean_max"].clip(lower=1e-9))
     rz = (lv - lv.median()) / (1.4826 * np.median(np.abs(lv - lv.median())) or 1)
     t["robust_z"] = rz
     flagged = t[(rz > 3.5) | (t["plv_all_subject_mean_max"] > 0.01) | (t["plv_excl_boundary_max"] > 0.05)]
+    atomic_write_csv(rep / "flagged_recordings.csv", flagged)
     print(flagged[["key", "dataset", "label", "robust_z", "plv_all_subject_mean_max", "plv_excl_boundary_max",
                    "n_interpolated", "edge_rms_ratio_max"]].round(4).to_string(index=False) if len(flagged) else "none")
     for key in flagged["key"]:
@@ -668,37 +732,69 @@ def cmd_report2(args, paths, cfg, reg, out, commit):
     o = np.argsort(flat_cells)[::-1]
     print(f"share of the total in the top 1 % / 5 % of (band, pair) cells: "
           f"{flat_cells[o[:len(o) // 100]].sum() / flat_cells.sum():.1%} / {flat_cells[o[:len(o) // 20]].sum() / flat_cells.sum():.1%}")
-    print("\n[2.9] boundary effect relative to the between-subject spread (pre-specified primary criterion):")
-    print("ratio = |subject-mean A - subject-mean B| / pooled within-dataset SD over subjects of the subject-mean A,"
-          " per (band, pair); summarised per recording")
-    mats, ds_of = {}, []
+    print("\n[2.9] boundary effect, absolute and normalised by the between-subject spread WITHIN each dataset:")
+    print(f"ratio = |subject-mean A - subject-mean B| / max(SD over the subjects of the same dataset of the "
+          f"subject-mean A, {SD_FLOOR}), per (band, ROI pair). Provisional QC categories at {PROVISIONAL_RATIO} "
+          "(per-recording p95): QC flags, not validated physiological cut-offs.")
+    mats = {}
     for r in rows:
         with np.load(out / "part2" / r["key"] / "arrays.npz") as z:
             mats[r["key"]] = {k: (z[f"{k}_subject_mean_A"].astype(float), z[f"{k}_subject_mean_diff"].astype(float))
                               for k in ("plv", "ciplv")}
-        ds_of.append(r["dataset"])
-    rel = []
+    rel, relb, sdrows = [], [], []
     for k in ("plv", "ciplv"):
-        keys = [r["key"] for r in rows]
-        Am = np.stack([mats[x][k][0] for x in keys])                       # (subjects, bands, pairs)
-        var = [Am[np.array(ds_of) == ds].var(axis=0, ddof=1) for ds in sorted(set(ds_of))
-               if (np.array(ds_of) == ds).sum() > 1]
-        sd = np.sqrt(np.mean(var, axis=0)) if var else np.full(Am.shape[1:], np.nan)
-        for x, r in zip(keys, rows):
-            q = np.abs(mats[x][k][1]) / np.maximum(sd, 1e-6)
-            rel.append({"metric": k, "key": x, "dataset": r["dataset"], "label": r["label"],
-                        "ratio_median": np.median(q), "ratio_p95": np.percentile(q, 95), "ratio_max": q.max(),
-                        "worst_band": bands[int(np.unravel_index(np.argmax(q), q.shape)[0])]})
-    rel = pd.DataFrame(rel)
-    atomic_write_csv(rep / "relative_to_between_subject_sd.csv", rel)
+        for ds in sorted({r["dataset"] for r in rows}):
+            members = [r for r in rows if r["dataset"] == ds]
+            Am = np.stack([mats[r["key"]][k][0] for r in members])            # (subjects, bands, pairs)
+            sd = Am.std(axis=0, ddof=1) if len(members) > 1 else np.full(Am.shape[1:], np.nan)
+            den = np.maximum(sd, SD_FLOOR)
+            for bi, bn in enumerate(bands):
+                sdrows.append({"metric": k, "dataset": ds, "band": bn, "n_subjects": len(members),
+                               "sd_median": float(np.nanmedian(sd[bi])), "sd_p5": float(np.nanpercentile(sd[bi], 5)),
+                               "sd_p95": float(np.nanpercentile(sd[bi], 95)),
+                               "frac_cells_at_floor": float(np.mean(sd[bi] < SD_FLOOR))})
+            for r in members:
+                dabs = np.abs(mats[r["key"]][k][1])
+                q = dabs / den
+                lo, hi = PROVISIONAL_RATIO
+                p95 = float(np.percentile(q, 95))
+                rel.append({"metric": k, "key": r["key"], "dataset": ds, "label": r["label"],
+                            "abs_median": float(np.median(dabs)), "abs_p95": float(np.percentile(dabs, 95)),
+                            "abs_max": float(dabs.max()), "ratio_median": float(np.median(q)), "ratio_p95": p95,
+                            "ratio_max": float(q.max()),
+                            "worst_band": bands[int(np.unravel_index(np.argmax(q), q.shape)[0])],
+                            "provisional_qc_category": "<= %.2f" % lo if p95 <= lo else ("%.2f-%.2f" % (lo, hi)
+                                                                                          if p95 <= hi else "> %.2f" % hi)})
+                for bi, bn in enumerate(bands):
+                    relb.append({"metric": k, "key": r["key"], "dataset": ds, "label": r["label"], "band": bn,
+                                 "abs_p95": float(np.percentile(dabs[bi], 95)), "abs_max": float(dabs[bi].max()),
+                                 "ratio_p95": float(np.percentile(q[bi], 95)), "ratio_max": float(q[bi].max())})
+    rel, relb, sdrows = pd.DataFrame(rel), pd.DataFrame(relb), pd.DataFrame(sdrows)
+    for name, df_ in (("normalised_per_recording.csv", rel), ("normalised_per_recording_band.csv", relb),
+                      ("between_subject_sd.csv", sdrows)):
+        atomic_write_csv(rep / name, df_)
+    print("between-subject SD of the subject-mean A (denominator), per dataset and band:")
+    print(sdrows.round(4).to_string(index=False))
+    print("\nper recording (absolute subject-mean differences and normalised ratios):")
     print(rel.sort_values(["metric", "ratio_p95"], ascending=[True, False]).round(4).to_string(index=False))
+    print("\nper band, median over recordings:")
+    print(relb.groupby(["metric", "dataset", "band"])[["abs_p95", "abs_max", "ratio_p95", "ratio_max"]].median()
+          .round(4).to_string())
+    norm_comp = []
     for k, g in rel.groupby("metric"):
-        print(f"{k}: recordings with ratio p95 <= 0.10: {(g.ratio_p95 <= 0.10).mean():.0%}; > 0.25: "
-              f"{(g.ratio_p95 > 0.25).sum()} {g.loc[g.ratio_p95 > 0.25, 'key'].tolist()}")
-        for y in ("ratio_p95",):
-            sp = strat_perm(g, y, args.n_perm)
-            print(f"   D1 vs D2 p (MWU) {mwu(g.loc[g.dataset == 'D1', y], g.loc[g.dataset == 'D2', y]):.4f}; AD vs HC "
-                  f"within dataset {json.dumps({kk: round(v, 5) for kk, v in sp.items()})}")
+        print(f"\n{k}: provisional QC categories (per-recording ratio p95): "
+              f"{g['provisional_qc_category'].value_counts().to_dict()}")
+        comp = [{"comparison": "D1 vs D2", "statistic": f"{k} ratio_p95",
+                 **compare_two(g.loc[g.dataset == "D1", "ratio_p95"], g.loc[g.dataset == "D2", "ratio_p95"], args.n_boot)},
+                {"comparison": "D1 vs D2", "statistic": f"{k} abs_p95",
+                 **compare_two(g.loc[g.dataset == "D1", "abs_p95"], g.loc[g.dataset == "D2", "abs_p95"], args.n_boot)}]
+        comp += ad_hc_within_dataset(g, "ratio_p95", args.n_perm, args.n_boot)
+        comp += ad_hc_within_dataset(g, "abs_p95", args.n_perm, args.n_boot)
+        for c in comp:
+            c["statistic"] = c["statistic"] if c["statistic"].startswith(k) else f"{k} {c['statistic']}"
+        norm_comp += comp
+        print(pd.DataFrame(comp).round(5).fillna("").to_string(index=False))
+    atomic_write_csv(rep / "normalised_group_comparisons.csv", pd.DataFrame(norm_comp))
     _fig_part2(t, prof, rep)
     atomic_write_json(rep / "summary.json", jsonable({"n": len(rows), "association": assoc, "groups": grp,
                                                       "flagged": flagged["key"].tolist()}))

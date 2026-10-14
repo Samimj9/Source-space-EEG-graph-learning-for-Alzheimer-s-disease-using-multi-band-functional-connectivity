@@ -1,7 +1,8 @@
 # Dataset-wide QC audit: bad channels and connectivity boundary sensitivity
 
 Status: **plan and pre-specified decision criteria, written 2026-10-14 before any dataset-wide
-result was seen** (methodology log entry 40). The audit is read-only. The production code stays at
+result was seen** (methodology log entry 40). Revised the same day, still before any result, at the
+author's request; see "Revision 1" below. The audit is read-only. The production code stays at
 commit `7fd5a69`, and no graph, operator, checkpoint or experiment is modified. Nothing is changed in
 the pipeline until the author has seen the results and approved a decision.
 
@@ -62,12 +63,15 @@ Per recording:
 Recordings whose preprocessing fails are recorded as QC findings, not errors.
 
 Report 1:
-- the per-recording table;
-- per-channel detection frequency by dataset, with AD/HC counts;
+- the per-recording table, with every field saved (`per_recording.csv`);
+- per-channel detection frequency by dataset, with AD/HC counts and reasons (`channel_frequency.csv`);
 - the distribution of interpolated counts;
-- AD vs HC per dataset: Mann–Whitney, plus a permutation test of the within-dataset AD − HC
-  difference with labels permuted within dataset;
-- D1 vs D2;
+- AD vs HC within each dataset and D1 vs D2 (`group_comparisons.csv`), for: interpolated count, largest
+  cluster, edge severity, amplitude. Each comparison gives:
+  - medians, the median difference with a 95 % bootstrap CI (subjects resampled within each group),
+    the rank-biserial effect size and the Mann–Whitney p;
+  - for AD vs HC combined over datasets: the dataset-weighted mean difference with a stratified
+    bootstrap CI and a permutation p (labels permuted within dataset);
 - systematic electrodes;
 - where D2-2 sits in the distribution and which recordings share its channels.
 
@@ -85,15 +89,27 @@ Report 1:
   - the 10 largest (band, ROI pair) subject-mean differences;
   - the band-limited ROI edge severity (RMS ratio per band and side).
 
-Report 2:
-- the per-recording and per-band tables;
-- the distance profile;
-- Spearman associations, across subjects, with edge severity and the number of interpolated channels;
-- D1 vs D2 and AD vs HC: per-recording statistics, Mann–Whitney within dataset, stratified
-  permutation;
-- unusually sensitive recordings, with their bands and ROI pairs;
+Report 2 (every table is saved as CSV in the report folder, so no conclusion rests on categories
+alone):
+- per recording, every statistic for PLV and |ciPLV| (`per_recording.csv`):
+  - all windows, excluding boundary-touching windows, and excluding the next ones;
+  - median / p95 / max of |A − B| and the subject-mean max;
+- per recording and band (`per_band.csv`);
+- the per-window values by distance from the boundary (`per_window_by_distance.csv`) and by position
+  (`by_position.csv`);
+- Spearman associations, across subjects, with edge severity and interpolated count
+  (`associations.csv`);
+- D1 vs D2 and AD vs HC at the subject level, with effect sizes, CIs and p (`group_comparisons.csv`);
+- recordings flagged for investigation, with their bands and ROI pairs (`flagged_recordings.csv`);
 - ROI concentration;
-- the **primary relative criterion** (§3.2).
+- **the normalised boundary metric (§3.2), always next to the absolute differences:**
+  - `normalised_per_recording.csv`, `normalised_per_recording_band.csv`;
+  - the denominators per dataset and band (`between_subject_sd.csv`, with the share of floored
+    cells);
+  - its group comparisons (`normalised_group_comparisons.csv`).
+
+The per-recording units (`part1/<key>/`, `part2/<key>/`: JSON, CSV, NPZ) keep the raw per-window,
+per-band and per-ROI-pair quantities for any further analysis.
 
 ### Resumability, storage, cost
 - **Checkpointing:**
@@ -120,57 +136,108 @@ Report 2:
 
 ## 3. Pre-specified criteria (fixed before results; never tuned on classification performance)
 
+**Principles.**
+- The recommendation weighs the **magnitudes** of the effects: absolute differences in PLV/|ciPLV|
+  units, normalised differences, their uncertainty and their distribution over recordings, bands and
+  ROI pairs.
+- Thresholds and categories are **provisional QC flags** that direct attention. They are not validated
+  physiological cut-offs and do not trigger decisions on their own.
+- A p < 0.05 marks a comparison **for investigation**. It never triggers a rebuild, an exclusion or a
+  montage change by itself.
+- Every group comparison is reported with p, effect size (rank-biserial; difference in medians or
+  means), 95 % bootstrap CI and the practical magnitude in the metric's own units.
+- No decision is made by the audit tool. Every change needs the author's approval.
+
 ### 3.1 Bad channels (Part 1)
-- **E1 Systematic electrode:** interpolated in ≥ 30 % of the recordings of a dataset.
+- **E1 Systematic electrode:** interpolated in ≥ 30 % of the recordings of a dataset. This is a
+  **trigger to test** a reduced common montage, never automatic removal (§3.3).
 - **R1 Recording with too many interpolated channels:** more than 20 % of the 30 channels (≥ 7). This
   is the existing `bad_channels.max_fraction_warn`.
 - **R2 Interpolation over a gap:** a cluster of ≥ 3 neighbouring interpolated electrodes. Spherical
   splines are least reliable where neighbours are missing.
 - **R3 Existing rule:** fewer than 5 clean windows, the only pre-specified exclusion in DESIGN.md.
-- **G1 Group imbalance:** the AD − HC difference in interpolated counts, labels permuted within
-  dataset, with p < 0.05. This is reported as a potential confound, not used to exclude.
+- **G1 Group imbalance in interpolation:** the AD − HC difference within dataset, reported with effect
+  size and CI. Flagged for investigation as a potential confound when p < 0.05 or when the CI excludes
+  0 with a difference of ≥ 1 channel. Never used to exclude.
 
 ### 3.2 Boundary sensitivity (Part 2)
-- **Primary (relative):** for each (band, ROI pair), the ratio of |subject-mean A − subject-mean B| to
-  the pooled within-dataset between-subject SD of the subject-mean A, summarised per recording by its
-  95th percentile.
-  - **Negligible:** ≥ 90 % of the recordings at ≤ 0.10 and none > 0.25.
-  - **Moderate:** otherwise, as long as ≤ 10 % of the recordings are > 0.25.
-  - **Material:** > 10 % of the recordings > 0.25.
-- **Dependence:** D1 vs D2 (Mann–Whitney) or AD vs HC (stratified permutation) differences in the
-  relative p95 or in the PLV subject-mean max with p < 0.05.
-- **Interior persistence:** p95 of |A − B| at distance ≥ 2 above 0.005 in any recording.
-- **Unusual recording:** robust z of log(PLV subject-mean max) > 3.5, or PLV subject-mean max > 0.01,
-  or PLV max excluding boundary-touching windows > 0.05. D2-2 (0.0204) already meets the second
-  condition.
+- **Absolute (always reported):** |A − B| in PLV/|ciPLV| units, per recording and band:
+  - all windows and the interior windows (distance ≥ 1, ≥ 2);
+  - median / p95 / max;
+  - the subject-mean difference (the quantity that enters subject-level analyses).
+- **Normalised (always reported alongside):** for each (band, ROI pair),
+  ratio = |subject-mean A − subject-mean B| / max(SD, floor):
+  - SD is the between-subject SD of the subject-mean A, **computed within the recording's own dataset**
+    (D1 recordings use the D1 SD, D2 recordings the D2 SD), so a D1/D2 difference in spread cannot
+    distort the ratio;
+  - **denominator floor 0.005** (PLV/|ciPLV| units). Connections that barely vary between subjects
+    (e.g. |ciPLV| near zero) would otherwise turn negligible absolute differences into large ratios;
+  - the share of floored cells is reported per dataset and band, and where it is large the absolute
+    values take precedence;
+  - the recording's own value contributes to its dataset's SD (20 and 23 subjects).
+  - It is summarised per recording by the median, p95 and max over cells, and per band.
+- **Provisional QC categories** (per-recording ratio p95): ≤ 0.10, 0.10–0.25, > 0.25. They are QC
+  flags fixed before the results, not validated cut-offs. They describe the distribution, and the
+  recommendation does not depend on them alone.
+- **Dataset or diagnosis dependence:** D1 vs D2 and AD vs HC (within dataset) on the absolute and
+  normalised per-recording statistics, with effect size, CI and p. p < 0.05 is a flag for
+  investigation.
+- **Interior persistence flag:** p95 of |A − B| at distance ≥ 2 above 0.005 in a recording.
+- **Unusual-recording flag** (for investigation): robust z of log(PLV subject-mean max) > 3.5, or PLV
+  subject-mean max > 0.01, or PLV max excluding boundary-touching windows > 0.05. D2-2 (0.0204) already
+  meets the second condition.
 
-### 3.3 Decision rules (applied separately to the two problems)
+### 3.3 How the evidence maps to the options (for the author's decision; nothing is automatic)
 
 **Interpolation**
-- **A (keep the 30-channel montage with subject-specific interpolation)** applies when there is no E1
-  electrode and R1/R2 flags are rare (≤ 10 % of recordings) with no G1 imbalance.
-- **C (test a reduced common montage)** applies when an E1 electrode exists:
-  - the same electrodes are removed in both datasets;
-  - a new operator is computed for the reduced set;
-  - run first as a sensitivity analysis. Making it primary is the author's decision.
-- **B (exclude recordings)** is considered only for recordings meeting R1 or R3, and only with a
-  logged reason and a DESIGN.md amendment. Any such exclusion is accompanied by the analysis with all
-  recordings. R2 alone triggers a sensitivity analysis, not exclusion.
+- **A (keep the 30-channel montage with subject-specific interpolation)** is supported when no
+  electrode is systematic, R1/R2 flags are rare and the interpolation burden is similar between AD and
+  HC within dataset (small effect, CI around 0).
+- **C (test a reduced common montage)** is warranted when an E1 electrode exists. The test must:
+  - drop **identical retained channels in both datasets**, even if the electrode is systematic in only
+    one;
+  - use a **source operator recomputed** for exactly that channel set (forward model, inverse, ROI
+    operator, verification);
+  - be run first as a sensitivity analysis on the same subjects.
+
+  Whether the reduced montage becomes primary is decided by the author from signal-quality evidence,
+  never from classification results.
+- **B (exclude recordings)** is considered only for recordings meeting R1 or R3, with a logged reason
+  and a DESIGN.md amendment, and always accompanied by the all-recordings analysis. R2 alone motivates
+  a sensitivity analysis, not exclusion.
 
 **Boundary**
-- **E (retain the production pipeline, report this audit as a sensitivity analysis)** applies when the
-  effect is negligible, with no dependence and no interior persistence.
-- **D (revise boundary handling and regenerate the graphs)** applies when the effect is material, or
-  any dependence exists, or interior persistence occurs in more than one recording. The new method is
-  chosen on synthetic ground truth and boundary diagnostics, never on classification results.
-- **Moderate effect:** E plus, as a pre-specified secondary analysis, results recomputed without
-  boundary-touching windows. Recomputing graphs needs the author's approval.
+- **E (retain the production pipeline and report this audit as a sensitivity analysis)** is supported
+  when absolute subject-mean differences are small relative to the between-subject spread for nearly
+  all recordings. Typically most recordings would sit in the lowest provisional category, with no
+  practically relevant D1/D2 or AD/HC difference and no interior persistence.
+- **D (revise the boundary handling and regenerate the graphs)** is warranted by **material
+  magnitudes**, not by p-values:
+  - large normalised or absolute subject-mean differences in a substantial share of recordings, or in
+    the interior windows;
+  - a dataset- or diagnosis-related difference whose effect size and CI indicate a practically relevant
+    magnitude.
+
+  The new method would be chosen on synthetic ground truth and boundary diagnostics, never on
+  classification results, and graphs are regenerated only after the author's approval.
+- **Intermediate evidence:** E plus a pre-specified secondary analysis without boundary-touching
+  windows (computing it needs the author's approval).
 
 **General**
-- Channel removal (C) is not assumed to change boundary sensitivity, and vice versa. Each problem is
-  assessed on its own evidence.
-- No electrode, recording or preprocessing choice is made from classification performance on any
-  test set.
+- Interpolation and boundary sensitivity are separate problems assessed on separate evidence. Channel
+  removal (C) is not assumed to change boundary sensitivity, and vice versa.
+- No electrode, recording or preprocessing choice is made from classification performance on any test
+  set.
+
+**Revision 1 (2026-10-14, before any dataset-wide result, author's request).**
+- p-values are flags for investigation, never automatic rebuild triggers.
+- Effect sizes, CIs and practical magnitudes are reported with every comparison.
+- The normalising SD is computed within each dataset, with a documented floor (0.005); absolute and
+  normalised values are reported together.
+- 0.10/0.25 are provisional QC categories, not validated cut-offs.
+- The 30 % bad-channel criterion triggers a reduced-montage **test** with identical channels in both
+  datasets and a recomputed operator.
+- All per-recording and per-band metrics are preserved and saved.
 
 ### 3.4 Implications to check for the evaluation settings (DESIGN.md)
 - **Pooled:** an artifact that differs by dataset is harmless only if it is not also associated with
@@ -184,20 +251,10 @@ Report 2:
 
 ## 4. Running it (Colab)
 
-The production code stays pinned at `7fd5a69`. The audit script is read from its own commit (the
-`AUDIT_COMMIT` printed in the instructions), so the audit code is versioned separately:
-
-```python
-# after Cell 1 of notebooks/01_build_graphs.ipynb (UPDATE_CODE = False, pin 7fd5a69)
-AUDIT_COMMIT = '<commit given in the instructions>'
-AUDIT_OUT = '/content/drive/MyDrive/AD-LEB-audit'          # separate Drive folder
-import subprocess
-from pathlib import Path
-Path('/content/audit').mkdir(exist_ok=True)
-Path('/content/audit/audit_quality_boundary.py').write_text(subprocess.check_output(
-    ['git', 'show', f'{AUDIT_COMMIT}:scripts/audit_quality_boundary.py'], cwd='/content/repo', text=True))
-sh(f"python /content/audit/audit_quality_boundary.py estimate --out '{AUDIT_OUT}'", cwd='/content/repo')
-```
-
-Then run `part1`, `report1`, `part2` and `report2` in that order with the same call. Each command can
-be rerun after a disconnect and continues where it stopped; `status` shows the progress.
+The production code stays pinned at `7fd5a69` (Cell 1 of Notebook 01 with `UPDATE_CODE = False`). The
+audit script is read from its own commit (`AUDIT_COMMIT`, given with the instructions) into
+`/content/audit/`, outside the repository, so the audit code is versioned separately and the pinned
+working tree stays clean. The order is `estimate`, `part1`, `report1`, then `part2`, `report2`.
+- Every command can be rerun after a disconnect: completed recordings are skipped.
+- `status` shows the progress.
+- Outputs go only to the separate Drive folder given with `--out`.

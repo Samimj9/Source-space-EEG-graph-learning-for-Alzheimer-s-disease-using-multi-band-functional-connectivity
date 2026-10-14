@@ -2492,6 +2492,17 @@ committed **before** any dataset-wide result.
 
 The production modules, the graphs, the cached operators and the experiments are untouched.
 
+**Revision 1 (same day, still before any dataset-wide result, author's request).**
+- Significance only flags a comparison for investigation; every group comparison reports p, effect
+  size (rank-biserial, difference), 95 % bootstrap CI and practical magnitude.
+- The normalised boundary metric uses the between-subject SD within each dataset, with a floor of
+  0.005, and is always reported next to the absolute differences.
+- 0.10/0.25 are provisional QC categories.
+- The ≥ 30 % bad-channel criterion triggers only a *test* of a reduced common montage, with identical
+  channels in both datasets and a recomputed operator.
+- All per-recording and per-band metrics are saved.
+- Audit script and plan only; production code unchanged.
+
 **Approval status.** Audit requested by the author. Decisions on options A–E follow the results.
 
 ---
