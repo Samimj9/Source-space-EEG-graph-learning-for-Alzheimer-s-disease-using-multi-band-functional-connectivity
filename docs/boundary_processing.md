@@ -1,6 +1,7 @@
 # Boundary-Aware Filtering and Hilbert Phase Estimation for Source-Space EEG Functional Connectivity
 
-Methodological decision record, **version 1.0** (2026-10-14). This is methodology log entry 41 and
+Methodological decision record, **version 1.1** (2026-10-14; v1.1 enters the final counts of the
+completed rebuild). This is methodology log entry 41 and
 decisions-log row 49. The pipeline version is v4 (`configs/pipeline.yaml`, `version: 4`, `boundary:`
 section).
 
@@ -9,9 +10,23 @@ Code:
 - `src/adgraph/connectivity/plv.py` (`analytic_kernel`, `band_analytic_fir`);
 - `src/adgraph/pipeline.py` (`process_subject`, `process_recording`).
 
-The code commit is recorded in §8 and in every graph-run manifest. Numbers marked **[final]** are
-filled in from the rebuild's `validation_<time>/validation.json` once the 43-recording reconstruction
-has completed. Everything else describes the implemented code.
+The code commit is recorded in §8 and in every graph-run manifest. The dataset counts in §5 and §10
+are taken from the validation of the completed rebuild (`graphs_v4_33faa4b89a5d/validation_<time>/
+validation.json`, 23/23 checks passed). Everything else describes the implemented code.
+
+**Frozen v4 graph dataset** (used by every experiment from Exp 0 onward):
+
+| Item | Value |
+|---|---|
+| Graph run | `<processed>/graphs_v4_33faa4b89a5d/` |
+| `graph_run_id` | `6d75de9975f0d9ae` |
+| Code commit (clean tree) | `e63736828598655f8c2b281e3985051b05118e41` |
+| Recordings processed / registered | 43 / 43 (D1 20, D2 23); no failures, no exclusions |
+| Graphs (accepted 20 s windows) | 1,527 (D1 907, D2 620; AD 729, HC 798) |
+| Candidate / rejected windows | 1,706 / 179 (10.5 % rejected) |
+| Band-specific adjacency matrices per connectivity measure | 6,108 (1,527 × 4 bands), for PLV and for \|ciPLV\| |
+| Source operator | `c9a4fbf869a03321`, relative error vs the full MNE inverse 1.27 × 10⁻¹⁵ |
+| Integrity validation | 23/23 checks passed |
 
 ---
 
@@ -183,10 +198,17 @@ lies within the data the rules already used.
 | First window start | 10 s | 28.148 s |
 | Candidate windows for a recording of T s | ⌊(T − 40)/10⌋ + 1 | ⌊(T − 76.296)/10⌋ + 1 |
 | Candidate windows lost per recording | | 3 or 4 |
-| Accepted windows (graphs) | 1,640 | **[final]** |
-| Recordings with ≥ 5 accepted windows | | **[final]** |
+| Candidate windows | | 1,706 |
+| Rejected windows | | 179 (10.5 %) |
+| Accepted windows (graphs) | 1,640 | 1,527 (−113, −6.9 %) |
+| Graphs per dataset | | D1 907, D2 620 |
+| Graphs per class | | AD 729, HC 798 |
+| Recordings with ≥ 5 accepted windows | 43 / 43 | 43 / 43 |
+| Band-specific adjacency matrices per measure | | 6,108 |
 
-The reduction is caused only by the boundary margin (§3.4). The per-recording old and new counts are in
+The reduction in candidate windows is caused only by the boundary margin (§3.4); window rejection
+operates on the new candidate set with unchanged rules, so the accepted counts of individual
+recordings can also differ by rejection. The per-recording old and new counts are in
 `validation_<time>/dataset_report.csv` (columns `reference_accepted_windows`, `accepted_windows`).
 
 ## 6. Reproducibility
@@ -210,8 +232,12 @@ The reduction is caused only by the boundary margin (§3.4). The per-recording o
 - **Margin:** 4537 samples (18.148 s).
 - **Crop:** 10 s per side at the original rate.
 - **Manifest:** `manifest.json` → `boundary_processing` records all of the above, including the
-  per-band kernel properties, plus the source-operator identity, its verification error (< 10⁻⁶) and
-  the comparison with the cached operator of `7fd5a69`.
+  per-band kernel properties (rebuild: Hilbert-kernel energy outside the support 3.1 × 10⁻⁸ to
+  3.8 × 10⁻⁷, negative-frequency leakage −76.1 to −77.7 dB), plus the source-operator identity and
+  its verification error (rebuild: 1.27 × 10⁻¹⁵). The comparison with cached operators
+  (`compared_with_cached`) was empty in the rebuild: no cached operator with the same source-model
+  identity was found, so equality with the `7fd5a69` operator was not tested directly. The operator's
+  validity rests on its verification against the full MNE inverse.
 - **Outputs:** `<processed>/graphs_v4_<config hash>/`. Earlier graph runs, checkpoints, experiments and
   audits are left untouched. Experiments select the highest pipeline version (`latest_complete_graph_run`).
 
@@ -237,22 +263,26 @@ The reduction is caused only by the boundary margin (§3.4). The per-recording o
   of this record.
 - **Commits that only add documentation** do not change `src/` or `configs/`; this link is one of
   them.
-- **Commit of the rebuild:** the commit pinned in `<processed>/CODE_COMMIT.txt` when the rebuild is
-  launched, recorded as `git_commit` in every subject checkpoint, `manifest.json` and `validation.json`.
-  Verify with `git diff 4c1853d <that commit> -- src configs` (empty).
+- **Commit of the rebuild:** `e63736828598655f8c2b281e3985051b05118e41` (pinned in
+  `<processed>/CODE_COMMIT.txt`; recorded with a clean tree as `git_commit` in every subject
+  checkpoint, `manifest.json` and `validation.json`). `git diff 4c1853d e637368 -- src configs scripts
+  tests` is empty: the rebuild ran exactly the implementation of this record.
+- **Later documentation commits** (such as the one entering these counts) do not change `src/` or
+  `configs/`; experiments stay pinned to `e637368`.
 
-## 9. Implementation choices requiring the author's approval before the rebuild
+## 9. Implementation choices approved by the author before the rebuild
+All four were approved on 2026-10-14, as configured:
 1. **Margin policy:** `full_support` (18.148 s, configured) vs `feature_band` (1.796 s; v4 candidate
    counts then about one window lower than v3).
 2. **Window grid anchored at the first valid sample:** window start times differ from v3 even where
    windows overlap.
 3. **The unit safeguard and the spatial-consistency QC** run on the cropped signal.
-4. **The source operator is rebuilt**, because its identity includes the code version, and it is
-   compared with the cached `7fd5a69` operator (expected identical).
+4. **The source operator is rebuilt**, because its identity includes the code version, and verified
+   against the full inverse (see §6 for the outcome of the cached-operator comparison).
 
 ---
 
-## 10. Methods subsection (publication text; numbers marked [final] are completed after the rebuild)
+## 10. Methods subsection (publication text; counts from the completed rebuild)
 
 **Boundary-Aware Signal Processing and Functional Connectivity Estimation.**
 
@@ -292,9 +322,12 @@ For regions j and k within a window of T samples, with phases φ = arg a:
 &nbsp;&nbsp;&nbsp;&nbsp;PLV_jk = |C_jk|
 &nbsp;&nbsp;&nbsp;&nbsp;|ciPLV_jk| = |Im C_jk| / √(1 − (Re C_jk)²)
 
-Identical processing parameters were applied to both datasets. The procedure yielded **[final]** graphs
-from **[final]** recordings, compared with 1,640 graphs under the previous boundary handling. The
-difference results from the boundary-exclusion margin.
+Identical processing parameters were applied to both datasets. All 43 recordings (dataset 1: 20;
+dataset 2: 23) yielded at least five accepted windows, so no recording was excluded. Of 1,706
+candidate windows, 179 (10.5 %) were rejected, leaving 1,527 windows (dataset 1: 907; dataset 2: 620;
+AD: 729; HC: 798). Each window provided one 68-node graph per frequency band (6,108 band-specific
+adjacency matrices per connectivity measure). Under the previous boundary handling the same
+recordings had yielded 1,640 windows; the reduction results from the boundary-exclusion margin.
 
 This procedure removes the dependence of the retained windows on discarded recording edges and on
 periodic signal continuation. It does not guarantee the absence of other artifacts within the analysed

@@ -2563,15 +2563,22 @@ Identical for D1 and D2.
 
 **Effect.**
 - 3–4 fewer candidate windows per recording, from the margin.
-- The graph counts (v3: 1,640) are recorded in `validation.json` after the rebuild and entered in
-  `docs/boundary_processing.md` §5.
+- Completed rebuild (`graphs_v4_33faa4b89a5d`, `graph_run_id` `6d75de9975f0d9ae`, commit `e637368`,
+  23/23 integrity checks passed): 43/43 recordings, no failures or exclusions; 1,706 candidate
+  windows, 179 rejected (10.5 %), **1,527 graphs** (D1 907, D2 620; AD 729, HC 798), 6,108
+  band-specific adjacency matrices per connectivity measure. v3 had 1,640 graphs (−113, −6.9 %).
+- The source operator (`c9a4fbf869a03321`) was verified against the full inverse (relative error
+  1.27e-15). The cached-operator comparison found no operator with the same source-model identity,
+  so equality with the `7fd5a69` operator was not tested directly.
 - v3 checkpoints are never reused: the configuration hash, `CODE_VERSIONS["graph_subject"]` and the code
   identity all change.
 
 **Approval status.**
 - The correction and rebuild were approved by the author.
-- Implementation choices to confirm before launch: margin policy, window-grid anchoring, QC on the
-  cropped signal, operator rebuild with comparison (`docs/boundary_processing.md` §9).
+- The four implementation choices (margin policy `full_support`, window grid from the first valid
+  sample, QC on the cropped signal, operator rebuild) were approved before launch
+  (`docs/boundary_processing.md` §9).
+- The v4 graph dataset is **frozen**; Exp 0–6 and all later analyses use it.
 
 ---
 

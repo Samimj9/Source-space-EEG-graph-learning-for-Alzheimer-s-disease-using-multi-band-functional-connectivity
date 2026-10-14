@@ -16,6 +16,8 @@ Changelog:
   - windows keep a boundary margin of 4537 samples (18.148 s), so there are fewer windows per recording.
 
   The window length, overlap, bands, connectivity definitions, montage, interpolation, source model and every evaluation rule are unchanged. The same rules apply to D1 and D2.
+
+  **Frozen v4 graph dataset** (input of every experiment): `graphs_v4_33faa4b89a5d`, `graph_run_id` `6d75de9975f0d9ae`, commit `e637368`; 43/43 recordings (D1 20, D2 23), none excluded; 1,706 candidate windows, 179 rejected; **1,527 graphs** (D1 907, D2 620; AD 729, HC 798); 6,108 band-specific adjacency matrices per connectivity measure; 23/23 integrity checks passed (v3: 1,640 graphs).
 - **v1.1:** primary segmentation frozen at 20 s windows with 50 % overlap (both
   datasets). Experiment set 0–6 fixed (§10). The code for every setting exists,
   but nothing has been run on real data.
