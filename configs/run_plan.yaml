@@ -1,5 +1,8 @@
 # Run plan used by notebooks/02_experiments.ipynb and scripts/run_plan.py.
 #
+# GNN experiments use the fixed-hyperparameter protocol (configs/experiments/gnn_fixed_base.yaml,
+# methodology log entry 42); the nested-CV GNN configs are kept only as historical records.
+#
 # Order only: it decides what is computed first, never how. Every experiment keeps the settings,
 # evaluation protocol and grids of its own config (configs/experiments/, DESIGN.md).
 # Pass 1: within-dataset settings (S1/S2, primary in DESIGN.md) for every experiment, primary
@@ -12,58 +15,63 @@ experiments:
   # ---- pass 1: within-dataset (primary)
   - {config: configs/experiments/exp0_sensor_psd.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/exp1_source_psd.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp6_multiband_psd_strength.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp5_multiband.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp4_band_mean.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp2_conn_minimal.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp3_conn_psd.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/exp3b_conn_psd_allbands.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp6_multiband_psd_strength_fixedhp.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp5_multiband_fixedhp.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp4_band_mean_fixedhp.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp2_conn_minimal_fixedhp.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp3_conn_psd_fixedhp.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/exp3b_conn_psd_allbands_fixedhp.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/baseline_age.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/baseline_conn_classical.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/age/exp0_sensor_psd_plus_age.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/age/exp1_source_psd_plus_age.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/age/exp6_multiband_psd_strength_plus_age.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/age/exp5_multiband_plus_age.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/age/exp4_band_mean_plus_age.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/age/exp2_conn_minimal_plus_age.yaml, settings: [within_D1, within_D2]}
-  - {config: configs/experiments/age/exp3_conn_psd_plus_age.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/age/exp6_multiband_psd_strength_fixedhp_plus_age.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/age/exp5_multiband_fixedhp_plus_age.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/age/exp4_band_mean_fixedhp_plus_age.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/age/exp2_conn_minimal_fixedhp_plus_age.yaml, settings: [within_D1, within_D2]}
+  - {config: configs/experiments/age/exp3_conn_psd_fixedhp_plus_age.yaml, settings: [within_D1, within_D2]}
   - {config: configs/experiments/age/baseline_conn_classical_plus_age.yaml, settings: [within_D1, within_D2]}
   # ---- pass 2: pooled (secondary)
   - {config: configs/experiments/exp0_sensor_psd.yaml, settings: [pooled]}
   - {config: configs/experiments/exp1_source_psd.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp6_multiband_psd_strength.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp5_multiband.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp4_band_mean.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp2_conn_minimal.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp3_conn_psd.yaml, settings: [pooled]}
-  - {config: configs/experiments/exp3b_conn_psd_allbands.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp6_multiband_psd_strength_fixedhp.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp5_multiband_fixedhp.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp4_band_mean_fixedhp.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp2_conn_minimal_fixedhp.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp3_conn_psd_fixedhp.yaml, settings: [pooled]}
+  - {config: configs/experiments/exp3b_conn_psd_allbands_fixedhp.yaml, settings: [pooled]}
   - {config: configs/experiments/baseline_age.yaml, settings: [pooled]}
   - {config: configs/experiments/baseline_conn_classical.yaml, settings: [pooled]}
   - {config: configs/experiments/age/exp0_sensor_psd_plus_age.yaml, settings: [pooled]}
   - {config: configs/experiments/age/exp1_source_psd_plus_age.yaml, settings: [pooled]}
-  - {config: configs/experiments/age/exp6_multiband_psd_strength_plus_age.yaml, settings: [pooled]}
-  - {config: configs/experiments/age/exp5_multiband_plus_age.yaml, settings: [pooled]}
-  - {config: configs/experiments/age/exp4_band_mean_plus_age.yaml, settings: [pooled]}
-  - {config: configs/experiments/age/exp2_conn_minimal_plus_age.yaml, settings: [pooled]}
-  - {config: configs/experiments/age/exp3_conn_psd_plus_age.yaml, settings: [pooled]}
+  - {config: configs/experiments/age/exp6_multiband_psd_strength_fixedhp_plus_age.yaml, settings: [pooled]}
+  - {config: configs/experiments/age/exp5_multiband_fixedhp_plus_age.yaml, settings: [pooled]}
+  - {config: configs/experiments/age/exp4_band_mean_fixedhp_plus_age.yaml, settings: [pooled]}
+  - {config: configs/experiments/age/exp2_conn_minimal_fixedhp_plus_age.yaml, settings: [pooled]}
+  - {config: configs/experiments/age/exp3_conn_psd_fixedhp_plus_age.yaml, settings: [pooled]}
   - {config: configs/experiments/age/baseline_conn_classical_plus_age.yaml, settings: [pooled]}
   - {config: configs/experiments/probe_dataset.yaml, settings: [pooled]}
   # ---- pass 3: cross-dataset (gated)
   - {config: configs/experiments/exp0_sensor_psd.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/exp1_source_psd.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp6_multiband_psd_strength.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp5_multiband.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp4_band_mean.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp2_conn_minimal.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp3_conn_psd.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/exp3b_conn_psd_allbands.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp6_multiband_psd_strength_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp5_multiband_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp4_band_mean_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp2_conn_minimal_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp3_conn_psd_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/exp3b_conn_psd_allbands_fixedhp.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/baseline_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/baseline_conn_classical.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/age/exp0_sensor_psd_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/age/exp1_source_psd_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/age/exp6_multiband_psd_strength_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/age/exp5_multiband_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/age/exp4_band_mean_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/age/exp2_conn_minimal_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
-  - {config: configs/experiments/age/exp3_conn_psd_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/age/exp6_multiband_psd_strength_fixedhp_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/age/exp5_multiband_fixedhp_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/age/exp4_band_mean_fixedhp_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/age/exp2_conn_minimal_fixedhp_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  - {config: configs/experiments/age/exp3_conn_psd_fixedhp_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
   - {config: configs/experiments/age/baseline_conn_classical_plus_age.yaml, settings: [cross_D1_to_D2, cross_D2_to_D1]}
+  # ---- Tier 2 (optional, secondary; fixed-hyperparameter protocol, methodology log entry 42)
+  - {config: configs/experiments/exp2_conn_minimal_fixedhp_tier2.yaml}
+  - {config: configs/experiments/exp3_conn_psd_fixedhp_tier2.yaml}
+  - {config: configs/experiments/exp5_multiband_fixedhp_tier2.yaml}
+  - {config: configs/experiments/exp6_multiband_psd_strength_fixedhp_tier2.yaml}

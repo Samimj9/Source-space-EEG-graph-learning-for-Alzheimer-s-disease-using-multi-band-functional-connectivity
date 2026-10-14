@@ -2582,6 +2582,88 @@ Identical for D1 and D2.
 
 ---
 
+## 42. Fixed-hyperparameter GNN protocol and Tier 1 schedule (protocol amendment for computational feasibility)
+
+Version 1.0, 2026-10-14. Author decision. DESIGN.md v1.5, decisions row 50.
+
+**Situation when the decision was made.**
+- Exp 0 and Exp 1 were complete (results committed in `results/tables/`).
+- Exp 2 had run under the nested protocol for ≈ 1 h 40 min: 1 of 120 units (PLV / theta / GCN / within-D1,
+  subject-level AUC 0.522) and 102 of 7,248 outer folds. **This result had been observed before the
+  amendment.**
+- Measured cost: ≈ 59 s per outer fold, i.e. 17 GNN fits (4-point grid × 4 inner folds + refit, 60 epochs
+  each). Extrapolated: ≈ 180–290 GPU hours for Exp 2 alone and ≈ 900–1,100 h for Exp 2–6.
+
+**Decision.**
+1. **No GNN hyperparameter search of any kind** (no grid, random or Bayesian search, no inner CV, no
+   epoch selection). One fixed configuration per architecture, `configs/experiments/gnn_fixed_base.yaml`
+   (protocol `gnn_fixed_hparams_v1`, recorded in every variant config, manifest and checkpoint identity):
+
+   | Item | Value |
+   |---|---|
+   | Graph-convolution layers | 2 (GCN: symmetric-normalized weighted adjacency with self-loops) |
+   | Hidden dimension | 32 (EdgeWeightedGAT: 4 heads × 8, edge terms in attention and messages; WeightedGraphSAGE: sum aggregation) |
+   | Dropout | 0.3 |
+   | Readout | mean + max over ROIs; MLP head with 32 hidden units |
+   | Multi-band | shared encoder; fusion as specified by the experiment (mean / attention) |
+   | Optimizer | Adam (PyTorch defaults β = (0.9, 0.999), ε = 1e-8), learning rate 1e-3, weight decay (L2) 1e-4 |
+   | Batch size / epochs | 32 / 60, no early stopping; the model after the last epoch is evaluated |
+   | Loss | binary cross-entropy with subject- and class-balanced window weights (unchanged) |
+   | Node-feature scaling | z-score per (band graph, ROI, feature), fitted on the training windows of the fold |
+   | Seeds | outer splits: stratified subject folds with seed 0 + r for repeat r (identical to every other experiment); model seed 0 + 1000·r + fold (Python, NumPy, PyTorch, CUDA) |
+
+   **Source of the values:** they are the defaults of `gnn_base.yaml`, committed on 2026-10-12 before any
+   GNN result existed (hidden 32 and weight decay 1e-4 were also the base values around which the grid
+   was defined). Adam with learning rate 1e-3 is the optimizer's conventional default; two layers, hidden
+   width 32 and moderate dropout are conventional for small dense graphs. No value was chosen from
+   observed performance; the inner-CV selections of the observed nested run were not inspected.
+2. **Execution:** each outer training fold (subject-level; unchanged splits) is fitted exactly once and the
+   model predicts that fold's held-out test subjects once. Every fitted transform (node-feature scaler,
+   covariate scaler) is fitted on the training subjects of the fold only. Enforced: a config under this
+   protocol with a grid fails to load (`experiments.config.validate`); tested in
+   `tests/test_fixed_hparams.py` (one fit per outer fold, training subjects only, no inner units, same
+   splits as other experiments).
+3. **Tier 1 schedule (10 repeats, seeds 0–9):**
+   - Exp 2 and Exp 3: GCN, 4 bands × {PLV, |ciPLV|}, settings S1, S2, S4 (8 variants each);
+   - Exp 4: both measures, all settings;
+   - Exp 5: shared GCN encoder × {mean, attention} fusion × both measures, all settings;
+   - Exp 6: full model with both measures, all settings; the seven ablations (no PSD, no strength, no
+     learned fusion, each band dropped) with PLV in S1, S2, S4.
+   Configs `exp{2,3,4,5,6}_*_fixedhp.yaml`. A named variant may restrict its settings (`settings` key,
+   honoured by `plan_units` and `run_experiment.py`).
+4. **Tier 2 (optional, secondary, never delaying Tier 1):** EdgeWeightedGAT and WeightedGraphSAGE in
+   Exp 2/3, band-specific encoders and concat / gate fusion in Exp 5, |ciPLV| Exp 6 ablations
+   (`*_fixedhp_tier2.yaml`), Exp 3b and EEG + age GNN analyses (`*_fixedhp*.yaml`), same fixed values.
+5. **Permutation tests for GNNs are deferred.** No permutation p-value is reported unless a valid test is
+   completed. Subject-level ROC AUC, balanced accuracy, F1, sensitivity, specificity, MCC, bootstrap CIs
+   and per-subject predictions are kept.
+
+**Selection rules.** The GCN-only Tier 1 follows from the design (Exp 4–6 are GCN-only, so the single-band
+vs multi-band comparison is architecture-matched); the Exp 5 fusions mirror Exp 6 full / no learned
+fusion; the ablation settings follow the primary settings (S1, S2) plus the cheap S4. None of these uses
+the observed Exp 2 result.
+
+**Separation of results.**
+- The nested-CV Exp 2 checkpoint stays on Drive (`experiments/exp2_conn_minimal/`) as a historical
+  record. It is not reported as a result, not pooled with fixed-protocol results and not shown in figures
+  (`configs/figures/paper.yaml` reads only `*_fixedhp` experiments).
+- Fixed-protocol results live in `experiments/<name>_fixedhp/`; their identity includes the protocol, the
+  new code commit and the graph run `6d75de9975f0d9ae`.
+- Exp 0 and Exp 1 (commit `e637368`, 20 repeats, nested inner CV over C for LR/SVM) are kept as they are.
+  Paired comparisons with GNNs use repeats 0–9, whose subject splits are identical.
+
+**Limitations to state in the paper.**
+- The amendment was made after one nested-CV GNN result and the classical results had been observed.
+- Fixed hyperparameters may be suboptimal for some experiments; GNN performance is reported as that of a
+  pre-specified configuration, not of a tuned model.
+- 10 repeats instead of 20 (bootstrap CIs over subjects are affected little).
+- No permutation p-values for GNNs until tests are run.
+
+**Approval status.** Approved by the author on 2026-10-14 (fixed hyperparameters, Tier 1 / Tier 2
+schedule, deferred permutation tests).
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

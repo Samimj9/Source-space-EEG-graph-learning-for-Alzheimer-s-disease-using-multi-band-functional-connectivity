@@ -1,0 +1,14 @@
+# Experiment 4, fixed-hyperparameter protocol (Tier 1): band-averaged adjacency
+# A_mean = mean(A_theta, A_alpha1, A_alpha2, A_beta), node features = source PSD of all 4 bands (F = 8), GCN.
+# {PLV, |ciPLV|} = 2 variants; all settings.
+extends: gnn_fixed_base.yaml
+experiment: exp4_band_mean_fixedhp
+graph:
+  band_mode: mean
+  bands: [theta, alpha1, alpha2, beta]
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: all
+sweep:
+  graph.connectivity: [plv, ciplv]

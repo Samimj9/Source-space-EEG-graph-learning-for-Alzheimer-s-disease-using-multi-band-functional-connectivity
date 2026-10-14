@@ -68,6 +68,7 @@ variants = expand_variants(cfg)
 if args.variants:
     variants = [v for v in variants if variant_matches(v, args.variants)]
 settings = args.settings or cfg["settings"]
+own = lambda v: [s for s in settings if s in v["settings"]]  # noqa: E731  (a variant may restrict its settings)
 
 if args.synthetic:
     from adgraph.synthetic import make_synthetic_store
@@ -87,7 +88,7 @@ if not args.out:
     parser.error("--out is required unless --dry-run")
 pd.set_option("display.width", 250, "display.max_colwidth", 80, "display.max_rows", 500)
 if args.status:
-    rows = [experiment_status(store, v, s, args.out) for v in variants for s in settings]
+    rows = [experiment_status(store, v, s, args.out) for v in variants for s in own(v)]
     print(pd.DataFrame(rows).to_string())
     raise SystemExit
 if not args.synthetic:
@@ -95,7 +96,7 @@ if not args.synthetic:
 gate = gate_failures(store)
 for v in variants:
     data = None
-    for s in settings:
+    for s in own(v):
         if s in CROSS_SETTINGS and gate and not v["evaluation"].get("allow_ungated_cross_dataset", False):
             print(f"{v['name']} / {s}: not run, cross-dataset gate not passed: {'; '.join(gate)}")
             continue

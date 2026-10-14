@@ -1,0 +1,6 @@
+# Tier 2 (optional, secondary): Experiment 3 with EdgeWeightedGAT and WeightedGraphSAGE, same fixed
+# hyperparameters (gnn_fixed_base.yaml). 4 bands x {PLV, |ciPLV|} x 2 encoders = 16 variants; S1, S2, S4.
+extends: exp3_conn_psd_fixedhp.yaml
+experiment: exp3_conn_psd_fixedhp_tier2
+sweep:
+  model.encoder: [edge_weighted_gat, weighted_graphsage]

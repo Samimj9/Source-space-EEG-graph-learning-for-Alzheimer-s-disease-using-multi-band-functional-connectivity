@@ -35,19 +35,35 @@ EXPERIMENTS = [
      "Electrode band power (30 channels × 4 bands × {log, relative}) with logistic regression and SVM."),
     ("experiments", "Exp1_source_psd", "exp1_source_psd", "Experiment 1 · source PSD (LR, SVM)",
      "Source ROI band power (68 ROIs × 4 bands × {log, relative}) with logistic regression and SVM."),
-    ("experiments", "Exp2_conn_minimal", "exp2_conn_minimal", "Experiment 2 · single-band graphs, minimal node features",
-     "One band graph (PLV or |ciPLV|) per model, constant node feature; GCN, EdgeWeightedGAT, WeightedGraphSAGE."),
-    ("experiments", "Exp3_conn_psd", "exp3_conn_psd", "Experiment 3 · single-band graphs + matching-band PSD",
-     "One band graph per model; node features = matching-band ROI PSD [log, relative]; three encoders."),
-    ("experiments", "Exp4_band_mean", "exp4_band_mean", "Experiment 4 · band-averaged graph",
+    ("experiments", "Exp2_conn_minimal", "exp2_conn_minimal_fixedhp",
+     "Experiment 2 · single-band graphs, minimal node features (fixed hyperparameters)",
+     "One band graph (PLV or |ciPLV|) per model, constant node feature; GCN (Tier 1)."),
+    ("experiments", "Exp3_conn_psd", "exp3_conn_psd_fixedhp",
+     "Experiment 3 · single-band graphs + matching-band PSD (fixed hyperparameters)",
+     "One band graph per model; node features = matching-band ROI PSD [log, relative]; GCN (Tier 1)."),
+    ("experiments", "Exp4_band_mean", "exp4_band_mean_fixedhp", "Experiment 4 · band-averaged graph (fixed hyperparameters)",
      "Mean of the 4 band adjacencies; node features = ROI PSD of all bands; GCN."),
-    ("experiments", "Exp5_multiband", "exp5_multiband", "Experiment 5 · multi-band GNN",
-     "4 band graphs, matched-band PSD nodes; shared / band-specific encoders × mean / concat / gate / attention fusion."),
-    ("experiments", "Exp6_multiband_psd_strength", "exp6_multiband_psd_strength",
-     "Experiment 6 · multi-band GNN with PSD + strength (full model and ablations)",
-     "4 band graphs, nodes = [log PSD, relative PSD, strength] per band, attention fusion; 8 ablations × PLV/|ciPLV|."),
-    ("additional", "Exp3b_conn_psd_allbands", "exp3b_conn_psd_allbands",
-     "Experiment 3b (secondary) · single-band graphs + all-band PSD", "Secondary Experiment 3 node features (all bands)."),
+    ("experiments", "Exp5_multiband", "exp5_multiband_fixedhp", "Experiment 5 · multi-band GNN (fixed hyperparameters)",
+     "4 band graphs, matched-band PSD nodes; shared GCN encoder, mean / attention fusion (Tier 1)."),
+    ("experiments", "Exp6_multiband_psd_strength", "exp6_multiband_psd_strength_fixedhp",
+     "Experiment 6 · multi-band GNN with PSD + strength (fixed hyperparameters)",
+     "4 band graphs, nodes = [log PSD, relative PSD, strength] per band, attention fusion; full model "
+     "(PLV, |ciPLV|) + 7 PLV ablations (Tier 1)."),
+    ("additional", "Tier2_Exp2_other_encoders", "exp2_conn_minimal_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 2 with EdgeWeightedGAT and WeightedGraphSAGE",
+     "Secondary: the Exp 2 single-band graphs with the two other encoders, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp3_other_encoders", "exp3_conn_psd_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 3 with EdgeWeightedGAT and WeightedGraphSAGE",
+     "Secondary: the Exp 3 single-band graphs with the two other encoders, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp5_other_fusions", "exp5_multiband_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 5 band-specific encoders and concat / gate fusion",
+     "Secondary: the Exp 5 variants not in Tier 1, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp6_ciplv_ablations", "exp6_multiband_psd_strength_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 6 ablations with |ciPLV|",
+     "Secondary: the seven Exp 6 ablations with |ciPLV|, same fixed hyperparameters."),
+    ("additional", "Exp3b_conn_psd_allbands", "exp3b_conn_psd_allbands_fixedhp",
+     "Experiment 3b (secondary) · single-band graphs + all-band PSD (fixed hyperparameters)",
+     "Secondary Experiment 3 node features (all bands)."),
     ("additional", "Baseline_age_only", "baseline_age", "Baseline · age only", "Age as the only predictor."),
     ("additional", "Baseline_connectivity_classical", "baseline_conn_classical",
      "Baseline · connectivity features with LR / SVM", "Flattened connectivity matrices with classical models."),
@@ -57,9 +73,11 @@ EXPERIMENTS = [
     ("additional", f"Age_{name}", f"age/{cfg}_plus_age", f"EEG + age · {title}", f"{title} with age as a covariate.")
     for name, cfg, title in [
         ("Exp0_sensor_psd", "exp0_sensor_psd", "Experiment 0"), ("Exp1_source_psd", "exp1_source_psd", "Experiment 1"),
-        ("Exp2_conn_minimal", "exp2_conn_minimal", "Experiment 2"), ("Exp3_conn_psd", "exp3_conn_psd", "Experiment 3"),
-        ("Exp4_band_mean", "exp4_band_mean", "Experiment 4"), ("Exp5_multiband", "exp5_multiband", "Experiment 5"),
-        ("Exp6_multiband_psd_strength", "exp6_multiband_psd_strength", "Experiment 6"),
+        ("Exp2_conn_minimal", "exp2_conn_minimal_fixedhp", "Experiment 2"),
+        ("Exp3_conn_psd", "exp3_conn_psd_fixedhp", "Experiment 3"),
+        ("Exp4_band_mean", "exp4_band_mean_fixedhp", "Experiment 4"),
+        ("Exp5_multiband", "exp5_multiband_fixedhp", "Experiment 5"),
+        ("Exp6_multiband_psd_strength", "exp6_multiband_psd_strength_fixedhp", "Experiment 6"),
         ("Baseline_connectivity_classical", "baseline_conn_classical", "connectivity baseline")]
 ]
 
@@ -127,12 +145,21 @@ def protocol(cfg_path: str) -> tuple[list[dict], str]:
     ev = v["evaluation"]
     grid = len(hparam_grid(v))
     gnn = v["input"] == "graph"
+    settings = [s for s in v["settings"] if any(s in x["settings"] for x in variants)]
+    restricted = sorted({x["variant"] for x in variants if x["settings"] != v["settings"]})
+    if grid == 1:
+        search = ("fixed hyperparameters, no hyperparameter search and no inner CV: one fit per outer training "
+                  "fold" + (f" (protocol `{v['protocol']['name']}`)" if v.get("protocol") else ""))
+    else:
+        search = (f"inner {ev['inner_k']}-fold subject-level CV over {grid} hyperparameter combination(s); "
+                  f"refit on the full training fold")
     text = (f"- **{len(variants)} variant(s):** " + ", ".join(f"`{x['variant']}`" for x in variants[:24])
             + (" …" if len(variants) > 24 else "") + "\n"
-            f"- **Settings:** " + ", ".join(v["settings"]) + " (cross-dataset only if the DESIGN.md §7 gate passes)\n"
+            f"- **Settings:** " + ", ".join(settings) + " (cross-dataset only if the DESIGN.md §7 gate passes)"
+            + (f"; variants with their own settings: {', '.join(f'`{x}`' for x in restricted)}" if restricted else "")
+            + "\n"
             f"- **Protocol (from the config, unchanged):** {ev['n_repeats']} repeats × {ev['k']}-fold subject-level "
-            f"outer CV; inner {ev['inner_k']}-fold subject-level CV over {grid} hyperparameter combination(s); "
-            f"refit on the full training fold" + (f"; {v['training']['epochs']} epochs" if gnn else "") + ".")
+            f"outer CV; {search}" + (f"; {v['training']['epochs']} epochs" if gnn else "") + ".")
     return variants, text
 
 
@@ -143,11 +170,11 @@ def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict
     config = f"configs/experiments/{cfg_path}.yaml"
     nb = notebook([
         md(f"# {title}\n\n{desc}\n\n**Runs only this experiment** (`{config}`): every predefined variant and "
-           f"setting, with nested cross-validation, evaluation and checkpointing. It never starts another "
+           f"setting, with subject-level cross-validation, evaluation and checkpointing. It never starts another "
            f"experiment.\n\n{proto}\n" + HOWTO + f"""
 **Progress** is shown as one updating line: completed outer folds of the whole experiment
 (previously completed folds recovered from Drive count as done immediately), current variant,
-setting, repeat and fold, inner-CV trial{", training epoch" if gnn else ""}, and the counts of finished /
+setting, repeat and fold, inner-CV trial (if any){", training epoch" if gnn else ""}, and the counts of finished /
 resumed / failed / skipped units. An ETA is shown only for the current variant and setting, from folds
 computed in this session.{" Large GNN experiments take several Colab sessions: just *Run all* again after each disconnect." if gnn else ""}
 

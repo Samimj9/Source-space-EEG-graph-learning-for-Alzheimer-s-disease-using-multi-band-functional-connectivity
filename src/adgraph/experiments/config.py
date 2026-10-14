@@ -11,6 +11,9 @@ An experiment YAML may contain
     hparams:                      # grid searched by subject-level inner CV (not a variant)
       model.hidden: [32, 64]
 
+A named variant may set its own ``settings`` (a subset of the experiment's), e.g. ablations that run
+only in some settings; ``plan_units`` and ``scripts/run_experiment.py`` honour it.
+
 Each variant is a complete, self-contained config (``name`` = experiment name +
 variant tags) and is evaluated and saved separately, so PLV and ciPLV results are
 never merged.
@@ -23,6 +26,8 @@ import itertools
 from pathlib import Path
 
 import yaml
+
+SETTING_NAMES = ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1")
 
 
 def deep_merge(base: dict, over: dict) -> dict:
@@ -109,6 +114,12 @@ def validate(v: dict) -> None:
             raise ValueError("classical model must be logreg or svm")
     else:
         raise ValueError(f"unknown input {v['input']!r}")
+    if (v.get("protocol") or {}).get("hyperparameter_search") == "none" and len(hparam_grid(v)) != 1:
+        raise ValueError(f"{v.get('name')}: protocol {v['protocol'].get('name')!r} forbids hyperparameter search, "
+                         f"but the config defines a grid {v.get('hparams')}")
+    unknown = set(v.get("settings") or []) - set(SETTING_NAMES)
+    if unknown:
+        raise ValueError(f"{v.get('name')}: unknown settings {sorted(unknown)}")
 
 
 def hparam_grid(v: dict) -> list[dict]:

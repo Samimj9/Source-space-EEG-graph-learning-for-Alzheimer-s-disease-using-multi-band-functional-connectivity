@@ -1,0 +1,6 @@
+# Age sensitivity analysis (DESIGN.md §5), fixed-hyperparameter protocol: EEG + age version of
+# exp2_conn_minimal_fixedhp (age standardized on training subjects, concatenated to the pooled graph embedding).
+# Compare with exp2_conn_minimal_fixedhp (EEG-only) and baseline_age (age-only).
+extends: ../exp2_conn_minimal_fixedhp.yaml
+experiment: exp2_conn_minimal_fixedhp_plus_age
+covariates: [age]

@@ -1,0 +1,40 @@
+# Fixed-hyperparameter GNN protocol `gnn_fixed_hparams_v1` (DESIGN.md v1.5, methodology log entry 42,
+# decisions row 50; author decision 2026-10-14).
+#
+# Protocol amendment for computational feasibility, made AFTER the first nested-CV Exp 2 result
+# (PLV / theta / GCN / within-D1) had been observed. That nested-CV result is kept on Drive as a
+# historical run (experiments/exp2_conn_minimal/) and is never mixed with results of this protocol.
+#
+# No hyperparameter search of any kind: one fixed configuration per architecture, each outer training
+# fold (subject-level, same splits and seeds as before) is fitted exactly once, and the fitted model is
+# evaluated once on that fold's held-out test subjects. Every value below equals the default that was
+# defined in gnn_base.yaml before any GNN result existed (commit 65d5881 / ec1d8c4, 2026-10-12); none was
+# chosen from observed performance.
+extends: gnn_base.yaml
+protocol:
+  name: gnn_fixed_hparams_v1
+  hyperparameter_search: none    # enforced in experiments.config.validate: a grid here fails to load
+hparams: null                    # no grid -> runner.select_hparams returns the fixed config; no inner CV
+model:
+  encoder: gcn                   # Tier 1: GCN everywhere (EdgeWeightedGAT / WeightedGraphSAGE: Tier 2 configs)
+  hidden: 32                     # all layers; GAT: 4 heads x 8
+  n_layers: 2
+  dropout: 0.3
+  readout: mean_max
+  mlp_hidden: 32
+  shared_encoder: true
+  fusion: mean
+  encoder_kwargs:
+    heads: 4                     # edge_weighted_gat
+    edge_in_message: true        # edge_weighted_gat
+    aggr: sum                    # weighted_graphsage
+training:                        # optimizer: Adam (torch.optim.Adam, default betas/eps), fixed in trainer.py
+  lr: 0.001
+  weight_decay: 0.0001           # Adam L2 penalty
+  epochs: 60                     # fixed; the model after the last epoch is used (no epoch selection)
+  batch_size: 32
+  early_stopping:
+    enabled: false
+evaluation:
+  n_repeats: 10                  # Tier 1 (author decision 2026-10-14); repeats r = 0..9 use the same subject
+                                 # splits as repeats 0..9 of every other experiment (seed + r)

@@ -4,6 +4,13 @@ This document covers the code that runs Experiments 0–6 and the baselines. Not
 repository has been run on the real EEG; every test uses synthetic data
 (`adgraph.synthetic`). Evaluation follows `DESIGN.md`.
 
+**GNN protocol (DESIGN.md v1.5, methodology log entry 42):** GNNs are trained with one fixed
+hyperparameter configuration (`configs/experiments/gnn_fixed_base.yaml`), without any hyperparameter
+search or inner CV: one fit per outer training fold. The Tier 1 GNN configs are
+`exp{2,3,4,5,6}_*_fixedhp.yaml` (10 repeats); Tier 2 (optional) are `*_fixedhp_tier2.yaml`. The
+earlier nested-CV GNN configs (`exp2_conn_minimal.yaml` … `exp6_multiband_psd_strength.yaml`) are kept
+only as historical records and are not run.
+
 ## 1. Data flow
 
 Graph construction and the experiments are separate. Their only interface is the
@@ -15,7 +22,8 @@ scripts/build_graphs.py ──► processed/graphs_v3_<config hash>/
                                               │
 scripts/run_experiment.py --config configs/experiments/<exp>.yaml --graphs <run dir>
    GraphStore.load ─► build_dataset (stateless, per window) ─► subject-level splits
-   ─► per outer split: inner-CV hyperparameter selection ─► model.fit(train view)
+   ─► per outer split: inner-CV hyperparameter selection (classical models only; GNNs use
+      fixed hyperparameters, protocol gnn_fixed_hparams_v1) ─► model.fit(train view)
    ─► predict(test view) ─► window scores ─► subject score (mean) ─► metrics
 ```
 

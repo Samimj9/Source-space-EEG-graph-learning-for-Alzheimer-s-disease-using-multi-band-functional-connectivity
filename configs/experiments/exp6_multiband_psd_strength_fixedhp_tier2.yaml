@@ -1,0 +1,24 @@
+# Tier 2 (optional, secondary): the seven Experiment 6 ablations with |ciPLV| (Tier 1 runs them with PLV
+# only). Same fixed hyperparameters and settings as the Tier 1 ablations (S1, S2, S4).
+extends: gnn_fixed_base.yaml
+experiment: exp6_multiband_psd_strength_fixedhp_tier2
+settings: [within_D1, within_D2, cross_D1_to_D2, cross_D2_to_D1]
+graph:
+  connectivity: ciplv
+  band_mode: multi
+  bands: [theta, alpha1, alpha2, beta]
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+  fusion: attention
+variants:
+  ciplv__no_psd: {node_features.components: [strength]}
+  ciplv__no_strength: {node_features.components: [psd]}
+  ciplv__no_learned_fusion: {model.fusion: mean}
+  ciplv__drop_theta: {graph.bands: [alpha1, alpha2, beta]}
+  ciplv__drop_alpha1: {graph.bands: [theta, alpha2, beta]}
+  ciplv__drop_alpha2: {graph.bands: [theta, alpha1, beta]}
+  ciplv__drop_beta: {graph.bands: [theta, alpha1, alpha2]}

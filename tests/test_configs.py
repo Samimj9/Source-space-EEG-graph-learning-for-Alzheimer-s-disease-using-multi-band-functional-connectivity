@@ -8,7 +8,12 @@ EXP_DIR = Path("configs/experiments")
 EXPERIMENTS = sorted(p for p in EXP_DIR.glob("**/*.yaml") if "base" not in p.name)
 EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minimal": 24, "exp3_conn_psd": 24,
                    "exp3b_conn_psd_allbands": 24, "exp4_band_mean": 2, "exp5_multiband": 16, "exp6_multiband_psd_strength": 16,
-                   "baseline_age": 1, "probe_dataset": 1, "baseline_conn_classical": 4}
+                   "baseline_age": 1, "probe_dataset": 1, "baseline_conn_classical": 4,
+                   # fixed-hyperparameter GNN protocol (methodology log entry 42): Tier 1 and Tier 2
+                   "exp2_conn_minimal_fixedhp": 8, "exp3_conn_psd_fixedhp": 8, "exp3b_conn_psd_allbands_fixedhp": 8,
+                   "exp4_band_mean_fixedhp": 2, "exp5_multiband_fixedhp": 4, "exp6_multiband_psd_strength_fixedhp": 9,
+                   "exp2_conn_minimal_fixedhp_tier2": 16, "exp3_conn_psd_fixedhp_tier2": 16,
+                   "exp5_multiband_fixedhp_tier2": 12, "exp6_multiband_psd_strength_fixedhp_tier2": 7}
 
 
 @pytest.mark.parametrize("path", EXPERIMENTS, ids=lambda p: p.stem)
@@ -19,7 +24,10 @@ def test_config_expands(path):
     assert len(variants) == EXPECTED_COUNTS[base_name]
     assert cfg["covariates"] == (["age"] if cfg["experiment"].endswith("_plus_age") else [])
     for v in variants:
-        assert v["evaluation"]["k"] == 5 and v["evaluation"]["n_repeats"] == 20
+        fixed = (v.get("protocol") or {}).get("hyperparameter_search") == "none"
+        assert v["evaluation"]["k"] == 5 and v["evaluation"]["n_repeats"] == (10 if fixed else 20)
+        if fixed:
+            assert hparam_grid(v) == [{}]
         assert v["evaluation"]["threshold"] == 0.5
         if v["input"] == "graph":
             assert v["graph"]["connectivity"] in ("plv", "ciplv")

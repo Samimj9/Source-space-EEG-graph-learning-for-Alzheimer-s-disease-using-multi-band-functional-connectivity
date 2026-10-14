@@ -5,10 +5,16 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.4 (2026-10-14)**. No classification has been run. v1.4 changes only the boundary handling of graph construction (pipeline v4); the evaluation design is unchanged.
+Status: **frozen v1.5 (2026-10-14)**. v1.5 amends the GNN training protocol (fixed hyperparameters, no inner hyperparameter search) and the GNN experiment schedule (Tier 1 / Tier 2) for computational feasibility, **after** Exp 0, Exp 1 and the first nested-CV Exp 2 result had been observed; the amendment is described in the changelog and in methodology log entry 42. Classical models, splits, metrics and the graph dataset are unchanged.
 
 Changelog:
 
+- **v1.5 (2026-10-14, protocol amendment for computational feasibility; author decision; methodology log entry 42, decisions row 50):**
+  - **When:** after Exp 0 and Exp 1 (complete) and after ONE nested-CV GNN result had been observed (Exp 2, PLV / theta / GCN / within-D1, subject-level AUC 0.522; 1 of 120 Exp 2 units). The nested protocol was measured at ≈ 59 s per outer fold (17 GNN fits), i.e. weeks of GPU time for Exp 2–6.
+  - **GNN hyperparameters are fixed; there is no hyperparameter search of any kind and no inner CV for GNNs.** One configuration per architecture (`configs/experiments/gnn_fixed_base.yaml`, protocol `gnn_fixed_hparams_v1`): 2 graph-convolution layers, hidden 32, dropout 0.3, mean+max readout, MLP head 32; Adam, learning rate 1e-3, weight decay 1e-4, batch size 32, 60 epochs, no early stopping, the model after the last epoch is evaluated. These are the defaults defined in `gnn_base.yaml` before any GNN result (2026-10-12), not values chosen from results. Each outer training fold is fitted exactly once; outer splits, seeds and all fitting-on-training-subjects rules are unchanged (§3).
+  - **Tier 1 schedule (10 repeats, seeds 0–9):** Exp 2 and Exp 3 with GCN, 4 bands × {PLV, |ciPLV|}, settings S1, S2, S4; Exp 4 both measures, all settings; Exp 5 shared GCN encoder × {mean, attention} fusion × both measures, all settings; Exp 6 full model with both measures, all settings, and its seven ablations with PLV in S1, S2, S4. **Tier 2 (optional, secondary):** EdgeWeightedGAT and WeightedGraphSAGE in Exp 2/3, the other Exp 5 variants, |ciPLV| Exp 6 ablations. No band, fusion, encoder or experiment was chosen from held-out results.
+  - **Permutation tests for GNNs are deferred**; no permutation p-value is reported unless a valid test is completed (§4.2, §8).
+  - The nested-CV Exp 2 checkpoint is kept on Drive as a historical record (`experiments/exp2_conn_minimal/`) and is never pooled with or reported as a fixed-protocol result. Classical models (Exp 0, Exp 1, baselines) keep their nested inner CV over their pre-specified C grid.
 - **v1.4 (2026-10-14):** graph construction moves to pipeline v4, "Boundary-Aware Filtering and Hilbert Phase Estimation" (methodology log entry 41, `docs/boundary_processing.md`):
   - the 10 s edges are discarded before any filtering;
   - padding is explicit;
@@ -96,6 +102,10 @@ segmentation. The **subject** is the unit of inference. The subject key is
 > - bootstrap and permutation counts
 >
 > These numbers are defaults in `configs/experiments/base.yaml`.
+>
+> **v1.5 amendment (GNNs only):** GNNs use fixed hyperparameters and no inner
+> CV (`configs/experiments/gnn_fixed_base.yaml`), with 10 repeats (seeds 0–9);
+> see the changelog. The inner loop below applies to the classical models.
 
 ### 3.1 Within-dataset (S1, S2)
 
@@ -106,7 +116,7 @@ segmentation. The **subject** is the unit of inference. The subject key is
   - D1 (10/10): each test fold has 4 subjects (2 AD, 2 HC).
   - D2 (10/13): each test fold has 4–5 subjects with 2 AD each, and
     stratification keeps the HC share as even as possible.
-- **Inner loop (model selection):** stratified K = 4 subject-level CV inside
+- **Inner loop (model selection; classical models only from v1.5):** stratified K = 4 subject-level CV inside
   each outer training set. It chooses the hyperparameters from a
   pre-specified, finite grid recorded in the config. The outer test subjects
   are never seen during selection.
@@ -128,7 +138,8 @@ segmentation. The **subject** is the unit of inference. The subject key is
 ### 3.3 Cross-dataset (S4)
 
 - Train on **all** subjects of the source dataset. Hyperparameters are
-  selected by the §3.1 inner CV run on the source dataset only.
+  selected by the §3.1 inner CV run on the source dataset only (classical
+  models; GNNs use their fixed configuration, v1.5).
 - Test **once** on all subjects of the target dataset.
 - No target-dataset data are used for fitting, selection, thresholding or
   early stopping.
@@ -186,6 +197,10 @@ Each metric is computed as follows:
   1,000 permutations are used (at least 200 if compute-limited, with the
   number reported). The p-value is computed as
   `(1 + #perm ≥ observed) / (1 + n_perm)`.
+  **v1.5:** permutation tests are deferred (none has been run, for any model).
+  No permutation p-value is reported unless a valid test, re-running the full
+  CV pipeline, is completed; until then the §8 criterion "permutation p < 0.05"
+  is reported as not assessed.
 - **Model comparisons** (GNN vs. baseline on the same folds) use paired
   differences per repeat with the corrected resampled t-test of Nadeau and
   Bengio. They are reported as effect size + CI. With small N, "no
@@ -315,7 +330,7 @@ pipeline not harmonizable"** along with the reason.
 meet all of the following at subject level:
 
 - AUC 95% CI lower bound > 0.5
-- Permutation p < 0.05
+- Permutation p < 0.05 (v1.5: deferred; reported as not assessed until run)
 - Balanced accuracy above the majority baseline
 
 **Added value of the method.** The multi-band GNN must beat the age-only
@@ -381,6 +396,12 @@ Full details (inputs, tensor shapes, configs, leakage architecture) are in
 | 4 | Simple graph baseline | band-averaged graph, ROI PSD node features | GNN |
 | 5 | Multi-band GNN (candidate: learned fusion) | 4 band graphs, matched-band PSD | GNN, shared/band-specific encoders, mean/concat/gate/attention fusion |
 | 6 | Richest model, with ablations | 4 band graphs, [log PSD, rel PSD, strength] per band | GNN + attention fusion; ablations: no PSD, no strength, no learned fusion, each band dropped |
+
+**v1.5:** every GNN experiment above runs under the fixed-hyperparameter protocol
+(`*_fixedhp` configs). Tier 1 (primary): Exp 2/3 GCN (S1, S2, S4), Exp 4, Exp 5
+shared encoder × {mean, attention}, Exp 6 full (both measures) + PLV ablations
+(S1, S2, S4); 10 repeats. EdgeWeightedGAT, WeightedGraphSAGE, the other Exp 5
+variants and the |ciPLV| ablations are Tier 2 (secondary, optional).
 
 Conventions:
 

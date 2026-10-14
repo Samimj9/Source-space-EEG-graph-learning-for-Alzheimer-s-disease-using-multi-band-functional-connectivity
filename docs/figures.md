@@ -13,6 +13,11 @@ is `scripts/make_figures.py` (or `notebooks/03_figures.ipynb`).
 
 ## Pre-result design decisions (frozen 2026-10-12, before any real result)
 
+> **2026-10-14 (methodology log entry 42):** GNN figure entries read the fixed-hyperparameter experiments
+> (`*_fixedhp`; Tier 2 encoders: `*_fixedhp_tier2`). The figure selections below are unchanged. Tier 1
+> runs the Exp 6 ablations with PLV in S1, S2 and S4 only, so ablation panels for pooled (S09) or
+> |ciPLV| stay incomplete unless Tier 2 is run.
+
 These decisions are recorded in `docs/methodology_architecture_log.md`, entries 25–30.
 
 1. **PLV is the primary connectivity analysis.**

@@ -1,0 +1,15 @@
+# Experiment 3 (primary single-band model), fixed-hyperparameter protocol (Tier 1): single-band source
+# connectivity + matching-band source PSD node features [log, rel] (F = 2), GCN.
+# 4 bands x {PLV, |ciPLV|} = 8 variants; settings S1, S2, S4.
+extends: gnn_fixed_base.yaml
+experiment: exp3_conn_psd_fixedhp
+settings: [within_D1, within_D2, cross_D1_to_D2, cross_D2_to_D1]
+graph:
+  band_mode: single
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[theta], [alpha1], [alpha2], [beta]]

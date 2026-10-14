@@ -83,6 +83,8 @@ def plan_units(entries: list[dict], config_root: str | Path = ".") -> list[tuple
             variants = [v for v in variants if variant_matches(v, e["variants"])]
         for v in variants:
             for s in e.get("settings") or cfg["settings"]:
+                if s not in v.get("settings", cfg["settings"]):
+                    continue                              # the variant runs only in its own settings
                 units.append((order, e["config"], v, s))
                 order += 1
     return units

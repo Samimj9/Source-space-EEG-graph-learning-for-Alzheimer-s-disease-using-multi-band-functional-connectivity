@@ -1,0 +1,6 @@
+# Experiment 3b (optional, SECONDARY), fixed-hyperparameter protocol: as exp3_conn_psd_fixedhp, but every
+# single-band graph gets the PSD of all four bands as node features (F = 8).
+extends: exp3_conn_psd_fixedhp.yaml
+experiment: exp3b_conn_psd_allbands_fixedhp
+node_features:
+  psd_bands: all

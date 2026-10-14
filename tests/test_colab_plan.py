@@ -13,6 +13,7 @@ from adgraph import colab
 from adgraph.config import load_paths
 from adgraph.experiments import plan as plan_mod
 from adgraph.experiments import runner
+from adgraph.experiments.config import load_experiment
 from adgraph.experiments.plan import load_plan, plan_status, plan_units, run_plan
 from adgraph.synthetic import make_synthetic_store
 
@@ -153,8 +154,11 @@ def test_committed_plan_covers_every_config():
     entries = load_plan(REPO / "configs" / "run_plan.yaml")
     listed = {e["config"] for e in entries}
     every = {str(p.relative_to(REPO)) for p in (REPO / "configs" / "experiments").rglob("*.yaml")
-             if p.stem not in {"base", "classical_base", "gnn_base"}}
-    assert listed == every
+             if p.stem not in {"base", "classical_base", "gnn_base", "gnn_fixed_base"}}
+    # nested-CV GNN configs are historical records (methodology log entry 42) and are never planned
+    historical = {c for c in every if (lambda v: v["input"] == "graph" and not v.get("protocol"))(
+        load_experiment(REPO / c))}
+    assert historical and listed == every - historical
     units = plan_units(entries, REPO)
     assert len({(u[2]["name"], u[3]) for u in units}) == len(units)     # no unit twice
 

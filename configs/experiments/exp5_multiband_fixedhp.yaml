@@ -1,0 +1,18 @@
+# Experiment 5, fixed-hyperparameter protocol (Tier 1): four band graphs, one shared GCN encoder, fused by
+# mean or attention (the two fusions of Exp 6 full / no_learned_fusion). Node features = matching-band
+# PSD (F = 2). {PLV, |ciPLV|} x {mean, attention} = 4 variants; all settings.
+# Band-specific encoders and concat / gate fusion: exp5_multiband_fixedhp_tier2.yaml.
+extends: gnn_fixed_base.yaml
+experiment: exp5_multiband_fixedhp
+graph:
+  band_mode: multi
+  bands: [theta, alpha1, alpha2, beta]
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+sweep:
+  graph.connectivity: [plv, ciplv]
+  model.fusion: [mean, attention]

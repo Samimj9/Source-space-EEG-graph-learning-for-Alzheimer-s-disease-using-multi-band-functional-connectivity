@@ -31,7 +31,7 @@ from adgraph.visualization.writer import FigureWriter  # noqa: E402
 
 STYLE = load_style("configs/figures/style.yaml", {"formats": ["pdf", "png"], "dpi": 100})
 PAPER = yaml.safe_load(Path("configs/figures/paper.yaml").read_text())
-EXP6_FULL = {"label": "Exp6", "experiment": "exp6_multiband_psd_strength",
+EXP6_FULL = {"label": "Exp6", "experiment": "exp6_multiband_psd_strength_fixedhp",
              "where": {"node_features.components": ["psd", "strength"], "model.fusion": "attention",
                        "graph.bands": ["theta", "alpha1", "alpha2", "beta"]}}
 EXP1_SVM = {"label": "Exp1 SVM", "experiment": "exp1_source_psd", "where": {"model.name": "svm"}}
@@ -93,21 +93,21 @@ def test_generalization_ci_is_centred_on_saved_estimate(synth):
 # ----------------------------------------------------------------- family 2: paired, matched folds only
 def test_paired_conditions_require_identical_folds(synth, tmp_path):
     _, results, index = synth
-    spec = {"metric": "roc_auc", "settings": ["within_D1"], "experiments": ["exp4_band_mean", "exp5_multiband"]}
+    spec = {"metric": "roc_auc", "settings": ["within_D1"], "experiments": ["exp4_band_mean_fixedhp", "exp5_multiband_fixedhp"]}
     _, data, meta, _ = performance.fig_paired_conditions(index, spec, STYLE)
-    assert set(data["experiment"]) == {"exp4_band_mean", "exp5_multiband"} and not meta["refused_unmatched_pairs"]
+    assert set(data["experiment"]) == {"exp4_band_mean_fixedhp", "exp5_multiband_fixedhp"} and not meta["refused_unmatched_pairs"]
     assert np.allclose(data["diff_ciplv_minus_plv"], data["ciplv"] - data["plv"])
     # tamper with the folds of one |ciPLV| result -> the pair must be refused
     root = tmp_path / "tampered"
     shutil.copytree(results, root)
     idx2 = index_results(root)
-    row = idx2[(idx2["experiment"] == "exp4_band_mean") & (idx2["condition"] == "ciplv")
+    row = idx2[(idx2["experiment"] == "exp4_band_mean_fixedhp") & (idx2["condition"] == "ciplv")
                & (idx2["setting"] == "within_D1")].iloc[0]
     f = pd.read_csv(Path(row["path"]) / "folds.csv")
     f.loc[f.index[:2], "fold"] = (f.loc[f.index[:2], "fold"] + 1) % 3
     f.to_csv(Path(row["path"]) / "folds.csv", index=False)
     _, data2, meta2, _ = performance.fig_paired_conditions(idx2, spec, STYLE)
-    assert "exp4_band_mean" not in set(data2["experiment"]) and meta2["refused_unmatched_pairs"]
+    assert "exp4_band_mean_fixedhp" not in set(data2["experiment"]) and meta2["refused_unmatched_pairs"]
 
 
 # ----------------------------------------------------------------- families 3, 4, 12, 14
@@ -189,7 +189,7 @@ def test_fusion_weights_and_group_split_guard(synth, tmp_path):
     assert meta2["kind"] == "inferential"
     with pytest.raises(ValueError, match="no learned"):
         fusion.fig_fusion_weights(synth[2], {"setting": "within_D1", "entries": [
-            {"label": "mean", "experiment": "exp6_multiband_psd_strength",
+            {"label": "mean", "experiment": "exp6_multiband_psd_strength_fixedhp",
              "where": {"model.fusion": "mean", "graph.bands": ["theta", "alpha1", "alpha2", "beta"]}}]}, STYLE)
 
 
@@ -318,13 +318,13 @@ def test_frozen_main_figure_set_and_selections():
                     "Fig7_multiband_fusion"]
     fig3 = spec_of("Fig3_performance_overall")
     assert fig3["metrics"] == ["balanced_accuracy", "roc_auc"]
-    assert {e["experiment"] for e in fig3["entries"]} == {"exp0_sensor_psd", "exp1_source_psd", "exp4_band_mean",
-                                                          "exp5_multiband", "exp6_multiband_psd_strength"}
+    assert {e["experiment"] for e in fig3["entries"]} == {"exp0_sensor_psd", "exp1_source_psd", "exp4_band_mean_fixedhp",
+                                                          "exp5_multiband_fixedhp", "exp6_multiband_psd_strength_fixedhp"}
     # Exp 2/3 never get a representative band: they appear only in band-specific figures
     for f in PAPER["figures"]:
         entries = f.get("entries", []) + ([f["entry"]] if "entry" in f else []) + f.get("groups", [])
         if f["family"] != "band_comparison":
-            assert not {e.get("experiment") for e in entries} & {"exp2_conn_minimal", "exp3_conn_psd"}, f["id"]
+            assert not {e.get("experiment") for e in entries} & {"exp2_conn_minimal_fixedhp", "exp3_conn_psd_fixedhp"}, f["id"]
     roc = [f for f in PAPER["figures"] if f["family"] == "roc"]
     assert roc and all(f["status"] == "supplementary" for f in roc)
     assert [e["label"] for e in roc[0]["entries"]] == ["Exp0 SVM (sensor PSD)", "Exp1 SVM (source PSD)", "Exp6 full"]

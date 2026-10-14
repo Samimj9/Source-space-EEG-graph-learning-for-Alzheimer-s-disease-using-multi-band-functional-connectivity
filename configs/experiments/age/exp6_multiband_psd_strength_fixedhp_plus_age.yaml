@@ -1,0 +1,6 @@
+# Age sensitivity analysis (DESIGN.md §5), fixed-hyperparameter protocol: EEG + age version of
+# exp6_multiband_psd_strength_fixedhp (age standardized on training subjects, concatenated to the pooled graph embedding).
+# Compare with exp6_multiband_psd_strength_fixedhp (EEG-only) and baseline_age (age-only).
+extends: ../exp6_multiband_psd_strength_fixedhp.yaml
+experiment: exp6_multiband_psd_strength_fixedhp_plus_age
+covariates: [age]

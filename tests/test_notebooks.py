@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 import yaml
 
+from adgraph.experiments.config import load_experiment
 from adgraph.synthetic import make_synthetic_store
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,7 +42,10 @@ def test_committed_notebooks_match_the_generator(tmp_path):
 
 def test_one_notebook_per_experiment_config():
     configs = {str(p.relative_to(REPO)) for p in (REPO / "configs" / "experiments").rglob("*.yaml")
-               if p.stem not in {"base", "classical_base", "gnn_base"}}
+               if p.stem not in {"base", "classical_base", "gnn_base", "gnn_fixed_base"}}
+    # nested-CV GNN configs are historical records without notebooks (methodology log entry 42)
+    configs = {c for c in configs if not (lambda v: v["input"] == "graph" and not v.get("protocol"))(
+        load_experiment(REPO / c))}
     found = {}
     for nb in list((NB / "experiments").glob("*.ipynb")) + list((NB / "additional").glob("*.ipynb")):
         cfg = [ln.split("'")[1] for src in _code(nb) for ln in src.splitlines() if ln.startswith("CONFIG = ")]

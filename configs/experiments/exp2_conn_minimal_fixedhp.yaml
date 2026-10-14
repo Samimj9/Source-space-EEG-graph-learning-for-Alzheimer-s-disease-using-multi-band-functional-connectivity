@@ -1,0 +1,12 @@
+# Experiment 2, fixed-hyperparameter protocol (Tier 1): single-band source connectivity + GCN with a
+# constant node feature. 4 bands x {PLV, |ciPLV|} = 8 variants; settings S1, S2, S4.
+extends: gnn_fixed_base.yaml
+experiment: exp2_conn_minimal_fixedhp
+settings: [within_D1, within_D2, cross_D1_to_D2, cross_D2_to_D1]
+graph:
+  band_mode: single
+node_features:
+  components: [constant]
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[theta], [alpha1], [alpha2], [beta]]

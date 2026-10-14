@@ -13,16 +13,20 @@
 #   Fig. 2-7 below. Everything else is supplementary unless later promoted with a logged reason.
 duplicates: error
 
+# GNN entries read the fixed-hyperparameter experiments (`*_fixedhp`, methodology log entry 42); the
+# nested-CV GNN run of Exp 2 is a historical record and is never shown. Tier 1 runs the Exp 6 ablations
+# with PLV in S1/S2/S4 only, so S09 (pooled ablations) shows only the full model unless Tier 2 adds them.
+
 # Overall comparison: Exp 0, 1, 4, 5, 6 only (no band-specific experiments).
 entries_overall: &entries_overall
   - {label: "Exp0 sensor PSD · LR", experiment: exp0_sensor_psd, where: {model.name: logreg}}
   - {label: "Exp0 sensor PSD · SVM", experiment: exp0_sensor_psd, where: {model.name: svm}}
   - {label: "Exp1 source PSD · LR", experiment: exp1_source_psd, where: {model.name: logreg}}
   - {label: "Exp1 source PSD · SVM", experiment: exp1_source_psd, where: {model.name: svm}}
-  - {label: "Exp4 band-mean · GCN", experiment: exp4_band_mean}
-  - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
+  - {label: "Exp4 band-mean · GCN", experiment: exp4_band_mean_fixedhp}
+  - {label: "Exp5 multi-band · attn", experiment: exp5_multiband_fixedhp,
      where: {model.shared_encoder: true, model.fusion: attention}}
-  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
+  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength_fixedhp,
      where: {node_features.components: [psd, strength], model.fusion: attention,
              graph.bands: [theta, alpha1, alpha2, beta]}}
 
@@ -30,7 +34,7 @@ entries_overall: &entries_overall
 entries_primary: &entries_primary
   - {label: "Exp0 SVM (sensor PSD)", experiment: exp0_sensor_psd, where: {model.name: svm}}
   - {label: "Exp1 SVM (source PSD)", experiment: exp1_source_psd, where: {model.name: svm}}
-  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
+  - {label: "Exp6 full", experiment: exp6_multiband_psd_strength_fixedhp,
      where: {node_features.components: [psd, strength], model.fusion: attention,
              graph.bands: [theta, alpha1, alpha2, beta]}}
 
@@ -56,11 +60,11 @@ figures:
     metric: roc_auc
     settings: [within_D1, within_D2]
     panels:
-      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal, where: {model.encoder: gcn}}
-      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd, where: {model.encoder: gcn}}
+      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal_fixedhp, where: {model.encoder: gcn}}
+      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd_fixedhp, where: {model.encoder: gcn}}
 
   # Fig. 5: Exp 6 ablations
-  - {id: Fig5_exp6_ablations, family: ablation, status: main, experiment: exp6_multiband_psd_strength,
+  - {id: Fig5_exp6_ablations, family: ablation, status: main, experiment: exp6_multiband_psd_strength_fixedhp,
      metric: roc_auc, settings: [within_D1, within_D2],
      order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
 
@@ -74,9 +78,9 @@ figures:
     status: main
     setting: within_D1
     entries:
-      - {label: "Exp5 multi-band · attn", experiment: exp5_multiband,
+      - {label: "Exp5 multi-band · attn", experiment: exp5_multiband_fixedhp,
          where: {model.shared_encoder: true, model.fusion: attention}}
-      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
+      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength_fixedhp,
          where: {node_features.components: [psd, strength], model.fusion: attention,
                  graph.bands: [theta, alpha1, alpha2, beta]}}
 
@@ -93,27 +97,27 @@ figures:
      settings: [cross_D1_to_D2, cross_D2_to_D1], metrics: *metrics_main, entries: *entries_overall}
   - {id: S06_plv_vs_ciplv_paired, family: paired_conditions, status: supplementary, metric: roc_auc,
      settings: [within_D1, within_D2],
-     experiments: [exp2_conn_minimal, exp3_conn_psd, exp4_band_mean, exp5_multiband, exp6_multiband_psd_strength]}
+     experiments: [exp2_conn_minimal_fixedhp, exp3_conn_psd_fixedhp, exp4_band_mean_fixedhp, exp5_multiband_fixedhp, exp6_multiband_psd_strength_fixedhp]}
   - id: S07_band_specific_other_encoders
     family: band_comparison
     status: supplementary
     metric: roc_auc
     settings: [within_D1, within_D2]
     panels:
-      - {label: "Exp2 · EdgeWeightedGAT", experiment: exp2_conn_minimal, where: {model.encoder: edge_weighted_gat}}
-      - {label: "Exp2 · WeightedGraphSAGE", experiment: exp2_conn_minimal, where: {model.encoder: weighted_graphsage}}
-      - {label: "Exp3 · EdgeWeightedGAT", experiment: exp3_conn_psd, where: {model.encoder: edge_weighted_gat}}
-      - {label: "Exp3 · WeightedGraphSAGE", experiment: exp3_conn_psd, where: {model.encoder: weighted_graphsage}}
+      - {label: "Exp2 · EdgeWeightedGAT", experiment: exp2_conn_minimal_fixedhp_tier2, where: {model.encoder: edge_weighted_gat}}
+      - {label: "Exp2 · WeightedGraphSAGE", experiment: exp2_conn_minimal_fixedhp_tier2, where: {model.encoder: weighted_graphsage}}
+      - {label: "Exp3 · EdgeWeightedGAT", experiment: exp3_conn_psd_fixedhp_tier2, where: {model.encoder: edge_weighted_gat}}
+      - {label: "Exp3 · WeightedGraphSAGE", experiment: exp3_conn_psd_fixedhp_tier2, where: {model.encoder: weighted_graphsage}}
   - id: S08_band_specific_balanced_accuracy
     family: band_comparison
     status: supplementary
     metric: balanced_accuracy
     settings: [within_D1, within_D2]
     panels:
-      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal, where: {model.encoder: gcn}}
-      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd, where: {model.encoder: gcn}}
+      - {label: "Exp2 conn. only (GCN)", experiment: exp2_conn_minimal_fixedhp, where: {model.encoder: gcn}}
+      - {label: "Exp3 conn.+matched PSD (GCN)", experiment: exp3_conn_psd_fixedhp, where: {model.encoder: gcn}}
   - {id: S09_exp6_ablations_pooled, family: ablation, status: supplementary,
-     experiment: exp6_multiband_psd_strength, metric: roc_auc, settings: [pooled],
+     experiment: exp6_multiband_psd_strength_fixedhp, metric: roc_auc, settings: [pooled],
      order: [full, no_psd, no_strength, no_learned_fusion, drop_theta, drop_alpha1, drop_alpha2, drop_beta]}
   - {id: S10a_roc_within_D1, family: roc, status: supplementary, setting: within_D1, bootstrap_band: 1000,
      entries: *entries_primary}
@@ -136,7 +140,7 @@ figures:
     settings: [within_D1, within_D2, pooled]
     groups:
       - {label: "Exp1 SVM (source PSD)", experiment: exp1_source_psd, where: {model.name: svm}}
-      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength,
+      - {label: "Exp6 full", experiment: exp6_multiband_psd_strength_fixedhp,
          where: {node_features.components: [psd, strength], model.fusion: attention,
                  graph.bands: [theta, alpha1, alpha2, beta]}}
   - {id: S14_source_psd_log, family: psd_heatmap, status: supplementary, kind: log}
@@ -157,7 +161,7 @@ figures:
     repeat: 0                      # the ONE fitted model whose embeddings are shown (required)
     fold: 0
     method: pca
-    entry: {label: "Exp6 full", experiment: exp6_multiband_psd_strength, conditions: [plv],
+    entry: {label: "Exp6 full", experiment: exp6_multiband_psd_strength_fixedhp, conditions: [plv],
             where: {node_features.components: [psd, strength], model.fusion: attention,
                     graph.bands: [theta, alpha1, alpha2, beta]}}
   - {id: S21a_complexity_parameters, family: complexity, status: supplementary, setting: within_D1,

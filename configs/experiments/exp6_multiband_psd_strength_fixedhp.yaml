@@ -1,0 +1,28 @@
+# Experiment 6, fixed-hyperparameter protocol (Tier 1): multi-band GCN, shared encoder, attention fusion,
+# node features per ROI i and band b: [log PSD_i,b, relative PSD_i,b, strength_i,b] (F = 3).
+# * full model: PLV and |ciPLV|, all settings;
+# * seven ablations: PLV only, settings S1, S2, S4 (per-variant `settings`).
+# |ciPLV| ablations: exp6_multiband_psd_strength_fixedhp_tier2.yaml.
+extends: gnn_fixed_base.yaml
+experiment: exp6_multiband_psd_strength_fixedhp
+graph:
+  band_mode: multi
+  bands: [theta, alpha1, alpha2, beta]
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+  fusion: attention
+variants:
+  plv__full: {graph.connectivity: plv, evaluation.save_embeddings: true}
+  ciplv__full: {graph.connectivity: ciplv, evaluation.save_embeddings: true}
+  plv__no_psd: {graph.connectivity: plv, node_features.components: [strength],
+                settings: &ablation_settings [within_D1, within_D2, cross_D1_to_D2, cross_D2_to_D1]}
+  plv__no_strength: {graph.connectivity: plv, node_features.components: [psd], settings: *ablation_settings}
+  plv__no_learned_fusion: {graph.connectivity: plv, model.fusion: mean, settings: *ablation_settings}
+  plv__drop_theta: {graph.connectivity: plv, graph.bands: [alpha1, alpha2, beta], settings: *ablation_settings}
+  plv__drop_alpha1: {graph.connectivity: plv, graph.bands: [theta, alpha2, beta], settings: *ablation_settings}
+  plv__drop_alpha2: {graph.connectivity: plv, graph.bands: [theta, alpha1, beta], settings: *ablation_settings}
+  plv__drop_beta: {graph.connectivity: plv, graph.bands: [theta, alpha1, alpha2], settings: *ablation_settings}
