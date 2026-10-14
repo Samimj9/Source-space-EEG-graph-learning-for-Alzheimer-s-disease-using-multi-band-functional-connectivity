@@ -232,8 +232,14 @@ The reduction is caused only by the boundary margin (§3.4). The per-recording o
   v3-based numbers are not reported as v4.
 
 ## 8. Code version
-- **Corrected code commit: [final]**, the commit that introduces this record. Exact hash: see §8 of this
-  file at release, and `git_commit` in every v4 manifest.
+- **Implementation commit:** `4c1853d3e2c9331202681f1ec23508883bd7e209` ("Use boundary-aware filtering
+  and Hilbert phase estimation (pipeline v4)"). It contains every source, configuration and test change
+  of this record.
+- **Commits that only add documentation** do not change `src/` or `configs/`; this link is one of
+  them.
+- **Commit of the rebuild:** the commit pinned in `<processed>/CODE_COMMIT.txt` when the rebuild is
+  launched, recorded as `git_commit` in every subject checkpoint, `manifest.json` and `validation.json`.
+  Verify with `git diff 4c1853d <that commit> -- src configs` (empty).
 
 ## 9. Implementation choices requiring the author's approval before the rebuild
 1. **Margin policy:** `full_support` (18.148 s, configured) vs `feature_band` (1.796 s; v4 candidate
