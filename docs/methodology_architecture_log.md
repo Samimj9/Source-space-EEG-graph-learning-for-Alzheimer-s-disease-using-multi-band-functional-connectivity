@@ -2976,6 +2976,30 @@ participants, 3,974 windows) and D3 Exp 0 and Exp 1 had been completed. Exp 2, 4
 
 ---
 
+## 49. Dataset 3: Experiments 2, 4 and 5 added
+
+**Date:** 2026-10-15. **Requested by:** the author. The frozen D3 graph run `graphsD3_v4_da723b33554c` has 65
+participants and 3,974 graphs; D3 Exp 0/1 are complete and Exp 6 is running.
+**Configs:** `configs/experiments/d3/d3_exp{2_conn_minimal,4_band_mean,5_multiband}_fixedhp.yaml`.
+**Notebooks:** `notebooks/d3/experiments/D3_Exp2_conn_minimal.ipynb`, `D3_Exp4_band_mean.ipynb`,
+`D3_Exp5_multiband.ipynb`. **Test:** `tests/test_d3.py::test_d3_gnn_experiments_reuse_d1d2_definitions_and_run_on_d3_only`
+(also covers Exp 3).
+
+- **Definitions unchanged**, as for D3 Exp 3 (entry 48). Each config extends the Tier 1 D1/D2 config. The test
+  checks that every variant's graph, node features, model, training, evaluation and protocol equal the D1/D2 ones:
+  - Exp 2: single band, constant node feature, GCN; 4 bands × {PLV, |ciPLV|} = 8 variants.
+  - Exp 4: band-mean adjacency, [log, rel] PSD of all bands (F = 8), GCN; 2 variants.
+  - Exp 5: four band graphs, shared GCN, mean / attention fusion, matched-band PSD; 4 variants.
+  - All use `gnn_fixed_hparams_v1`: 10 repeats × 5 stratified participant folds, with training-fold-only weights
+    and participant-level metrics.
+- **D3 only.** `within_D3`, results in `experiments_D3/<experiment>/`, each experiment with its own code pin
+  (`experiments_D3/<experiment>/CODE_COMMIT.txt`). `D3_CODE_COMMIT.txt` and the D1/D2 pin are not moved. No code,
+  graph, preprocessing or source-model change.
+- **Timing.** Added after D3 Exp 0/1 results were observed. The definitions are the pre-existing ones, and no D3
+  result entered any choice.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

@@ -1,0 +1,8 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 49): Experiment 2 on D3. The Tier 1 Exp 2
+# definition unchanged (exp2_conn_minimal_fixedhp.yaml): single-band source connectivity + GCN with a constant
+# node feature, fixed-hyperparameter protocol (gnn_fixed_base.yaml, 10 repeats); 4 bands x {PLV, |ciPLV|} = 8
+# variants. Only the data (frozen graphsD3_v4 run) and the setting (within_D3) differ; results in experiments_D3/.
+extends: ../exp2_conn_minimal_fixedhp.yaml
+experiment: d3_exp2_conn_minimal_fixedhp
+graph_family: D3
+settings: [within_D3]

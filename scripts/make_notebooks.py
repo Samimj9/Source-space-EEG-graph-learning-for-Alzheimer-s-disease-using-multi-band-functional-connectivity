@@ -187,7 +187,8 @@ def protocol(cfg_path: str) -> tuple[list[dict], str]:
 
 # experiments added after their family's results existed run their own code pin (as Exp7 does), so the family
 # pin (and every completed result and graph run under it) never has to move for them
-OWN_PIN = {"d3/d3_exp3_conn_psd_fixedhp"}
+OWN_PIN = {"d3/d3_exp2_conn_minimal_fixedhp", "d3/d3_exp3_conn_psd_fixedhp", "d3/d3_exp4_band_mean_fixedhp",
+           "d3/d3_exp5_multiband_fixedhp"}
 
 
 def own_pin_cells(results: str, experiment: str, config: str) -> list[dict]:
@@ -457,11 +458,23 @@ D3_EXPERIMENTS = [
      "Dataset 3: source ROI band power (68 ROIs × 4 bands × {log, relative})."),
     ("D3_Baseline_age_only", "d3/d3_baseline_age", "D3 · Baseline · age only",
      "Dataset 3: age as the only predictor (DESIGN.md §5)."),
+    ("D3_Exp2_conn_minimal", "d3/d3_exp2_conn_minimal_fixedhp",
+     "D3 · Experiment 2 · single-band connectivity only (GCN)",
+     "Dataset 3: each band on its own (theta, alpha1, alpha2, beta), single-band source connectivity graph with a "
+     "constant node feature, GCN; PLV and |ciPLV| (the Tier 1 Exp 2 design, methodology log entry 49)."),
     ("D3_Exp3_conn_psd_single_band", "d3/d3_exp3_conn_psd_fixedhp",
      "D3 · Experiment 3 · single-band connectivity + PSD (GCN)",
      "Dataset 3: each band on its own (theta, alpha1, alpha2, beta), single-band source connectivity graph with "
      "matching-band [log, relative] PSD node features, GCN; PLV and |ciPLV| (the Tier 1 Exp 3 design, "
      "methodology log entry 48)."),
+    ("D3_Exp4_band_mean", "d3/d3_exp4_band_mean_fixedhp",
+     "D3 · Experiment 4 · band-averaged graph (GCN)",
+     "Dataset 3: band-averaged adjacency of the four bands, nodes = [log, relative] source PSD of all four bands, "
+     "GCN; PLV and |ciPLV| (the Tier 1 Exp 4 design, methodology log entry 49)."),
+    ("D3_Exp5_multiband", "d3/d3_exp5_multiband_fixedhp",
+     "D3 · Experiment 5 · multi-band GNN (shared GCN, mean / attention fusion)",
+     "Dataset 3: four band graphs, one shared GCN encoder, mean or attention fusion, nodes = matching-band "
+     "[log, relative] PSD; PLV and |ciPLV| (the Tier 1 Exp 5 design, methodology log entry 49)."),
     ("D3_Exp6_GCN_full", "d3/d3_exp6_gcn_full", "D3 · Experiment 6 · multi-band GCN, full model",
      "Dataset 3: four band graphs, nodes = [log PSD, relative PSD, strength], attention fusion; PLV and |ciPLV|."),
     ("D3_Exp7_EARM_GNN", "d3/d3_exp7_earm_gnn", "D3 · Experiment 7 · EARM-GNN (+ two ablations)",

@@ -1,0 +1,9 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 49): Experiment 5 on D3. The Tier 1 Exp 5
+# definition unchanged (exp5_multiband_fixedhp.yaml): four band graphs, one shared GCN encoder, mean or attention
+# fusion, nodes = matching-band [log, rel] source PSD (F = 2), fixed-hyperparameter protocol (gnn_fixed_base.yaml,
+# 10 repeats); {PLV, |ciPLV|} x {mean, attention} = 4 variants. Only the data (frozen graphsD3_v4 run) and the
+# setting (within_D3) differ; results in experiments_D3/.
+extends: ../exp5_multiband_fixedhp.yaml
+experiment: d3_exp5_multiband_fixedhp
+graph_family: D3
+settings: [within_D3]

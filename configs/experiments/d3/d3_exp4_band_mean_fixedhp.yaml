@@ -1,0 +1,9 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 49): Experiment 4 on D3. The Tier 1 Exp 4
+# definition unchanged (exp4_band_mean_fixedhp.yaml): band-averaged adjacency mean(A_theta, A_alpha1, A_alpha2,
+# A_beta), node features = [log, rel] source PSD of all 4 bands (F = 8), GCN, fixed-hyperparameter protocol
+# (gnn_fixed_base.yaml, 10 repeats); {PLV, |ciPLV|} = 2 variants. Only the data (frozen graphsD3_v4 run) and the
+# setting (within_D3) differ; results in experiments_D3/.
+extends: ../exp4_band_mean_fixedhp.yaml
+experiment: d3_exp4_band_mean_fixedhp
+graph_family: D3
+settings: [within_D3]
