@@ -131,6 +131,8 @@ The full build cell runs only after `CONFIRM_D3_FULL_BUILD = True` is set.
 - **Experiments run first** (author choice):
   - Exp 0 and Exp 1 (LR, SVM);
   - the age-only baseline;
+  - Exp 3 single-band GCN (each of the four bands on its own, PLV and |ciPLV|; methodology log entry 48; its own
+    code pin `experiments_D3/d3_exp3_conn_psd_fixedhp/CODE_COMMIT.txt`);
   - Exp 6 full multi-band GCN (PLV, |ciPLV|);
   - Exp 7 EARM-GNN with its two ablations.
 

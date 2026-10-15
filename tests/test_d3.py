@@ -318,3 +318,48 @@ def test_inspection_uses_active_channel_count_and_smoke_checks(tmp_path, monkeyp
     code, checks = verify()
     assert code == 1 and [c["check"] for c in checks if not c["passed"]] == [
         "(4) 68 ROI names and order identical to the frozen D1/D2 run"]
+
+
+def test_d3_exp3_reuses_exp3_and_runs_on_d3_only(tmp_path):
+    """D3 Exp 3 (methodology log entry 48): the Tier 1 Exp 3 variants unchanged (4 single bands x {PLV,
+    |ciPLV|}, GCN, nodes = matched-band [log, rel] PSD, fixed hyperparameters), within_D3 only, results in
+    experiments_D3/d3_exp3_conn_psd_fixedhp/."""
+    from adgraph.experiments.config import expand_variants, load_experiment, validate
+    from adgraph.synthetic import make_synthetic_store
+
+    d3 = expand_variants(load_experiment(REPO / "configs/experiments/d3/d3_exp3_conn_psd_fixedhp.yaml"))
+    ref = expand_variants(load_experiment(REPO / "configs/experiments/exp3_conn_psd_fixedhp.yaml"))
+    assert [v["variant"] for v in d3] == [v["variant"] for v in ref] and len(d3) == 8
+    for a, b in zip(d3, ref):
+        validate(a)
+        assert a["graph_family"] == "D3" and a["settings"] == ["within_D3"]
+        for k in ("graph", "node_features", "model", "training", "evaluation", "protocol", "input"):
+            assert a[k] == b[k], k
+    assert {tuple(v["graph"]["bands"]) for v in d3} == {("theta",), ("alpha1",), ("alpha2",), ("beta",)}
+    assert {v["graph"]["connectivity"] for v in d3} == {"plv", "ciplv"}
+
+    processed = tmp_path / "processed"
+    for name, cohort in (("graphs_v4_synth", {"D1": (4, 4), "D2": (4, 5)}), ("graphsD3_v4_synth", {"D3": (5, 5)})):
+        g = processed / name
+        make_synthetic_store(cohort, windows_per_subject=(3, 3), psd_effect=0.6).save(g)
+        (g / "assembly.done.json").write_text("{}")
+        man = json.loads((g / "manifest.json").read_text())
+        man["assembled_at"] = "2026-01-01T00:00:00+00:00"
+        (g / "manifest.json").write_text(json.dumps(man))
+    (tmp_path / "paths.yaml").write_text(yaml.safe_dump({"drive_root": str(tmp_path), "processed_dir": str(processed),
+                                                         "cache_dir": str(processed / "cache")}))
+    cfg = tmp_path / "exp3.yaml"
+    cfg.write_text(yaml.safe_dump({"extends": str(REPO / "configs/experiments/d3/d3_exp3_conn_psd_fixedhp.yaml"),
+                                   "evaluation": {"n_repeats": 1, "k": 3, "n_bootstrap": 20},
+                                   "training": {"epochs": 2}}))
+    r = subprocess.run([sys.executable, "scripts/experiment.py", "run", "--config", str(cfg), "--paths",
+                        str(tmp_path / "paths.yaml"), "--allow-ephemeral-storage"], capture_output=True, text=True,
+                       cwd=REPO)
+    assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-2000:]
+    assert "graphsD3_v4_synth" in r.stdout
+    out = processed / "experiments_D3" / "d3_exp3_conn_psd_fixedhp"
+    done = sorted(p.parent.parent.name for p in out.rglob("within_D3/final.done.json"))
+    assert done == sorted(v["variant"] for v in d3)
+    assert not (processed / "experiments").exists()                      # never the D1/D2 results root
+    subj = pd.read_csv(next(out.rglob("plv__theta/within_D3/predictions_subjects.csv")))
+    assert subj["key"].str.startswith("D3-").all() and subj["key"].nunique() == 10     # participant-level

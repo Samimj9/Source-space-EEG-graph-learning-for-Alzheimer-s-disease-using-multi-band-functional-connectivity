@@ -1,0 +1,9 @@
+# Dataset 3 (OpenNeuro ds004504, AD vs HC; methodology log entry 48): Experiment 3 (single-band model) on D3.
+# The Tier 1 Exp 3 definition unchanged (exp3_conn_psd_fixedhp.yaml): single-band source connectivity graph +
+# matching-band source PSD node features [log, rel] (F = 2), GCN, fixed-hyperparameter protocol
+# (gnn_fixed_base.yaml, 10 repeats); 4 bands x {PLV, |ciPLV|} = 8 variants, each band evaluated on its own.
+# Only the data (frozen graphsD3_v4 run) and the setting (within_D3) differ; results in experiments_D3/.
+extends: ../exp3_conn_psd_fixedhp.yaml
+experiment: d3_exp3_conn_psd_fixedhp
+graph_family: D3
+settings: [within_D3]

@@ -2948,6 +2948,34 @@ statistic would then be redefined; the graphs are unaffected, since nothing depe
 
 ---
 
+## 48. Dataset 3: Experiment 3 (single bands) added
+
+**Date:** 2026-10-15. **Requested by:** the author, after the D3 graph run was built and validated (65
+participants, 3,974 windows) and D3 Exp 0 and Exp 1 had been completed. Exp 2, 4 and 5 are not added for D3.
+**Config:** `configs/experiments/d3/d3_exp3_conn_psd_fixedhp.yaml`. **Notebook:**
+`notebooks/d3/experiments/D3_Exp3_conn_psd_single_band.ipynb`. **Test:**
+`tests/test_d3.py::test_d3_exp3_reuses_exp3_and_runs_on_d3_only`.
+
+- **Definition unchanged.** The config extends the Tier 1 `exp3_conn_psd_fixedhp.yaml`; the test checks that every
+  variant's graph, node features, model, training, evaluation and protocol equal the D1/D2 ones. Concretely:
+  - 4 bands (theta, alpha1, alpha2, beta), each evaluated on its own, × {PLV, |ciPLV|} = 8 variants;
+  - single-band source connectivity graph; nodes = matching-band [log, relative] source PSD; GCN;
+  - `gnn_fixed_hparams_v1`: no search, no inner CV, 60 epochs, no early stopping;
+  - 10 repeats × 5 stratified participant folds, seeds as for every other experiment;
+  - training-fold-only, per-participant and class-balanced weights; participant-level metrics.
+- **D3 only.**
+  - `graph_family: D3`, setting `within_D3`: the frozen D3 graph run (`graphsD3_v4_*`) is read, and results go
+    to `experiments_D3/d3_exp3_conn_psd_fixedhp/`.
+  - Mixing with D1/D2 settings is refused (`validate`).
+  - No code, graph construction, preprocessing or source model changed.
+- **Code pin.** The experiment runs its own pin, `experiments_D3/d3_exp3_conn_psd_fixedhp/CODE_COMMIT.txt`
+  (as Exp 7 does). `D3_CODE_COMMIT.txt`, under which the D3 graph run and D3 Exp 0/1 were produced, and the
+  D1/D2 pin are not moved.
+- **Timing.** It was added after the D3 Exp 0/1 results were observed. Its definition is the pre-existing Exp 3,
+  and no D3 result entered any choice.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

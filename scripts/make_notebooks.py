@@ -185,6 +185,37 @@ def protocol(cfg_path: str) -> tuple[list[dict], str]:
     return variants, text
 
 
+# experiments added after their family's results existed run their own code pin (as Exp7 does), so the family
+# pin (and every completed result and graph run under it) never has to move for them
+OWN_PIN = {"d3/d3_exp3_conn_psd_fixedhp"}
+
+
+def own_pin_cells(results: str, experiment: str, config: str) -> list[dict]:
+    return [md(f"""## 0. This experiment's code pin
+This experiment runs the commit recorded in its own folder (`{results}/{experiment}/CODE_COMMIT.txt`, set on the
+first run). The family pin used by the setup cell, the graph run and every other experiment's results stay
+unchanged. Leave `UPDATE_EXPERIMENT_CODE = False`; `True` moves only this experiment's pin to the newest code."""),
+            code(f"""UPDATE_EXPERIMENT_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+EXP_DIR = Path(OUT) / '{results}' / '{experiment}'
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+has_work = EXP_DIR.exists() and any(EXP_DIR.rglob('*.done.json'))
+EXP_COMMIT, _ = resolve_code_pin(EXP_DIR / 'CODE_COMMIT.txt', head, update=UPDATE_EXPERIMENT_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP_COMMIT])
+if not Path('/content/repo', '{config}').exists():
+    raise RuntimeError(f'pin {{EXP_COMMIT[:10]}} lacks {config}: set UPDATE_EXPERIMENT_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from this experiment's commit
+from adgraph.colab import sh
+print('{experiment} code commit:', EXP_COMMIT)
+for pin in ('D3_CODE_COMMIT.txt', 'CODE_COMMIT.txt'):
+    if (Path(OUT) / pin).exists():
+        print(f'{{pin}} (not used here, unchanged):', (Path(OUT) / pin).read_text().split()[0])""")]
+
+
 def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict]:
     variants, proto = protocol(cfg_path)
     experiment = variants[0]["experiment"]
@@ -212,6 +243,7 @@ Requires the graphs from `""" + ("d3/D3_01_download_and_build_graphs.ipynb" if d
            + "`." + (" Dataset 3 (OpenNeuro ds004504, AD vs HC): graph runs `graphsD3_v4_*`, results in "
                      "`experiments_D3/`, never mixed with D1/D2." if d3 else "")),
         code(SETUP_D3 if d3 else SETUP),
+        *(own_pin_cells(results, experiment, config) if cfg_path in OWN_PIN else []),
         md("## 1. This experiment: progress so far (from the checkpoints on Drive)"),
         code(f"""CONFIG = '{config}'   # this notebook's experiment
 EXPERIMENT = '{experiment}'
@@ -425,6 +457,11 @@ D3_EXPERIMENTS = [
      "Dataset 3: source ROI band power (68 ROIs × 4 bands × {log, relative})."),
     ("D3_Baseline_age_only", "d3/d3_baseline_age", "D3 · Baseline · age only",
      "Dataset 3: age as the only predictor (DESIGN.md §5)."),
+    ("D3_Exp3_conn_psd_single_band", "d3/d3_exp3_conn_psd_fixedhp",
+     "D3 · Experiment 3 · single-band connectivity + PSD (GCN)",
+     "Dataset 3: each band on its own (theta, alpha1, alpha2, beta), single-band source connectivity graph with "
+     "matching-band [log, relative] PSD node features, GCN; PLV and |ciPLV| (the Tier 1 Exp 3 design, "
+     "methodology log entry 48)."),
     ("D3_Exp6_GCN_full", "d3/d3_exp6_gcn_full", "D3 · Experiment 6 · multi-band GCN, full model",
      "Dataset 3: four band graphs, nodes = [log PSD, relative PSD, strength], attention fusion; PLV and |ciPLV|."),
     ("D3_Exp7_EARM_GNN", "d3/d3_exp7_earm_gnn", "D3 · Experiment 7 · EARM-GNN (+ two ablations)",
