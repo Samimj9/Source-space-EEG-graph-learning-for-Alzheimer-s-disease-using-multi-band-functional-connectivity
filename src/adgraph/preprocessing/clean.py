@@ -100,7 +100,7 @@ def robust_std(data: np.ndarray) -> np.ndarray:
     return 1.4826 * np.median(np.abs(data - med), axis=1)
 
 
-def preprocess(raw, cfg: dict) -> tuple[object, dict]:
+def preprocess(raw, cfg: dict, segments: list | None = None, offset_new: int = 0) -> tuple[object, dict]:
     """Resample, band-pass, unit safeguard, bad channels, interpolation, average reference,
     amplitude plausibility (methodology log entry 39).
 
@@ -132,7 +132,15 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     from .boundary import filter_pad
 
     pp = cfg["preprocessing"]
-    resample_and_bandpass(raw, cfg)
+    seg_info = None
+    if segments is not None:
+        # recordings with discontinuities (Dataset 3, entry 45): usable continuous segments (original-rate
+        # [start, stop) of the cropped signal) are resampled / filtered independently and concatenated
+        from .discontinuities import process_segments
+
+        raw, seg_info = process_segments(raw, segments, cfg, offset_new)
+    else:
+        resample_and_bandpass(raw, cfg)
     data = raw.get_data()
     iv = analysed_interval(data.shape[1], raw.info["sfreq"], cfg)
 
@@ -143,7 +151,13 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
                          "(whole 0.1-45 Hz recording): the EDF unit scale is wrong by orders of magnitude; "
                          "run scripts/diagnose_amplitude.py")
 
-    hp = raw.copy().filter(1.0, None, fir_design="firwin", verbose="error", **filter_pad(cfg)).get_data()
+    hp1 = lambda r: r.filter(1.0, None, fir_design="firwin", verbose="error", **filter_pad(cfg))  # noqa: E731
+    if seg_info is not None:                     # QC high-pass per segment: never across a discontinuity
+        from .discontinuities import per_segment
+
+        hp = per_segment(raw, seg_info, hp1)
+    else:
+        hp = hp1(raw.copy()).get_data()
     rules = pp["bad_channels"]
     metrics = channel_metrics(hp[:, iv], rules)
     bads = detect_bad_channels(hp[:, iv], raw.ch_names, rules)
@@ -203,4 +217,6 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
         "bad_channels_whole_recording": bads_whole,
         "channels": channels,
     }
+    if seg_info is not None:
+        qc["segments"] = seg_info
     return raw, qc

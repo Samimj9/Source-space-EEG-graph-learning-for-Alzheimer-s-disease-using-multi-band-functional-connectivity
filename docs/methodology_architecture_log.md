@@ -2760,6 +2760,85 @@ on 2026-10-14.
 
 ---
 
+## 45. Dataset 3: boundary-aware processing of EEGLAB discontinuities; separate D3 code pin
+
+**Date:** 2026-10-15. **Requested by:** the author, after the real D3 input check (56 of 65 recordings contain
+EEGLAB `boundary` events; D3-56 has 56). **Code:** `src/adgraph/preprocessing/discontinuities.py`,
+`pipeline.process_subject` / `process_recording`, `preprocessing/clean.preprocess(segments=...)`,
+`configs/pipeline_d3.yaml` (`discontinuities: {source: eeglab_boundary, handling: split}`). **Tests:**
+`tests/test_d3_discontinuities.py`.
+
+**Problem.** The provider's ASR cleaning removed data segments and EEGLAB marks each junction with a `boundary`
+event. The file then contains samples that are adjacent in the array but not in time. A 20 s window across such
+a junction mixes non-contiguous data, and resampling or filtering across it spreads the jump into its
+neighbourhood. Entry 44 had deferred the decision until the counts were known.
+
+**How MNE represents the events** (MNE 1.13.2 `_read_annotations_eeglab`, confirmed on an EEGLAB `.set` written
+in the test):
+- onset = (latency − 1) / srate, in seconds from the first sample; a boundary has latency k + 0.5, so it lies
+  between two samples;
+- duration = EEGLAB `event.duration` / srate, which is the number of samples REMOVED there. Those samples are
+  not in the file, so the duration does not affect the file's time line; it is 0 or NaN for many events;
+- events with a NaN latency are dropped by MNE; the description stays `boundary`, and MNE does not treat it as a
+  bad segment.
+
+**Rule.**
+1. A boundary at fractional sample position p = onset·srate cuts the recording before sample ⌈p⌉. Events at the
+   very start or end make no cut; the count still reports them.
+2. The edge crop (10 s per side) is applied first, as before; cuts inside the analysed interval split it into
+   continuous segments.
+3. Each segment is sliced by sample index and trimmed at its end to the largest length that resamples to a whole
+   number of samples (500 → 250 Hz: even; at most 1 sample). It is resampled on its own with a fixed 4 s
+   (2,000-sample) mirrored padding, and band-passed only if the configuration band-passes (D3 does not).
+   - Reason for the trim: MNE's FFT resampling of an odd length spreads the output over the exact duration,
+     a sub-sample time shift.
+   - Reason for the fixed padding: MNE's `npad='auto'` changes the FFT length with the segment length and
+     shifted some segments by one input sample.
+   - Measured with band-limited test signals (3–44 Hz): beyond the margin, the relative error of the resampled
+     segment is ≤ 2.4·10⁻⁴.
+4. The 1 Hz QC high-pass (bad-channel and plausibility checks) is applied per segment. The average reference and
+   the 68 × 19 ROI operator are instantaneous and act on the concatenated segments. The analytic FIR (half-length
+   412) also acts on the concatenation; this is exact for every accepted window because its support never leaves
+   the window's own segment (rule 5).
+5. Windows: the same 20 s / 10 s grid, started at each segment's first valid sample, at least the margin
+   (412 samples) from both segment ends. A segment shorter than 5,000 + 2 × 412 = 5,824 samples (23.3 s) holds
+   no window and is not processed.
+6. Window rejection, the ≥ 5-window rule, source model, ROIs, bands, PLV, |ciPLV| and PSD are unchanged. No
+   recording is excluded for having boundaries. A recording whose segments are all too short gets status
+   `below_min_windows` through the existing rule.
+7. Stored `start_sample` / `stop_sample` stay on the original 250 Hz time line. New columns: `segment_index`,
+   `segment_start_sample`, `segment_stop_sample`.
+
+**Report** (per participant, in `subjects.csv`):
+- `n_boundary_events`, `n_discontinuities_analysed`, `n_segments`, `n_segments_usable`, `usable_duration_s`;
+- `n_windows_continuous_grid`: windows the continuous grid would have placed, and how many of them would cross a
+  cut;
+- `n_windows_excluded_discontinuity`;
+- `n_windows_total` (candidates), `n_windows_rejected` (QC), `n_windows_kept` (accepted);
+- `discontinuity_samples`: cut positions on the 250 Hz time line.
+
+**Verification gate.** The gate is no longer "no boundary events in the files". It is ZERO accepted windows
+crossing a discontinuity or its margin, with every window inside one segment at least the margin from its ends.
+- `d3_verify_smoke.py` checks this on the smoke subject and, in memory, on the recording with the most events.
+- `validate_graph_run.py` checks it on the full run.
+
+**D1/D2.** Unchanged. `configs/pipeline.yaml` has no `discontinuities` key, so the D1/D2 path runs the same code
+as before (the frozen run `graphs_v4_33faa4b89a5d` is not touched). The D3 config hash changes, so D3 graphs go
+to a new `graphsD3_v4_<hash>` directory.
+
+**Code pins.**
+- Before this entry, every D3 notebook first ran the shared setup on `CODE_COMMIT.txt` and then switched to
+  `D3_CODE_COMMIT.txt`. A D3 session could therefore move the D1/D2 pin (with `UPDATE_CODE`, or automatically
+  when no D1/D2 unit had been completed).
+- Now `scripts/colab_setup.py --family D3` uses only `D3_CODE_COMMIT.txt` and D3 checkpoints (`graphsD3_v*`,
+  `experiments_D3/`). It reads `CODE_COMMIT.txt` only to print it.
+- `scripts/code_pin.py restore-d1d2` (notebook `advanced/Restore_D1D2_code_pin.ipynb`) sets `CODE_COMMIT.txt`
+  back to the last pin in its history that predates Dataset 3 (expected `1b6988a`). It keeps the history and
+  changes no result. It refuses if any D1/D2 unit was completed under the current pin.
+- The Exp 7 pin is unchanged.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

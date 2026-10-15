@@ -1,8 +1,9 @@
 # Dataset 3 (D3): OpenNeuro ds004504, AD vs HC
 
-Version 1.0, 2026-10-14. Methodology log entry 44, decisions row 52, DESIGN.md v1.7.
+Version 1.1, 2026-10-15. Methodology log entries 44–45, decisions rows 52–53, DESIGN.md v1.7.
 Code: `src/adgraph/io/bids.py`, `src/adgraph/io/openneuro.py`, `configs/pipeline_d3.yaml`,
-`configs/experiments/d3/`, `scripts/d3_data.py`. Notebooks: `notebooks/d3/`. Tests: `tests/test_d3.py`.
+`configs/experiments/d3/`, `scripts/d3_data.py`, `src/adgraph/preprocessing/discontinuities.py`. Notebooks:
+`notebooks/d3/`. Tests: `tests/test_d3.py`, `tests/test_d3_discontinuities.py`.
 
 ## 1. Source and cohort
 
@@ -43,6 +44,7 @@ Author decision: use the provider's cleaning as given and add only what our pipe
 |---|---|---|
 | Input | EDF, 30 of 32 channels | EEGLAB `.set` derivatives, all 19 channels |
 | Edge crop | 10 s per side before any processing | same |
+| Discontinuities | none in the EDFs | split at every EEGLAB `boundary` event; each continuous segment resampled on its own (§3a) |
 | Resampling | 250 Hz (FFT, `reflect_limited`) | same |
 | Sensor band-pass | 0.1–45 Hz FIR (8251 taps) | **none** (provider 0.5–45 Hz Butterworth; nothing filtered twice) |
 | Artifact cleaning | none at the sensor level | provider ASR + ICA (as released) |
@@ -59,7 +61,25 @@ How runs and results are kept apart:
   `graphs_v*` runs, so the two families never mix.
 - **Experiment results:** `<processed>/experiments_D3/`. Each results root therefore holds results from a
   single graph run.
-- **Code pin:** D3 has its own pin, `<processed>/D3_CODE_COMMIT.txt`; the D1/D2 pin is untouched.
+- **Code pin:** D3 has its own pin, `<processed>/D3_CODE_COMMIT.txt`. The D3 setup cell
+  (`colab_setup.py --family D3`) never reads it for checkout nor writes `CODE_COMMIT.txt` (the D1/D2 pin).
+  `notebooks/advanced/Restore_D1D2_code_pin.ipynb` restores the D1/D2 pin if a D3 session moved it earlier.
+
+## 3a. Discontinuities (EEGLAB `boundary` events; methodology log entry 45)
+
+The provider's cleaning removed data segments in 56 of the 65 recordings (D3-56: 56 events). MNE reads each
+event as an annotation at (latency − 1)/srate; its duration is the number of removed samples, which are not in
+the file. Processing:
+1. the recording is cut before sample ⌈onset·srate⌉ of every boundary inside the analysed interval;
+2. each continuous segment is trimmed to an even length and resampled on its own (fixed 4 s padding);
+3. windows use the same 20 s / 10 s grid inside each segment, at least 412 samples (1.648 s) from both segment
+   ends; segments shorter than 23.3 s give no window;
+4. reference, source operator, analytic FIR, rejection, PLV, |ciPLV| and PSD are unchanged.
+
+No recording is excluded for having boundaries. Per participant, `subjects.csv` reports boundary events,
+segments (all / usable), the windows of the continuous grid and how many of them would have crossed a cut,
+windows excluded for a discontinuity, candidates, windows rejected by QC and accepted windows.
+`discontinuity_samples` holds the cut positions on the 250 Hz time line.
 
 ## 3b. Real-data checks before the full build
 
@@ -70,7 +90,9 @@ selected explicitly: the smoke run and the operator recorded in its manifest, an
 2. no flat channel in the reconstruction;
 3. operator 68 × 19 with the configured channels, verified against the full MNE inverse;
 4. ROI names and order identical to D1/D2;
-5. no discontinuities.
+5. discontinuities are handled: on the smoke subject and, in memory, on the recording with the most boundary
+   events, ZERO accepted windows cross a discontinuity or its margin, and every window lies inside one segment
+   at least the margin from its ends. Boundary events themselves are allowed.
 
 The full build cell runs only after `CONFIRM_D3_FULL_BUILD = True` is set.
 
@@ -104,10 +126,10 @@ The full build cell runs only after `CONFIRM_D3_FULL_BUILD = True` is set.
   leakage-robust sensitivity analysis.
 - **Filtering before our crop:** the provider filtered and cleaned whole recordings before release. Our
   10 s crop and margin cover our own filters, not the provider's.
-- **Possible discontinuities:** if the provider's cleaning removed data segments, the `.set` files
-  contain EEGLAB "boundary" events. `scripts/d3_data.py check` counts them per recording. The pipeline
-  does not yet exclude windows that span one: if any are found, that is reported and decided before
-  graphs are built.
+- **Discontinuities:** the provider's cleaning removed data segments (EEGLAB "boundary" events in 56 of
+  65 recordings). Windows never cross them (§3a), but the removed data reduce the usable recording time, and
+  short segments between close boundaries contribute no window. The amount differs between participants and is
+  reported per participant.
 - **Relative-PSD range:** the provider's Butterworth low-pass is about −3 dB at 45 Hz, the top of our
   relative-PSD range [1, 45) Hz.
 - **Literature on this dataset:** many published results on ds004504 split windows rather than subjects.

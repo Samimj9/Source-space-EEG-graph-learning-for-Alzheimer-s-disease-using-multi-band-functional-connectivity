@@ -124,3 +124,11 @@ output:
   save_signed_ciplv: true       # keep antisymmetric signed ciPLV as `ciplv_signed` (never an adjacency)
 
 seed: 0
+
+discontinuities:
+  # D3 (methodology log entry 45): EEGLAB 'boundary' events mark where the provider removed data. The recording is
+  # split there into continuous segments; each segment is resampled on its own; windows lie inside one segment,
+  # at least the boundary margin (412 samples) from both of its ends, on the 20 s / 10 s grid from its first valid
+  # sample. Segments shorter than one window + 2 margins (23.3 s) are not processed.
+  source: eeglab_boundary
+  handling: split

@@ -95,11 +95,24 @@ check("every registered recording has a subject row", set(reg["key"]) <= set(sub
 check("windows are 20 s long", bool(((w["stop_sample"] - w["start_sample"]) == win_len).all()))
 bad_grid, bad_margin, bad_count = [], [], []
 margin = manifest.get("boundary_processing", {}).get("margin_samples", 0)
+segmented = "segment_index" in w                    # Dataset 3: windows per continuous segment (entry 45)
+bad_seg, crossing = [], {}
 for key, g in w.groupby("key"):
     s = subj.set_index("key").loc[key]
-    rel = (g["start_sample"] - g["start_sample"].min()) % step
-    if g["window_index"].duplicated().any() or (rel != 0).any():
+    grid_groups = g.groupby("segment_index") if segmented else [(0, g)]
+    rel_bad = any(((gg["start_sample"] - gg["start_sample"].min()) % step != 0).any() for _, gg in grid_groups)
+    if g["window_index"].duplicated().any() or rel_bad:
         bad_grid.append(key)
+    if segmented:
+        if (g["start_sample"] < g["segment_start_sample"] + margin).any() or \
+                (g["stop_sample"] > g["segment_stop_sample"] - margin).any():
+            bad_seg.append(key)
+        from adgraph.preprocessing.discontinuities import windows_crossing
+        v = s.get("discontinuity_samples")
+        cuts = json.loads(v) if isinstance(v, str) else []
+        n_cross = int(windows_crossing(g["start_sample"], g["stop_sample"], cuts, margin).sum())
+        if n_cross:
+            crossing[key] = n_cross
     if int(s["n_windows_kept"]) != len(g) or not np.isclose(g["sample_weight"].sum(), 1):
         bad_count.append(key)
     if v4:
@@ -109,6 +122,13 @@ for key, g in w.groupby("key"):
             bad_margin.append(key)
 check("windows on the 10 s grid, unique per subject", not bad_grid, str(bad_grid or ""))
 check("accepted windows = rows per subject; weights sum to 1", not bad_count, str(bad_count or ""))
+if segmented:
+    check("every window inside one continuous segment, at least the margin from both segment ends", not bad_seg,
+          str(bad_seg or ""))
+    check("ZERO accepted windows crossing an EEGLAB discontinuity or its margin", not crossing,
+          f"margin {margin} samples; " + (f"crossing: {crossing}" if crossing else
+                                          f"{int(subj.get('n_boundary_events', pd.Series(dtype=float)).fillna(0).sum())} "
+                                          "boundary events in the files, all handled"))
 if v4:
     check("every window at least the boundary margin inside the cropped interval", not bad_margin,
           f"margin {margin} samples ({margin / cfg['preprocessing']['sfreq']:.3f} s)" + (f"; {bad_margin}" if bad_margin else ""))
@@ -124,6 +144,10 @@ for r in subj.itertuples():
                  "rejected_windows": getattr(r, "n_windows_rejected", np.nan),
                  "graphs_in_dataset": kept, "band_adjacencies_per_metric": kept * n_bands,
                  "n_interpolated": getattr(r, "n_bad_channels", np.nan),
+                 **({k: getattr(r, k, np.nan) for k in (
+                     "n_boundary_events", "n_discontinuities_analysed", "n_segments", "n_segments_usable",
+                     "usable_duration_s", "n_windows_continuous_grid", "n_windows_continuous_grid_crossing_discontinuity",
+                     "n_windows_excluded_discontinuity")} if "n_boundary_events" in subj else {}),
                  "subject_unit": str(run / "subjects" / r.key)})
 rep = pd.DataFrame(rows)
 if args.reference_audit:

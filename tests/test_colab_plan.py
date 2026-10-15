@@ -222,3 +222,37 @@ def test_run_plan_cli_status_and_run(tmp_path, plan_file):
     assert r.returncode == 0, r.stderr[-2000:]
     assert (processed / "experiments" / "_plan_status.csv").exists()
     assert "completed" in r.stdout
+
+
+def test_d3_and_d1d2_code_pins_are_separate(tmp_path, monkeypatch):
+    """D3 work counts only for the D3 pin; the D1/D2 pin is restored to the last pre-D3 pin from its history,
+    and never when D1/D2 units were completed under the current pin (methodology log entry 45)."""
+    import importlib.util
+    import subprocess
+
+    out = tmp_path / "processed"
+    (out / "graphsD3_v4_abc" / "subjects" / "D3-1").mkdir(parents=True)
+    (out / "graphsD3_v4_abc" / "subjects" / "D3-1" / "subject.done.json").write_text("{}")
+    assert colab.has_completed_work(out, "D3") and not colab.has_completed_work(out)
+    (out / "graphs_v4_x" / "subjects" / "D1-1").mkdir(parents=True)
+    (out / "graphs_v4_x" / "subjects" / "D1-1" / "subject.done.json").write_text('{"git_commit": "e637368"}')
+    assert colab.has_completed_work(out) and colab.has_completed_work(out, "D3")
+
+    spec = importlib.util.spec_from_file_location("code_pin", REPO / "scripts" / "code_pin.py")
+    cp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cp)
+    rev = lambda c: subprocess.check_output(["git", "rev-parse", c], cwd=REPO, text=True).strip()
+    pre, d3 = rev(cp.FIRST_D3_COMMIT + "~1"), rev(cp.FIRST_D3_COMMIT)
+    pin = out / "CODE_COMMIT.txt"
+    colab.resolve_code_pin(pin, pre)
+    colab.resolve_code_pin(pin, d3, update=True)                  # a D3 session moved the shared pin
+    assert cp.pre_d3_pin(pin) == pre
+    exp = out / "experiments" / "exp2" / "gcn" / "within_D1" / "units"
+    exp.mkdir(parents=True)
+    (exp / "fold.done.json").write_text(json.dumps({"git_commit": d3}))
+    assert cp.restore_d1d2(out, None, force=False) == 1 and cp.pinned(pin) == d3     # refused: unit under pin
+    (exp / "fold.done.json").unlink()
+    assert cp.restore_d1d2(out, None, force=False) == 0 and cp.pinned(pin) == pre
+    assert f"previous pin: {d3}" in pin.read_text() and "restored by scripts/code_pin.py" in pin.read_text()
+    assert cp.restore_d1d2(out, None, force=False) == 0 and cp.pinned(pin) == pre     # idempotent
+    assert not (out / "D3_CODE_COMMIT.txt").exists()

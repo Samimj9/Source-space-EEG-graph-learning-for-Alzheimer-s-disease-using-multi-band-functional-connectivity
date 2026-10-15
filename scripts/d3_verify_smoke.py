@@ -11,7 +11,9 @@ Every input is selected explicitly, never "the newest":
 Checks: (1) electrode labels (raw -> canonical) and template positions of all 19 channels; (2) no confirmed flat
 channel in the processed smoke subjects (a flat channel stops the subject: FlatChannelError); (3) inverse
 operator 68 x 19 with the configured channel names and order, verified against the full MNE inverse; (4) 68 ROI
-names and order identical to the frozen D1/D2 run; (5) no EEGLAB 'boundary' discontinuity in any recording.
+names and order identical to the frozen D1/D2 run; (5) EEGLAB 'boundary' discontinuities are allowed only if
+handled: ZERO accepted windows cross a discontinuity or its margin, checked on the smoke subject(s) and, in
+memory (nothing saved), on the recording with the most boundary events.
 Writes d3_montage_checks.json into the smoke run; exits 1 if any check fails.
 """
 
@@ -101,18 +103,65 @@ else:
     check("(4) 68 ROI names and order identical to the frozen D1/D2 run",
           len(op["roi_names"]) == 68 and op["roi_names"] == ref_rois, f"vs {ref['run_dir'].iloc[0]}")
 
-# (5) discontinuities
+# (5) discontinuities: allowed only if handled -- ZERO accepted windows crossing a cut or its margin
+from adgraph.pipeline import build_registry, process_subject
+from adgraph.preprocessing.discontinuities import enabled as split_enabled, windows_crossing
+
 reports = sorted(processed.glob("d3_header_report_*.csv"))
+n_expected = sum(bids.EXPECTED.values())                       # 36 AD + 29 HC
 if not reports:
     check("(5) header report present (run scripts/d3_data.py check)", False)
+    rep = pd.DataFrame(columns=["key", "n_boundary_events"])
 else:
     rep = pd.read_csv(reports[-1])
-    n = rep["n_boundary_events"] if "n_boundary_events" in rep else pd.Series([np.nan])
-    n_expected = sum(bids.EXPECTED.values())                       # 36 AD + 29 HC
-    check(f"(5) no EEGLAB 'boundary' discontinuity in any of the {n_expected} recordings",
-          (n.fillna(-1) == 0).all() and len(rep) == n_expected,
-          f"{reports[-1].name}: {len(rep)} recordings, boundary events in "
-          f"{rep.loc[rep.get('n_boundary_events', 0) > 0, 'key'].tolist() if 'n_boundary_events' in rep else 'n/a'}")
+    n_files = int((rep["n_boundary_events"] > 0).sum())
+    check(f"(5) header report covers all {n_expected} recordings", len(rep) == n_expected,
+          f"{reports[-1].name}: {n_files} recordings with boundary events, {int(rep['n_boundary_events'].sum())} events")
+    check("(5) discontinuity handling enabled for this configuration (discontinuities.handling: split)",
+          split_enabled(cfg) or n_files == 0)
+margin = int(man["boundary_processing"]["margin_samples"])
+win = int(man["segmentation"]["window_samples"])
+probe = list(keys)
+if len(rep) and rep["n_boundary_events"].max() > 0:
+    worst = rep.sort_values("n_boundary_events").iloc[-1]["key"]       # most discontinuities: in-memory probe
+    if worst not in probe:
+        probe.append(worst)
+reg = build_registry(paths, cfg=cfg)[0].set_index("key")
+op_mem = {"W": W, "ch_names": op["channels"], "roi_names": op["roi_names"]}
+rows = []
+for k in probe:
+    if k in keys:                                               # processed and saved by the smoke test
+        row = json.loads(Path(smoke, "subjects", k, "subject.json").read_text())
+        wdf = pd.read_csv(Path(smoke, "subjects", k, "windows.csv"))
+        source = "smoke run"
+    else:                                                       # processed in memory only; nothing is saved
+        rec = reg.loc[[k]].reset_index().iloc[0]
+        print(f"\nprocessing {k} in memory (most boundary events; nothing saved) ...", flush=True)
+        _, wdf, row, _, _ = process_subject(rec, cfg, op_mem)
+        source = "in-memory probe"
+    cuts = json.loads(row.get("discontinuity_samples") or "[]")
+    cross = int(windows_crossing(wdf["start_sample"], wdf["stop_sample"], cuts, margin).sum()) if len(wdf) else 0
+    outside = int(((wdf["start_sample"] < wdf["segment_start_sample"] + margin)
+                   | (wdf["stop_sample"] > wdf["segment_stop_sample"] - margin)).sum()) if len(wdf) and \
+        "segment_start_sample" in wdf else (0 if not len(wdf) else -1)
+    in_report = rep.set_index("key")["n_boundary_events"].get(k, np.nan) if len(rep) else np.nan
+    rows.append({"key": k, "source": source, "boundary_events_file": in_report,
+                 "boundary_events_pipeline": row.get("n_boundary_events"), "segments": row.get("n_segments"),
+                 "usable_segments": row.get("n_segments_usable"), "continuous_grid": row.get("n_windows_continuous_grid"),
+                 "excluded_discontinuity": row.get("n_windows_excluded_discontinuity"),
+                 "candidates": row.get("n_windows_total"), "rejected_qc": row.get("n_windows_rejected"),
+                 "accepted": row.get("n_windows_kept"), "crossing": cross, "outside_segment_margin": outside,
+                 "status": row.get("status")})
+tab = pd.DataFrame(rows)
+print("\ndiscontinuity handling (windows of 20 s; margin %d samples = %.3f s):" % (margin, margin / 250))
+print(tab.to_string(index=False))
+check("(5) the pipeline found the same boundary events as the header check",
+      all(pd.isna(r["boundary_events_file"]) or r["boundary_events_file"] == r["boundary_events_pipeline"] for r in rows))
+check("(5) ZERO accepted windows crossing a discontinuity or its margin", (tab["crossing"] == 0).all(),
+      f"{int(tab['crossing'].sum())} crossing")
+check("(5) every accepted window inside one continuous segment with the margin", (tab["outside_segment_margin"] == 0).all())
+check("(5) no recording failed or was dropped because of boundary events",
+      tab["status"].isin(["ok", "below_min_windows"]).all() and (tab["status"] == "ok").any(), str(tab["status"].tolist()))
 
 (smoke / "d3_montage_checks.json").write_text(json.dumps({"checks": checks, "smoke_run": str(smoke)}, indent=1))
 bad = [c["check"] for c in checks if not c["passed"]]

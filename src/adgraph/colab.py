@@ -190,10 +190,15 @@ def run_tests_once(output_root: str | Path, repo: str | Path = ".") -> None:
     marker.write_text("passed\n")
 
 
-def has_completed_work(output_root: str | Path) -> bool:
-    """True if any graph-subject or experiment checkpoint has been completed under ``output_root``
-    (a pinned commit then protects results and must not move silently)."""
+def has_completed_work(output_root: str | Path, family: str = "D1D2") -> bool:
+    """True if any graph-subject or experiment checkpoint of ``family`` has been completed under ``output_root``
+    (a pinned commit then protects results and must not move silently). ``family``: 'D1D2' (``graphs_v*``,
+    ``experiments/``; pin ``CODE_COMMIT.txt``) or 'D3' (``graphsD3_v*``, ``experiments_D3/``; pin
+    ``D3_CODE_COMMIT.txt``)."""
     root = Path(output_root)
+    if family == "D3":
+        return any(root.glob("graphsD3_v*/subjects/*/subject.done.json")) or any(
+            root.glob("experiments_D3/**/*.done.json"))
     if any(root.glob("graphs_v*/subjects/*/subject.done.json")):
         return True
     return any(root.glob("experiments/*/*/*/units/*.done.json")) or any(

@@ -9,6 +9,7 @@ Layout:
                                                     dataset probe, EEG + age)
     notebooks/03_comparative_figures.ipynb          paper figures across experiments
     notebooks/advanced/Run_all_experiments_ADVANCED.ipynb   whole plan; does nothing unless enabled
+    notebooks/advanced/Restore_D1D2_code_pin.ipynb          restores the D1/D2 code pin (maintenance)
     notebooks/README.md                             index with Colab links and the Drive output layout
 
 Every notebook: Runtime -> Run all, nothing to edit. Scientific code lives in src/adgraph.
@@ -111,6 +112,27 @@ OUT = PATHS['processed_dir']
 print('outputs on Drive:', OUT)
 '''
 
+SETUP_D3 = (SETUP
+            .replace("# ===== Setup: nothing to edit.", "# ===== Dataset 3 setup: nothing to edit.")
+            .replace("UPDATE_CODE = False   # leave False. True only if you were asked to switch to newer code\n"
+                     "                      # (all notebooks then use the newest commit; unfinished work is recomputed).",
+                     "UPDATE_D3_CODE = False   # leave False. True only if you were asked to switch D3 to newer code\n"
+                     "# Dataset 3 has its own code pin, <outputs>/D3_CODE_COMMIT.txt (all D3 notebooks run that commit);\n"
+                     "# the D1/D2 pin CODE_COMMIT.txt is only reported, never read for checkout or changed here.")
+            .replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                     "_run([sys.executable, 'scripts/colab_setup.py', '--family', 'D3']\n"
+                     "     + (['--update-code'] if UPDATE_D3_CODE else []))")
+            + "print('Dataset 3 folder:', PATHS['dataset3']['root'])\n")
+assert "UPDATE_D3_CODE" in SETUP_D3 and "--family" in SETUP_D3
+
+SETUP_MAINTENANCE = (SETUP
+                     .replace("UPDATE_CODE = False   # leave False. True only if you were asked to switch to newer code\n"
+                              "                      # (all notebooks then use the newest commit; unfinished work is recomputed).\n",
+                              "# maintenance: runs the newest code of the branch and reads or writes no code pin\n")
+                     .replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                              "_run([sys.executable, 'scripts/colab_setup.py', '--no-pin'])"))
+assert "--no-pin" in SETUP_MAINTENANCE
+
 HOWTO = """
 **How to use:** *Runtime → Run all*. Nothing to edit. Allow Google Drive access when asked.
 
@@ -170,7 +192,6 @@ def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict
     config = f"configs/experiments/{cfg_path}.yaml"
     d3 = variants[0].get("graph_family") == "D3"
     results = "experiments_D3" if d3 else "experiments"
-    pin = [md(D3_PIN_MD), code(D3_PIN)] if d3 else []
     nb = notebook([
         md(f"# {title}\n\n{desc}\n\n**Runs only this experiment** (`{config}`): every predefined variant and "
            f"setting, with subject-level cross-validation, evaluation and checkpointing. It never starts another "
@@ -190,8 +211,7 @@ separately (`03_comparative_figures.ipynb`).
 Requires the graphs from `""" + ("d3/D3_01_download_and_build_graphs.ipynb" if d3 else "01_build_graphs.ipynb")
            + "`." + (" Dataset 3 (OpenNeuro ds004504, AD vs HC): graph runs `graphsD3_v4_*`, results in "
                      "`experiments_D3/`, never mixed with D1/D2." if d3 else "")),
-        code(SETUP),
-        *pin,
+        code(SETUP_D3 if d3 else SETUP),
         md("## 1. This experiment: progress so far (from the checkpoints on Drive)"),
         code(f"""CONFIG = '{config}'   # this notebook's experiment
 EXPERIMENT = '{experiment}'
@@ -411,38 +431,6 @@ D3_EXPERIMENTS = [
      "Dataset 3: EARM-GNN full, fixed adjacency and mean fusion; PLV and |ciPLV| (exploratory, docs/earm_gnn.md)."),
 ]
 
-D3_PIN = """# Dataset 3 code pin: every D3 notebook (download, graphs, experiments) runs the commit recorded in
-# <outputs>/D3_CODE_COMMIT.txt (set on the first D3 run), independent of the D1/D2 pin in CODE_COMMIT.txt.
-UPDATE_D3_CODE = False   # leave False; True moves only the D3 pin to the newest code
-import subprocess, sys
-from pathlib import Path
-from adgraph.colab import resolve_code_pin
-
-head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{BRANCH}'], text=True).strip()
-d3_work = (any(Path(OUT).glob('graphsD3_v*/subjects/*/subject.done.json'))
-           or any(Path(OUT).glob('experiments_D3/**/*.done.json')))
-D3_COMMIT, _ = resolve_code_pin(Path(OUT) / 'D3_CODE_COMMIT.txt', head, update=UPDATE_D3_CODE, has_work=d3_work)
-_run(['git', '-C', '/content/repo', 'checkout', '-q', D3_COMMIT])
-for f in ('src/adgraph/io/bids.py', 'configs/pipeline_d3.yaml', 'scripts/d3_data.py'):
-    if not Path('/content/repo', f).exists():
-        raise RuntimeError(f'D3 pin {D3_COMMIT[:10]} lacks {f}: set UPDATE_D3_CODE = True and run again')
-_run([sys.executable, '-m', 'pip', 'install', '-q', '-r', '/content/repo/requirements.txt'])
-for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
-    del sys.modules[m]                      # this notebook's own imports now come from the D3 commit
-from adgraph.colab import choose_output_root, find_data_root, sh, write_paths_yaml
-from adgraph.config import load_paths
-_root = find_data_root()
-write_paths_yaml('/content/repo', _root, choose_output_root(_root))   # adds the Dataset 3 location
-PATHS = load_paths('/content/repo/configs/paths.yaml')
-print('D3 code commit:', D3_COMMIT)
-print('D1/D2 pin (unchanged):', (Path(OUT) / 'CODE_COMMIT.txt').read_text().split()[0])
-print('Dataset 3 folder:', PATHS['dataset3']['root'])"""
-
-D3_PIN_MD = """## 0. Dataset 3 code pin
-All Dataset 3 notebooks run one commit, recorded in `<outputs>/D3_CODE_COMMIT.txt` on the first D3 run; the
-D1/D2 experiments keep their own pin (`CODE_COMMIT.txt`, unchanged). Leave `UPDATE_D3_CODE = False`."""
-
-
 def d3_build_notebook() -> dict:
     return notebook([
         md("""# D3 · 01 · Download ds004504 and build its source-space graphs
@@ -453,19 +441,21 @@ resting-state EEG, 19 channels (10-20), 500 Hz. Used: the **36 AD and 29 HC** pa
 (methodology log entry 44, `docs/dataset_d3.md`).
 
 Processing (`configs/pipeline_d3.yaml`): the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given
-(nothing repeated). Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
+(nothing repeated). Recordings are split at the EEGLAB 'boundary' events that the provider's cleaning left
+(data removed there): each continuous segment is resampled on its own and no window crosses a discontinuity. Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
 50 % windows, window rejection, fsaverage source model, 68 Desikan-Killiany ROIs, bands, PLV / |ciPLV| and PSD
 as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation added).
 """ + HOWTO + """
-**Steps:** 0. D3 code pin · 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
-2. input check (36 AD / 29 HC, 19 channels in every file) · 3. smoke test (first subject) and its inspection ·
+**Code pin:** the setup cell runs the commit in `<outputs>/D3_CODE_COMMIT.txt` (Dataset 3's own pin); the
+D1/D2 pin `CODE_COMMIT.txt` is never changed by D3 notebooks.
+
+**Steps:** 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
+2. input check (36 AD / 29 HC, 19 channels in every file, EEGLAB boundary events per recording) · 3. smoke test (first subject) and its inspection ·
 3b. real-data montage checks · 4. full graph construction (65 recordings, resumable; **only after you set
 `CONFIRM_D3_FULL_BUILD = True`**) · 5. validation and completion report · 6. summary.
 Output: `<outputs>/graphsD3_v4_<config hash>/` (never mixed with the D1/D2 graph runs). Experiments on D3:
 `notebooks/d3/experiments/`. A GPU is not needed for this notebook."""),
-        code(SETUP),
-        md(D3_PIN_MD),
-        code(D3_PIN),
+        code(SETUP_D3),
         md("## 1. Download ds004504 (AD and HC derivatives only)"),
         code('sh("python scripts/d3_data.py download")'),
         md("## 2. Input check (participants and recording headers; no signal is read)"),
@@ -484,8 +474,13 @@ Explicitly selected inputs (never "the newest"): the D3 smoke run and the operat
 the frozen D1/D2 run by `graph_run_id 6d75de9975f0d9ae`, the header report of step 2. Checks: (1) electrode
 labels and template positions of all 19 channels; (2) no confirmed flat channel entered reconstruction (a flat
 channel stops its subject with `FlatChannelError`); (3) inverse operator 68 × 19 with the configured channels,
-verified against the full MNE inverse; (4) 68 ROI names and order identical to D1/D2; (5) no EEGLAB 'boundary'
-discontinuity in any of the 65 recordings. A failure stops the notebook here."""),
+verified against the full MNE inverse; (4) 68 ROI names and order identical to D1/D2; (5) EEGLAB 'boundary'
+discontinuities are handled (methodology log entry 45): the recording is split at every boundary, each continuous
+segment is processed on its own and windows lie inside one segment, at least the margin from its ends. The check
+runs the smoke subject and, in memory (nothing saved), the recording with the most boundary events, prints the
+per-participant table (boundary events, segments, candidate windows, windows excluded for a discontinuity,
+windows rejected by QC, accepted windows) and requires **zero accepted windows crossing a discontinuity or its
+margin**. A failure stops the notebook here."""),
         code('sh("python scripts/d3_verify_smoke.py")'),
         md("""## 4. Full graph construction (resumable)
 Starts only after you have reviewed steps 2-3b: set `CONFIRM_D3_FULL_BUILD = True` and run this cell (and the
@@ -510,8 +505,12 @@ print('graph_run_id', m['graph_run_id'], '| commit', m['git_commit'], '| operato
 print('per dataset:', m['summary']['per_dataset'])
 print('excluded by design:', len(m['registry'].get('excluded_by_design', {}).get('D3', [])), 'FTD participants')
 s = pd.read_csv(run / 'subjects.csv')
-display(s[[c for c in ['key', 'label', 'duration_s', 'median_std_uv', 'n_bad_channels', 'n_windows_kept',
-                       'n_windows_total', 'qc_spatial_rho', 'status'] if c in s]])
+display(s[[c for c in ['key', 'label', 'duration_s', 'median_std_uv', 'n_bad_channels', 'qc_spatial_rho', 'status']
+          if c in s]])
+print('discontinuities per participant (EEGLAB boundary events; windows of 20 s):')
+display(s[[c for c in ['key', 'n_boundary_events', 'n_segments', 'n_segments_usable', 'usable_duration_s',
+                       'n_windows_continuous_grid', 'n_windows_excluded_discontinuity', 'n_windows_total',
+                       'n_windows_rejected', 'n_windows_kept', 'status'] if c in s]])
 print(s.groupby('label')['n_windows_kept'].agg(['count', 'sum', 'median']))"""),
     ])
 
@@ -524,11 +523,10 @@ Subject-level results on Dataset 3 (ds004504, 36 AD / 29 HC, within-D3 cross-val
 ablations, the multi-band GCN, source and sensor PSD models and the age-only baseline. Tables, ROC curves,
 confusion matrices and per-repeat paired differences (descriptive; no significance test). Nothing is trained.
 Run after the D3 experiment notebooks; missing experiments are simply absent.""" + HOWTO),
-        code(SETUP),
-        md(D3_PIN_MD),
-        code(D3_PIN),
+        code(SETUP_D3),
         md("## 1. Comparison"),
         code("""sh("python scripts/exp7_earm.py compare --family D3")
+from pathlib import Path
 import pandas as pd
 from IPython.display import Image, display
 cmp = sorted((Path(OUT) / 'experiments_D3' / '_comparison').glob('comparison_*'))[-1]
@@ -713,9 +711,30 @@ else:
     ], gpu=True)
 
 
+def restore_pin_notebook() -> dict:
+    return notebook([
+        md("""# ADVANCED · Restore the D1/D2 code pin (maintenance, run once)
+""" + HOWTO + """
+Dataset 3 now has its own code pin (`<outputs>/D3_CODE_COMMIT.txt`, methodology log entry 45). Before that, D3
+notebooks used the shared pin `CODE_COMMIT.txt`, which a D3 session could move to a Dataset 3 commit. This
+notebook sets `CODE_COMMIT.txt` back to the last D1/D2 pin that predates Dataset 3, read from the pin's own
+history (expected: `1b6988a`, the fixed-hyperparameter commit). The old lines stay in the file as history.
+
+It changes **only that text file**: no graph, checkpoint or result is modified. It refuses (and changes nothing)
+if any D1/D2 unit was completed under the current pin. Running it again is harmless (it then reports
+"unchanged"). It runs the newest code without reading or writing any pin."""),
+        code(SETUP_MAINTENANCE),
+        md("## 1. Pins and the commits recorded by completed units (before)"),
+        code('sh("python scripts/code_pin.py status")'),
+        md("## 2. Restore the D1/D2 pin"),
+        code('sh("python scripts/code_pin.py restore-d1d2")'),
+    ])
+
+
 DRIVE_LAYOUT = """\
 <outputs>/                          AD-LEB/processed (or My Drive/AD-LEB-processed if that is read-only)
-├── CODE_COMMIT.txt                 code commit used by every session and notebook
+├── CODE_COMMIT.txt                 code commit used by every D1/D2 session and notebook
+├── D3_CODE_COMMIT.txt              Dataset 3's own code pin (notebooks/d3; never changes CODE_COMMIT.txt)
 ├── header_report_<time>.csv        EDF header checks (notebook 01, step 3)
 ├── diagnostics/amplitude_<time>/   read-only amplitude diagnostic (notebook 01, step 3b)
 ├── cache/
@@ -771,7 +790,9 @@ are generated by `scripts/make_notebooks.py` (do not edit them by hand).
 
 Optional: secondary analyses in [notebooks/additional](additional), and
 [advanced/Run_all_experiments_ADVANCED.ipynb]({COLAB}/advanced/Run_all_experiments_ADVANCED.ipynb)
-(whole plan; starts nothing unless explicitly enabled).
+(whole plan; starts nothing unless explicitly enabled). Maintenance:
+[advanced/Restore_D1D2_code_pin.ipynb]({COLAB}/advanced/Restore_D1D2_code_pin.ipynb) (sets the D1/D2 code
+pin back to its pre-Dataset 3 commit; changes no result).
 
 ## Experiment notebooks
 
@@ -789,7 +810,8 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     nbdir = Path(nbdir)
     outputs = {nbdir / "01_build_graphs.ipynb": build_graphs_notebook(),
-               nbdir / "advanced" / "Run_all_experiments_ADVANCED.ipynb": advanced_notebook()}
+               nbdir / "advanced" / "Run_all_experiments_ADVANCED.ipynb": advanced_notebook(),
+               nbdir / "advanced" / "Restore_D1D2_code_pin.ipynb": restore_pin_notebook()}
     entries = []
     for folder, name, cfg, title, desc in EXPERIMENTS:
         nb, entry = experiment_notebook(folder, name, cfg, title, desc)

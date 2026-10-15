@@ -29,6 +29,7 @@ from .io.eeg import list_recordings, load_raw, make_montage
 from .io.layout import check_layout, spatial_consistency
 from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
+from .preprocessing import discontinuities as disc
 from .preprocessing.boundary import boundary_aware, crop_edges, valid_window_starts
 from .preprocessing.boundary import margins as boundary_margins
 from .preprocessing.boundary import report as boundary_report
@@ -102,7 +103,7 @@ def verify_operator(op: dict, info, cfg: dict, subjects_dir: str | Path, seed: i
     return float(np.abs(op["W"] @ raw.get_data() - ref).max() / np.abs(ref).max())
 
 
-def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
+def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0, segments: list | None = None) -> dict:
     """Windows, rejection and per-window features for one cleaned, continuous recording.
 
     Filtering (sensor band-pass upstream; per-band ROI filtering here) is applied to
@@ -113,6 +114,11 @@ def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
     and the analytic signal is the finite complex FIR ``band_analytic_fir``. ``offset`` (samples at
     ``sfreq``) is where the cropped signal starts in the original recording; stored start samples and
     times are relative to the original recording.
+
+    ``segments`` (recordings with discontinuities, Dataset 3, entry 45): ``raw`` is the concatenation of
+    independently resampled continuous segments (``discontinuities.process_segments``); windows are placed
+    inside each segment with the margin from both of its ends, and stored positions map back to the
+    original recording.
     """
     v4 = boundary_aware(cfg)
     sfreq = raw.info["sfreq"]
@@ -125,13 +131,18 @@ def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
             raise ValueError("pipeline v4 expects the recording cropped by boundary.crop_edges before preprocessing "
                              f"(offset {offset} samples, expected {int(round(float(wcfg['edge_trim_s']) * sfreq))})")
         margin = boundary_margins(cfg)["margin_samples"]
-        starts = valid_window_starts(data.shape[1], cfg, margin)
+        if segments is not None:
+            starts, seg_idx = disc.window_starts(segments, cfg)
+        else:
+            starts = valid_window_starts(data.shape[1], cfg, margin)
     else:
         starts = window_starts(data.shape[1], sfreq, wcfg["window_s"], wcfg["step_s"], wcfg["edge_trim_s"])
     keep, thr, ptp = reject_windows(data, starts, win_len, wcfg["rejection"]["mad_k"],
                                     wcfg["rejection"]["max_bad_channel_fraction"])
     kept_idx = np.flatnonzero(keep)
     kept = starts[kept_idx]
+    # stored positions (samples at sfreq relative to the original recording)
+    stored = disc.to_original(starts, seg_idx, segments) if segments is not None else starts + offset
 
     progress.set(stage="source reconstruction (ROI signals)")
     roi = W @ data  # (n_rois, n_times): continuous source-space ROI signals
@@ -170,7 +181,11 @@ def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
     # every candidate window, kept or rejected (QC table saved with the subject). Windows within
     # the 0.1-45 Hz filter's half length of the discarded edges can carry slow (< l_freq) leakage
     # from edge transients; they are marked so their amplitude can be compared with the others.
-    if v4:                                        # by construction no window reaches the padded boundary
+    if segments is not None:                      # by construction no window reaches a segment's margin
+        s0 = np.array([segments[j]["proc_start"] for j in seg_idx], dtype=int)
+        s1 = np.array([segments[j]["proc_stop"] for j in seg_idx], dtype=int)
+        near = (starts < s0 + margin) | (starts + win_len > s1 - margin)
+    elif v4:                                      # by construction no window reaches the padded boundary
         near = (starts < margin) | (starts + win_len > data.shape[1] - margin)
     else:
         reach = bandpass_half_length(cfg)
@@ -178,8 +193,8 @@ def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
         near = (starts < trim + reach) | (starts + win_len > data.shape[1] - trim - reach)
     max_frac = wcfg["rejection"]["max_bad_channel_fraction"]
     qc_windows = pd.DataFrame({
-        "window_index": np.arange(len(starts)), "start_sample": starts + offset, "tmin": (starts + offset) / sfreq,
-        "tmax": (starts + offset + win_len) / sfreq, "kept": keep,
+        "window_index": np.arange(len(starts)), "start_sample": stored, "tmin": stored / sfreq,
+        "tmax": (stored + win_len) / sfreq, "kept": keep,
         "n_channels_over_threshold": (ptp > thr).sum(axis=1) if len(starts) else np.empty(0, int),
         "frac_channels_over_threshold": thr_exceed,
         "max_ptp_uv": ptp.max(axis=1) * 1e6 if len(starts) else np.empty(0),
@@ -187,9 +202,17 @@ def process_recording(raw, W: np.ndarray, cfg: dict, offset: int = 0) -> dict:
         "threshold_uv": thr * 1e6, "within_edge_filter_reach": near,
         "decision": np.where(keep, "kept", f"rejected: > {max_frac:.0%} of channels above threshold"),
     })
+    if segments is not None:
+        so = np.array([segments[j]["orig_start"] for j in seg_idx], dtype=int)
+        se = np.array([segments[j]["orig_stop"] for j in seg_idx], dtype=int)
+        qc_windows["segment_index"], qc_windows["segment_start_sample"], qc_windows["segment_stop_sample"] = (
+            seg_idx, so, se)
+        out.update({"segment_index": seg_idx[kept_idx], "segment_start_sample": so[kept_idx],
+                    "segment_stop_sample": se[kept_idx]})
+    kept_stored = stored[kept_idx]
     out.update({
-        "window_index": kept_idx, "start_sample": kept + offset, "stop_sample": kept + offset + win_len,
-        "tmin": (kept + offset) / sfreq, "tmax": (kept + offset + win_len) / sfreq,
+        "window_index": kept_idx, "start_sample": kept_stored, "stop_sample": kept_stored + win_len,
+        "tmin": kept_stored / sfreq, "tmax": (kept_stored + win_len) / sfreq,
         "qc_frac_channels_over_threshold": thr_exceed[kept_idx] if len(starts) else np.empty(0),
         "qc_max_ptp_uv": ptp[kept_idx].max(axis=1) * 1e6 if n_w else np.empty(0),
         "n_windows_total": len(starts), "n_windows_kept": n_w, "rejection_threshold_uv": thr * 1e6,
@@ -398,13 +421,29 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                                          "mmse", "acer", "comment", "path", "size_bytes")}
     progress.set(stage="loading EDF")
     raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+    split = disc.enabled(cfg)
+    if split:                                     # Dataset 3: EEGLAB boundary events (entry 45)
+        cuts, n_events = disc.boundary_cuts(raw)
+        sf_in = raw.info["sfreq"]
     crop, offset = {}, 0
     if boundary_aware(cfg):                       # v4: discard the edges before any filtering (entry 41)
         crop = crop_edges(raw, cfg)
         offset = int(round(crop["crop_start_s"] * cfg["preprocessing"]["sfreq"]))
+    seg_rows = {}
+    if split:
+        p = disc.plan(raw, int(round(crop["crop_start_s"] * sf_in)), cuts, cfg)
+        sf_new = float(cfg["preprocessing"]["sfreq"])
+        seg_rows = {"n_boundary_events": n_events, "n_discontinuities_analysed": int(len(p["cuts_cropped"])),
+                    "n_segments": len(p["segments"]), "n_segments_usable": len(p["usable"]),
+                    "usable_duration_s": sum(b - a for a, b in p["usable"]) / sf_in,
+                    "n_windows_continuous_grid": p["continuous_candidates"],
+                    "n_windows_continuous_grid_crossing_discontinuity": p["continuous_windows_spanning_cut"],
+                    "discontinuity_samples": json.dumps([round(c, 3) for c in disc.cuts_original(cuts, sf_in, sf_new)])}
+        if not p["usable"]:                       # no continuous stretch can hold one window
+            return _no_window_subject(rec, cfg, op, load_qc, crop, offset, seg_rows)
     progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
     try:
-        raw, pp_qc = preprocess(raw, cfg)
+        raw, pp_qc = preprocess(raw, cfg, segments=p["usable"] if split else None, offset_new=offset)
     except FlatChannelError as exc:               # Dataset 3: never silently analysed (entry 44)
         raise FlatChannelError(f"subject {rec.key}: {exc}") from exc
     # QC of the channel-to-electrode mapping only (changes nothing): nearby electrodes must
@@ -416,8 +455,11 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                     "check the channel mapping (%s labels)", rec.key, rho, load_qc["channel_naming"])
     if raw.ch_names != list(op["ch_names"]):
         raise RuntimeError(f"channel order {raw.ch_names} differs from operator")
-    res = process_recording(raw, op["W"], cfg, offset=offset)
+    res = process_recording(raw, op["W"], cfg, offset=offset, segments=pp_qc.get("segments"))
     n = res["n_windows_kept"]
+    if split:
+        seg_rows["n_windows_excluded_discontinuity"] = max(0, seg_rows["n_windows_continuous_grid"]
+                                                           - res["n_windows_total"])
     status = "ok" if n >= cfg["windowing"]["min_windows"] else "below_min_windows"
     subj_qc = {"median_std_uv": pp_qc["median_std_uv"], "n_bad_channels": pp_qc["n_bad_channels"],
                "rejection_threshold_uv": res["rejection_threshold_uv"],
@@ -433,7 +475,12 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                    "bad_channels_whole_recording": json.dumps(pp_qc["bad_channels_whole_recording"]),
                    "n_windows_rejected": res["n_windows_total"] - n,
                    "qc_edge_window_ptp_ratio": edge_window_ptp_ratio(res["qc_windows"]),
-                   "sample_offset": offset, "processed_n_samples": int(raw.n_times), **crop, "status": status}
+                   "sample_offset": offset, "processed_n_samples": int(raw.n_times), **crop, **seg_rows,
+                   "status": status}
+    if split:                                     # time line of the cropped recording, not of the concatenation
+        subject_row["processed_n_samples"] = disc.resampled_length(int(round((crop["crop_stop_s"] - crop["crop_start_s"])
+                                                                             * sf_in)), sf_in, sf_new)
+        subject_row["processed_concat_n_samples"] = int(raw.n_times)
     if subject_row["qc_edge_window_ptp_ratio"] > 2:
         log.warning("%s: kept windows near the recording edges have %.1fx the peak-to-peak of the others; "
                     "inspect qc_windows.csv", rec.key, subject_row["qc_edge_window_ptp_ratio"])
@@ -446,12 +493,32 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
         "sample_weight": 1.0 / n if n else np.nan,
         "qc_frac_channels_over_threshold": res["qc_frac_channels_over_threshold"][w],
         "qc_max_ptp_uv": res["qc_max_ptp_uv"][w], **{f"subject_{k}": v for k, v in subj_qc.items()},
+        **({k: int(res[k][w]) for k in ("segment_index", "segment_start_sample", "segment_stop_sample")}
+           if "segment_index" in res else {}),
     } for w in range(n)]
     windows = pd.DataFrame(win_rows, columns=list(WINDOW_COLUMNS) if not win_rows else None)
     log.info("%s: %d/%d windows, %d bad channels, %s channel labels, spatial rho %.2f", rec.key, n,
              res["n_windows_total"], pp_qc["n_bad_channels"], load_qc["channel_naming"], rho)
     qc_tables = {"qc_channels": pp_qc["channels"], "qc_windows": res["qc_windows"]}
     return arrays, windows, subject_row, res["roi_timeseries"], qc_tables
+
+
+def _no_window_subject(rec, cfg: dict, op: dict, load_qc: dict, crop: dict, offset: int, seg_rows: dict):
+    """A recording none of whose continuous segments can hold one window (entry 45): reported with status
+    ``below_min_windows`` (the pre-specified rule), nothing analysed; never a silent drop or a failure."""
+    n_b, n_r, n_c = len(cfg["connectivity"]["bands"]), len(op["roi_names"]), len(op["ch_names"])
+    arrays = {k: np.zeros((0, n_b, n_r, n_r) if k in ("plv", "ciplv", "ciplv_signed")
+                          else (0, n_b, n_c if k.startswith("sensor") else n_r), np.float32)
+              for k in DATA_ARRAY_KEYS if (k != "ciplv_signed" or cfg["output"].get("save_signed_ciplv", True))}
+    row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex", "mmse", "acer",
+                                         "comment", "path", "size_bytes")}
+    subject_row = {**row, **{k: load_qc[k] for k in ("orig_sfreq", "duration_s", "unit_scale")}, **crop, **seg_rows,
+                   "n_windows_total": 0, "n_windows_kept": 0, "n_windows_rejected": 0,
+                   "n_windows_excluded_discontinuity": seg_rows.get("n_windows_continuous_grid", 0),
+                   "sample_offset": offset, "status": "below_min_windows",
+                   "note": "no continuous segment long enough for one window plus margins"}
+    log.warning("%s: %s", rec.key, subject_row["note"])
+    return arrays, pd.DataFrame(columns=list(WINDOW_COLUMNS)), subject_row, None, {}
 
 
 def save_subject(unit_dir: Path, identity: dict, arrays: dict, windows: pd.DataFrame, subject_row: dict,

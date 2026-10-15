@@ -91,9 +91,12 @@ e.g. `D1-3`, `D2-3`.
 - Pipeline `configs/pipeline_d3.yaml`:
   - no second band-pass;
   - bad channels reported only;
+  - recordings split at EEGLAB `boundary` events, each segment resampled on its own; no window crosses a
+    discontinuity or its margin (`preprocessing/discontinuities.py`, methodology log entry 45);
   - runs in `graphsD3_v4_*`.
 - Experiments `configs/experiments/d3/` (`graph_family: D3`, setting `within_D3`); results in `experiments_D3/`.
-- Own code pin `D3_CODE_COMMIT.txt`.
+- Own code pin `D3_CODE_COMMIT.txt` (`colab_setup.py --family D3`); D3 notebooks never change the D1/D2 pin
+  `CODE_COMMIT.txt` (`scripts/code_pin.py`).
 - Never mix D3 graph runs or results with D1/D2 ones. Cross-dataset D3 ↔ D1/D2 is not implemented yet.
 
 ## Repository layout

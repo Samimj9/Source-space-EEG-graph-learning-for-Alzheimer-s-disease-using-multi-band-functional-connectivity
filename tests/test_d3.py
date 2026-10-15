@@ -301,7 +301,8 @@ def test_inspection_uses_active_channel_count_and_smoke_checks(tmp_path, monkeyp
         return e.value.code, json.loads((run / "d3_montage_checks.json").read_text())["checks"]
 
     code, checks = verify()
-    assert code == 0 and all(c["passed"] for c in checks) and len(checks) == 8
+    assert code == 0 and all(c["passed"] for c in checks) and len(checks) == 13
+    assert "(5) ZERO accepted windows crossing a discontinuity or its margin" in [c["check"] for c in checks]
     m = json.loads((ref / "manifest.json").read_text())
     m["source_operator"]["roi_names"] = m["source_operator"]["roi_names"][::-1]          # different ROI order
     (ref / "manifest.json").write_text(json.dumps(m))
