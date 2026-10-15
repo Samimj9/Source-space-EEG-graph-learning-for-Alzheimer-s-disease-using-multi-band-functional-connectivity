@@ -84,8 +84,9 @@ for key in keys:
     with np.load(unit / "arrays.npz") as z:
         arr = {k: z[k] for k in z.files}
     n = arr["plv"].shape[0]
-    roi_rel = arr["psd_rel"].mean(0) if n else np.full((len(bands), 68), np.nan)        # (bands, ROIs)
-    sens_rel = arr["sensor_psd_rel"].mean(0) if n else np.full((len(bands), 30), np.nan)
+    # (bands, ROIs) and (bands, active channels): sizes from the subject's own arrays (D1/D2: 30, D3: 19)
+    roi_rel = arr["psd_rel"].mean(0) if n else np.full((len(bands), arr["psd_rel"].shape[-1]), np.nan)
+    sens_rel = arr["sensor_psd_rel"].mean(0) if n else np.full((len(bands), arr["sensor_psd_rel"].shape[-1]), np.nan)
     plv, ci = (arr["plv"].mean(0), arr["ciplv"].mean(0)) if n else (None, None)
     iu = np.triu_indices(arr["plv"].shape[-1], 1)
     stats = {}

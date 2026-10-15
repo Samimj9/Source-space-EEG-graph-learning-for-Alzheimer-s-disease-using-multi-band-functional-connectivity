@@ -8,6 +8,11 @@ import pandas as pd
 from ..io.eeg import robust_channel_std
 
 
+class FlatChannelError(ValueError):
+    """A confirmed flat channel in a recording whose bad channels are not interpolated (Dataset 3): it must
+    never enter the average reference, the source model or connectivity as a valid measurement."""
+
+
 def channel_metrics(data: np.ndarray, rules: dict) -> pd.DataFrame:
     """Per-channel quantities behind the bad-channel rules, and the rule each channel fails.
 
@@ -112,7 +117,8 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
 
     Dataset 3 (OpenNeuro ds004504 derivatives, methodology log entry 44): ``preprocessing.bandpass: false``
     (the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given; nothing is filtered twice) and
-    ``interpolate_bads: false`` (the bad-channel rules are evaluated and reported, nothing is interpolated).
+    ``interpolate_bads: false`` (the bad-channel rules are evaluated and reported, nothing is interpolated; a
+    confirmed *flat* channel raises ``FlatChannelError`` before referencing instead of entering the analysis).
 
     Window rejection (``process_recording``) is unchanged. ``qc["channels"]`` holds the
     per-channel quantities; ``bad_channels_whole_recording`` (QC only) what step 3 would flag
@@ -147,8 +153,17 @@ def preprocess(raw, cfg: dict) -> tuple[object, dict]:
     if bads and pp["interpolate_bads"]:
         raw.interpolate_bads(reset_bads=True, verbose="error")
     elif not pp["interpolate_bads"]:
-        # Dataset 3 (provider-cleaned, entry 44): flagged channels are reported only; every channel stays in
-        # the signal, the average reference and the source model
+        # Dataset 3 (provider-cleaned, entry 44): a confirmed flat channel (std over the whole analysed interval
+        # of the 1 Hz high-passed signal below rules.flat_std_v = 0.1 uV, two orders of magnitude below
+        # physiological EEG) is not a measurement: stop before referencing; the author decides how to handle it.
+        flat = [ch for ch, why in bads.items() if why == "flat"]
+        if flat:
+            stds = metrics.set_index(pd.Index(raw.ch_names))["std"]
+            raise FlatChannelError(
+                f"flat channel(s) {flat} (std {', '.join(f'{stds[c] * 1e6:.3g} uV' for c in flat)} over the analysed "
+                f"interval, < {rules['flat_std_v'] * 1e6:.3g} uV): not interpolated by configuration, so this "
+                "recording is not processed; decide how to handle it (methodology log entry 44)")
+        # other flagged channels (amplitude, correlation) are reported only and stay in the signal
         raw.info["bads"] = []
 
     raw.set_eeg_reference(pp["reference"], projection=True, verbose="error")

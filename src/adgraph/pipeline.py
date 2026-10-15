@@ -32,7 +32,7 @@ from .io.participants import load_participants
 from .preprocessing.boundary import boundary_aware, crop_edges, valid_window_starts
 from .preprocessing.boundary import margins as boundary_margins
 from .preprocessing.boundary import report as boundary_report
-from .preprocessing.clean import bandpass_half_length, preprocess
+from .preprocessing.clean import FlatChannelError, bandpass_half_length, preprocess
 from .preprocessing.windows import reject_windows, window_samples, window_starts
 from .checkpoint import (CODE_VERSIONS, IncompatibleCheckpoint, StatusTable, atomic_save_npy, atomic_savez,
                          atomic_write_csv, atomic_write_json, check_unit, cleanup_temp_files, code_identity,
@@ -403,7 +403,10 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
         crop = crop_edges(raw, cfg)
         offset = int(round(crop["crop_start_s"] * cfg["preprocessing"]["sfreq"]))
     progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
-    raw, pp_qc = preprocess(raw, cfg)
+    try:
+        raw, pp_qc = preprocess(raw, cfg)
+    except FlatChannelError as exc:               # Dataset 3: never silently analysed (entry 44)
+        raise FlatChannelError(f"subject {rec.key}: {exc}") from exc
     # QC of the channel-to-electrode mapping only (changes nothing): nearby electrodes must
     # correlate more than distant ones; near 0 would indicate a wrong index mapping
     pos = np.array([raw.info["chs"][i]["loc"][:3] for i in range(len(raw.ch_names))])

@@ -46,7 +46,7 @@ Author decision: use the provider's cleaning as given and add only what our pipe
 | Resampling | 250 Hz (FFT, `reflect_limited`) | same |
 | Sensor band-pass | 0.1–45 Hz FIR (8251 taps) | **none** (provider 0.5–45 Hz Butterworth; nothing filtered twice) |
 | Artifact cleaning | none at the sensor level | provider ASR + ICA (as released) |
-| Bad channels | rules evaluated on the analysed interval, flagged channels interpolated | same rules **evaluated and reported only** (`qc_channels.csv`); no interpolation added |
+| Bad channels | rules evaluated on the analysed interval, flagged channels interpolated | same rules **evaluated and reported only** (`qc_channels.csv`); no interpolation added. A **confirmed flat** channel (std of the analysed 1 Hz high-passed signal < 0.1 µV, `flat_std_v`) stops that subject with `FlatChannelError` naming subject and channel; nothing is interpolated or excluded automatically |
 | Reference | common average (projection) | common average (from A1–A2) |
 | Amplitude checks | unit safeguard + plausibility | same |
 | Boundary margin | 4125 + 412 = 4537 samples (18.148 s) | analytic kernel only: **412 samples (1.648 s)**, since no sensor FIR is applied |
@@ -60,6 +60,19 @@ How runs and results are kept apart:
 - **Experiment results:** `<processed>/experiments_D3/`. Each results root therefore holds results from a
   single graph run.
 - **Code pin:** D3 has its own pin, `<processed>/D3_CODE_COMMIT.txt`; the D1/D2 pin is untouched.
+
+## 3b. Real-data checks before the full build
+
+`scripts/d3_verify_smoke.py` (notebook D3_01 step 3b) runs on the one-subject smoke test. Its inputs are
+selected explicitly: the smoke run and the operator recorded in its manifest, and the frozen D1/D2 run by
+`graph_run_id`. It checks:
+1. electrode labels and positions;
+2. no flat channel in the reconstruction;
+3. operator 68 × 19 with the configured channels, verified against the full MNE inverse;
+4. ROI names and order identical to D1/D2;
+5. no discontinuities.
+
+The full build cell runs only after `CONFIRM_D3_FULL_BUILD = True` is set.
 
 ## 4. Evaluation
 

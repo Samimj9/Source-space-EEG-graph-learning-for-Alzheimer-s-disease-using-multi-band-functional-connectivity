@@ -186,3 +186,125 @@ def test_experiment_cli_uses_d3_family(tmp_path):
     assert "graphsD3_v4_synth" in r.stdout
     assert list((processed / "experiments_D3" / "d3_baseline_age").rglob("final.done.json"))
     assert not (processed / "experiments").exists()
+
+
+# ---------------------------------------------------------------- flat-channel stop and 19-channel inspection
+def test_confirmed_flat_channel_stops_d3_but_low_amplitude_eeg_passes():
+    from adgraph.io.eeg import make_montage
+    from adgraph.preprocessing.boundary import crop_edges
+    from adgraph.preprocessing.clean import FlatChannelError, preprocess
+
+    raw = synthetic_raw()
+    raw._data[CH.index("Cz")] = 0.0                                         # flatlined electrode
+    raw.set_montage(make_montage("standard_1020"))
+    crop_edges(raw, CFG)
+    with pytest.raises(FlatChannelError, match=r"flat channel\(s\) \['Cz'\]"):
+        preprocess(raw, CFG)
+    low = synthetic_raw(seed=4)
+    low._data[CH.index("Cz")] *= 0.1                                        # ~1 uV: low but physiological
+    low.set_montage(make_montage("standard_1020"))
+    crop_edges(low, CFG)
+    _, qc = preprocess(low, CFG)
+    assert not any(str(r).startswith("flat") for r in qc["bad_channels"].values())
+
+
+def test_flat_channel_is_still_interpolated_for_d1d2():
+    from adgraph.io.eeg import make_montage
+    from adgraph.preprocessing.boundary import crop_edges
+    from adgraph.preprocessing.clean import preprocess
+
+    cfg = load_yaml(REPO / "configs" / "pipeline.yaml")                     # frozen D1/D2 behaviour unchanged
+    names = [c for c in cfg["channels"]["recorded"] if c not in cfg["channels"]["drop"]]
+    rng = np.random.default_rng(0)
+    t = np.arange(150 * 500) / 500
+    x = (np.sin(2 * np.pi * 10 * t) + rng.standard_normal((len(names), t.size))) * 10e-6
+    x[names.index("Cz")] = 0.0
+    raw = mne.io.RawArray(x, mne.create_info(names, 500, "eeg"), verbose="error")
+    raw.set_montage(make_montage("standard_1020"))
+    crop_edges(raw, cfg)
+    out, qc = preprocess(raw, cfg)
+    assert qc["bad_channels"]["Cz"] == "flat" and bool(qc["channels"].set_index("channel").loc["Cz", "interpolated"])
+    assert np.std(out.get_data(picks=["Cz"])) > 1e-7
+
+
+def _d3_run(tmp_path, monkeypatch, flat_subject=None, limit=None):
+    import adgraph.io.eeg as eeg
+    import adgraph.pipeline as pl
+
+    root = tmp_path / "ds004504"
+    write_participants(root, {1: "A", 2: "C", 3: "F", 4: "A"})
+    for i in (1, 2, 3, 4):
+        f = root / "derivatives" / f"sub-{i:03d}" / "eeg" / f"sub-{i:03d}_task-eyesclosed_eeg.set"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(str(i))
+    (root / "dataset_description.json").write_text("{}")
+    monkeypatch.setattr(bids, "EXPECTED", {"AD": 2, "HC": 1})
+
+    def header(path, fmt):
+        i = int(Path(path).read_text())
+        raw = synthetic_raw(i)
+        if i == flat_subject:
+            raw._data[CH.index("O2")] = 0.0
+        return raw
+    monkeypatch.setattr(eeg, "read_header", header)
+    W = np.random.default_rng(2).standard_normal((68, 19))
+    monkeypatch.setattr(pl, "fetch_fsaverage", lambda d: None)
+    monkeypatch.setattr(pl, "build_roi_operator", lambda info, cfg, d: {
+        "W": W, "roi_names": [f"r{i}" for i in range(68)], "ch_names": list(info["ch_names"]), "n_sources": 20484,
+        "fwd_ch_names": list(info["ch_names"])})
+    monkeypatch.setattr(pl, "verify_operator", lambda *a, **k: 1e-12)
+    paths = {"dataset3": {"root": str(root)}}
+    return pl, paths, pl.run(paths, CFG, tmp_path / "processed", tmp_path / "subjects", limit=limit,
+                             allow_ephemeral=True)
+
+
+def test_flat_subject_fails_with_subject_and_channel_named(tmp_path, monkeypatch):
+    import adgraph.pipeline as pl
+
+    with pytest.raises(pl.GraphRunIncomplete):
+        pl_, paths, _ = _d3_run(tmp_path, monkeypatch, flat_subject=2)
+    failed = json.loads(next((tmp_path / "processed").glob("graphsD3_v4_*/subjects/D3-2/failed.json")).read_text())
+    assert "subject D3-2" in failed["status"] and "['O2']" in failed["status"]
+    done = list((tmp_path / "processed").glob("graphsD3_v4_*/subjects/D3-1/subject.done.json"))
+    assert done                                                             # other subjects unaffected
+
+
+def test_inspection_uses_active_channel_count_and_smoke_checks(tmp_path, monkeypatch):
+    import runpy
+
+    _, paths, run = _d3_run(tmp_path, monkeypatch, limit=1)
+    unit = run / "subjects" / "D3-1"
+    z = dict(np.load(unit / "arrays.npz"))
+    np.savez(unit / "arrays.npz", **{k: v[:0] for k, v in z.items()})      # a subject without kept windows
+    (tmp_path / "paths.yaml").write_text(yaml.safe_dump({"drive_root": str(tmp_path), "processed_dir":
+                                                         str(tmp_path / "processed"), "cache_dir": str(tmp_path / "c"),
+                                                         "dataset3": paths["dataset3"]}))
+    r = subprocess.run([sys.executable, "scripts/inspect_graph_subjects.py", "--paths", str(tmp_path / "paths.yaml"),
+                        "--config", "configs/pipeline_d3.yaml", "--run-dir", str(run)], capture_output=True, text=True,
+                       cwd=REPO, env={"PYTHONPATH": str(REPO / "src"), "PATH": "/usr/bin:/bin", "MPLBACKEND": "Agg"})
+    assert r.returncode == 0, r.stderr[-2000:]
+    # explicit-selection smoke checks: frozen D1/D2 manifest by graph_run_id, D3 operator from the smoke manifest
+    ref = tmp_path / "processed" / "graphs_v4_frozen"
+    ref.mkdir()
+    (ref / "manifest.json").write_text(json.dumps({"graph_run_id": "frozen123", "config": {"version": 4},
+                                                   "assembled_at": "x",
+                                                   "source_operator": {"roi_names": [f"r{i}" for i in range(68)]}}))
+    (ref / "assembly.done.json").write_text("{}")
+    pd.DataFrame({"key": ["D3-1", "D3-2", "D3-4"], "n_boundary_events": [0, 0, 0]}).to_csv(
+        tmp_path / "processed" / "d3_header_report_20260101_000000.csv", index=False)
+
+    def verify(extra=()):
+        monkeypatch.setattr(sys, "argv", ["d3_verify_smoke.py", "--paths", str(tmp_path / "paths.yaml"),
+                                          "--d1d2-graph-run-id", "frozen123", *extra])
+        with pytest.raises(SystemExit) as e:
+            runpy.run_path(str(REPO / "scripts" / "d3_verify_smoke.py"), run_name="__main__")
+        return e.value.code, json.loads((run / "d3_montage_checks.json").read_text())["checks"]
+
+    code, checks = verify()
+    assert code == 0 and all(c["passed"] for c in checks) and len(checks) == 8
+    m = json.loads((ref / "manifest.json").read_text())
+    m["source_operator"]["roi_names"] = m["source_operator"]["roi_names"][::-1]          # different ROI order
+    (ref / "manifest.json").write_text(json.dumps(m))
+    code, checks = verify()
+    assert code == 1 and [c["check"] for c in checks if not c["passed"]] == [
+        "(4) 68 ROI names and order identical to the frozen D1/D2 run"]

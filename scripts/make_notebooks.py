@@ -459,7 +459,8 @@ as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation ad
 """ + HOWTO + """
 **Steps:** 0. D3 code pin · 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
 2. input check (36 AD / 29 HC, 19 channels in every file) · 3. smoke test (first subject) and its inspection ·
-4. full graph construction (65 recordings, resumable) · 5. validation and completion report · 6. summary.
+3b. real-data montage checks · 4. full graph construction (65 recordings, resumable; **only after you set
+`CONFIRM_D3_FULL_BUILD = True`**) · 5. validation and completion report · 6. summary.
 Output: `<outputs>/graphsD3_v4_<config hash>/` (never mixed with the D1/D2 graph runs). Experiments on D3:
 `notebooks/d3/experiments/`. A GPU is not needed for this notebook."""),
         code(SETUP),
@@ -478,9 +479,23 @@ from adgraph.pipeline import graph_run_dir
 smoke = graph_run_dir(OUT, load_yaml('configs/pipeline_d3.yaml'), 1)
 for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
     display(Image(str(png)))"""),
-        md("## 4. Full graph construction (resumable)\nProgress is saved per subject. If the runtime stops, *Run all* again."),
-        code('sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --status")\n'
-             'sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml")'),
+        md("""## 3b. Real-data montage checks (must all PASS)
+Explicitly selected inputs (never "the newest"): the D3 smoke run and the operator recorded in its manifest,
+the frozen D1/D2 run by `graph_run_id 6d75de9975f0d9ae`, the header report of step 2. Checks: (1) electrode
+labels and template positions of all 19 channels; (2) no confirmed flat channel entered reconstruction (a flat
+channel stops its subject with `FlatChannelError`); (3) inverse operator 68 × 19 with the configured channels,
+verified against the full MNE inverse; (4) 68 ROI names and order identical to D1/D2; (5) no EEGLAB 'boundary'
+discontinuity in any of the 65 recordings. A failure stops the notebook here."""),
+        code('sh("python scripts/d3_verify_smoke.py")'),
+        md("""## 4. Full graph construction (resumable)
+Starts only after you have reviewed steps 2-3b: set `CONFIRM_D3_FULL_BUILD = True` and run this cell (and the
+ones below). Progress is saved per subject; if the runtime stops, *Run all* again."""),
+        code("""CONFIRM_D3_FULL_BUILD = False   # set True only after every check of step 3b passed and the smoke test was reviewed
+if not CONFIRM_D3_FULL_BUILD:
+    raise RuntimeError('Full D3 graph construction not started (CONFIRM_D3_FULL_BUILD = False). Review steps 2-3b, '
+                       'then set CONFIRM_D3_FULL_BUILD = True and run this cell and the cells below.')
+sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --status")
+sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml")"""),
         md("## 5. Validate the D3 graph dataset and write the completion report"),
         code('sh("python scripts/validate_graph_run.py --prefix graphsD3")'),
         md("## 6. Summary"),

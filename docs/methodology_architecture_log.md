@@ -2748,6 +2748,16 @@ Version 1.0, 2026-10-14. Author decisions. Full record: `docs/dataset_d3.md`.
 **Approval status.** Approved by the author (role, preprocessing, representation, first experiments)
 on 2026-10-14.
 
+**Addendum (2026-10-15, author approval; montage inspection before the first D3 build).**
+- **Flat channels:** with bad-channel interpolation off (D3), a confirmed flat channel raises
+  `FlatChannelError` naming the subject and channel, before referencing. The criterion is the existing
+  `flat_std_v`: std < 0.1 µV over the analysed, 1 Hz high-passed interval, two orders of magnitude below
+  physiological EEG. Nothing is interpolated, excluded or rebuilt automatically. Other flagged channels stay
+  report-only. D1/D2, where flat channels are interpolated, is unchanged.
+- **Inspection script:** `inspect_graph_subjects.py` takes the channel and ROI counts from the subject's arrays
+  (no fixed 30).
+- **Real-data checks:** `scripts/d3_verify_smoke.py` gates the full D3 build (`CONFIRM_D3_FULL_BUILD`).
+
 ---
 
 ## Open items requiring author confirmation
