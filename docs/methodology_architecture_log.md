@@ -2839,6 +2839,67 @@ to a new `graphsD3_v4_<hash>` directory.
 
 ---
 
+## 46. Dataset 3: electrode coordinates from the EEGLAB files (provenance: a shared template)
+
+**Date:** 2026-10-15. **Requested by:** the author: the D3 forward and inverse models must use the electrode
+coordinates supplied with the recordings, not a template substituted by this pipeline. D3 only; D1/D2 unchanged.
+**Code:** `src/adgraph/io/chanlocs.py`, `io/eeg.load_raw`, `pipeline.subject_geometries` / `operator_identity` /
+`get_operator` / `run` / `process_subject`, `configs/pipeline_d3.yaml` (`channels.coordinates`),
+`scripts/d3_data.py check`, `scripts/d3_verify_smoke.py`. **Tests:** `tests/test_d3_coordinates.py`.
+
+**Inspection of the real files** (all 65 AD/HC recordings of ds004504 v1.0.9, derivatives and raw BIDS files; only
+the `chanlocs`, `chaninfo` and `history` variables were read, from the public OpenNeuro bucket, byte ranges only;
+the Drive copy is the same content, MD5-verified at download):
+
+| Property | Finding |
+|---|---|
+| Channels with coordinates | 19 of 19 in every file (Fp1 … Pz, provider order), all X/Y/Z finite |
+| Units, axes | mm; EEGLAB axes (X nose, Y left, Z up), `chaninfo.nosedir = '+X'`; radius 83–117 mm |
+| Provenance | every file: `chaninfo.filename` and `EEG.history` = `pop_chanedit(EEG, 'lookup', 'D:\eeglab2022.1\plugins\dipfit\standard_BEM\elec\standard_1005.elc')` |
+| Subject-specific? | **No.** All 65 files hold identical coordinates (max difference 0.0 mm) |
+| Relation to the template | identical (≤ 7·10⁻¹⁴ mm) to MNE's `colin27_1005` / `colin27_1020` (FieldTrip `standard_1005.elc`): Colin27 positions in MNI space |
+| Fiducials | none (`nodatchans` = the A1/A2 mastoid references only) |
+| BIDS sidecars | no `electrodes.tsv` / `coordsystem.json`; `EEGPlacementScheme` "10-20" |
+| MNE's EEGLAB reader as is | labels the MNI coordinates as `head` frame with fiducials invented at ±97 mm; with `trans='fsaverage'` every electrode would land 46–57 mm from its stored position. Not usable without explicit frame handling |
+| The template used so far (`standard_1020` → `colin27_1020`, `mri` frame, fsaverage fiducials) | positions given to the forward model identical to the stored ones (≤ 1.4·10⁻¹⁴ mm) |
+
+The stored coordinates are therefore valid and interpretable, but they are the provider's template lookup, not
+individual measurements. They cannot represent individual head geometry.
+
+**Implementation.**
+- `channels.coordinates.source: eeglab_chanlocs`: every D3 recording's montage is built from its own `chanlocs`.
+  `make_standard_montage` is never called for D3.
+- **Frame.** It is established from the provider's lookup record: `chaninfo.filename`, or a `'lookup'` in
+  `EEG.history`, must name an accepted DIPFIT `standard_BEM` file. Those positions are MNI (Colin27). They are
+  placed in the `mri` frame with the fsaverage MNI fiducials, exactly as MNE handles its colin27 templates, so
+  `trans='fsaverage'` maps them onto fsaverage MRI space.
+- **Checks; any failure raises `CoordinateError`, with no template fallback:**
+  - all 19 channels present with finite 3D coordinates;
+  - head radius consistent with the configured units (mm);
+  - nose = +X, left/right sides correct;
+  - an accepted lookup record. An unrecorded or other source, such as an individual digitisation in an unknown
+    frame, stops the subject.
+- **Operators.** One verified 68 × 19 operator per distinct geometry. The identity includes the geometry hash and
+  positions. Every subject records `coord_source`, `coord_frame`, `coord_lookup`, `montage_hash`,
+  `coord_template_deviation_mm` and `operator_id`. A subject whose geometry differs from its operator's stops.
+  With one geometry, as in ds004504, there is one operator. The manifest stores the geometry with the operator,
+  and all operators if there are several.
+- **New identities.** The config hash changes, so D3 uses a new `graphsD3_v4_<hash>` run (old smoke output kept).
+  The operator identity changes, so the old template-based operator is not reused (it stays in the cache).
+- **Smoke checks** (`d3_verify_smoke.py`):
+  - (1) the coordinates come from the file, and the operator's positions equal them;
+  - (1) the head → fsaverage MRI transform returns the stored positions (< 0.01 mm);
+  - (1) every subject is on its own geometry's operator;
+  - (6) PSD, PLV and |ciPLV| are finite, in range and symmetric.
+  - Provenance is saved in `d3_montage_checks.json`.
+
+**Expected effect.** None numerically: the stored positions are the template used before. The change makes the
+geometry come from the data with an explicit frame. It also stops any future recording whose positions differ or
+whose frame cannot be established. The limitation that D3 source estimates use template electrode positions on a
+template head (fsaverage) is unchanged and must be stated.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

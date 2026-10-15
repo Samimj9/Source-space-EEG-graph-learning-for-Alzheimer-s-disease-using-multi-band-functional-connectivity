@@ -28,6 +28,14 @@ CFG = load_yaml(REPO / "configs" / "pipeline_d3.yaml")
 CH = CFG["channels"]["recorded"]
 
 
+@pytest.fixture(autouse=True)
+def _provider_chanlocs(monkeypatch):
+    """Placeholder recordings carry the provider's chanlocs (template lookup; entry 46)."""
+    from synthetic_chanlocs import patch_reader
+
+    patch_reader(monkeypatch, CFG["channels"]["recorded"])
+
+
 def write_participants(root: Path, groups: dict) -> pd.DataFrame:
     rows = [{"participant_id": f"sub-{i:03d}", "Gender": "F" if i % 2 else "M", "Age": 60 + i, "Group": g,
              "MMSE": 20 + i % 10} for i, g in groups.items()]
@@ -283,6 +291,7 @@ def test_inspection_uses_active_channel_count_and_smoke_checks(tmp_path, monkeyp
                         "--config", "configs/pipeline_d3.yaml", "--run-dir", str(run)], capture_output=True, text=True,
                        cwd=REPO, env={"PYTHONPATH": str(REPO / "src"), "PATH": "/usr/bin:/bin", "MPLBACKEND": "Agg"})
     assert r.returncode == 0, r.stderr[-2000:]
+    np.savez(unit / "arrays.npz", **z)                                      # restore: (6) checks the outputs
     # explicit-selection smoke checks: frozen D1/D2 manifest by graph_run_id, D3 operator from the smoke manifest
     ref = tmp_path / "processed" / "graphs_v4_frozen"
     ref.mkdir()
@@ -301,7 +310,7 @@ def test_inspection_uses_active_channel_count_and_smoke_checks(tmp_path, monkeyp
         return e.value.code, json.loads((run / "d3_montage_checks.json").read_text())["checks"]
 
     code, checks = verify()
-    assert code == 0 and all(c["passed"] for c in checks) and len(checks) == 13
+    assert code == 0 and all(c["passed"] for c in checks) and len(checks) == 17
     assert "(5) ZERO accepted windows crossing a discontinuity or its margin" in [c["check"] for c in checks]
     m = json.loads((ref / "manifest.json").read_text())
     m["source_operator"]["roi_names"] = m["source_operator"]["roi_names"][::-1]          # different ROI order

@@ -8,13 +8,16 @@ Every input is selected explicitly, never "the newest":
 * the frozen D1/D2 run = the graphs_v* run whose manifest graph_run_id is --d1d2-graph-run-id (6d75de9975f0d9ae);
 * the header report = every d3_header_report_*.csv written by `scripts/d3_data.py check` (latest file).
 
-Checks: (1) electrode labels (raw -> canonical) and template positions of all 19 channels; (2) no confirmed flat
+Checks: (1) electrode labels (raw -> canonical) and the coordinates stored in the .set file (entry 46): valid 3D
+positions, frame established from the provider's lookup record, the operator built from exactly these positions, the
+head -> fsaverage MRI transformation returning them, every subject on the operator of its own geometry; (2) no flat
 channel in the processed smoke subjects (a flat channel stops the subject: FlatChannelError); (3) inverse
 operator 68 x 19 with the configured channel names and order, verified against the full MNE inverse; (4) 68 ROI
 names and order identical to the frozen D1/D2 run; (5) EEGLAB 'boundary' discontinuities are allowed only if
 handled: ZERO accepted windows cross a discontinuity or its margin, checked on the smoke subject(s) and, in
-memory (nothing saved), on the recording with the most boundary events.
-Writes d3_montage_checks.json into the smoke run; exits 1 if any check fails.
+memory (nothing saved), on the recording with the most boundary events; (6) PSD, PLV and |ciPLV| finite and in range.
+Writes d3_montage_checks.json into the smoke run (checks + provenance: coordinate source, frame, montage hash,
+operator id); exits 1 if any check fails.
 """
 
 import argparse
@@ -27,7 +30,7 @@ import pandas as pd
 
 from adgraph.config import common_channels, load_paths, load_yaml
 from adgraph.io import bids
-from adgraph.io.eeg import channel_mapping, make_montage, read_header
+from adgraph.io.eeg import channel_mapping, read_header
 from adgraph.pipeline import graph_run_dir, list_graph_runs
 
 parser = argparse.ArgumentParser()
@@ -55,22 +58,54 @@ if man is None:
 subj = pd.read_csv(smoke / "subjects.csv")
 keys = subj["key"].tolist()
 
-# (1) electrode labels and positions
-pos = make_montage(cfg["channels"]["montage"]).get_positions()["ch_pos"]
+# (1) electrode labels and coordinates: those stored in the .set files (methodology log entry 46), never a template
+from adgraph.io import chanlocs
+from adgraph.pipeline import canonical_info
+
+op = man["source_operator"]
 first = Path(man["inputs"][0]["path"])
 raw = read_header(first, cfg["input"]["format"])
 mapping, unknown = channel_mapping(raw.ch_names, cfg["channels"]["recorded"])
+loc = chanlocs.read_chanlocs(first)
+try:
+    geom = chanlocs.establish(loc, channels, cfg)
+    geom_error = ""
+except chanlocs.CoordinateError as exc:
+    geom, geom_error = None, str(exc)
 table = pd.DataFrame({"raw_label": list(mapping), "channel": list(mapping.values())})
 table = table.set_index("channel").reindex(channels).reset_index()
-table[["x_mm", "y_mm", "z_mm"]] = np.round(np.array([pos[c] for c in channels]) * 1000, 1)
-print(f"\nelectrodes of {first.name} (raw label -> configured channel, template position):")
+xyz = {c: loc["xyz"][loc["labels"].index(r)] for r, c in mapping.items() if r in loc["labels"]}
+table[["file_X_mm", "file_Y_mm", "file_Z_mm"]] = np.round([xyz.get(c, [np.nan] * 3) for c in channels], 2)
+print(f"\nelectrodes of {first.name} (raw label -> configured channel, coordinates stored in the file, EEGLAB axes):")
 print(table.to_string(index=False))
-lr = all(pos[c][0] < 0 for c in channels if c[-1] in "1357") and all(pos[c][0] > 0 for c in channels if c[-1] in "2468")
-check("(1) all 19 labels map to the configured channels; positions on the correct hemisphere",
-      table["raw_label"].notna().all() and not unknown and lr and (subj["unrecognised_channels"].fillna("") == "").all(),
-      f"unrecognised {unknown}" if unknown else "")
-check("(1) old names T3/T4/T5/T6 at the T7/T8/P7/P8 positions",
-      all(np.allclose(pos[a], pos[b]) for a, b in (("T3", "T7"), ("T4", "T8"), ("T5", "P7"), ("T6", "P8"))))
+print("coordinate provenance:", {"chaninfo.filename": loc["chaninfo_filename"], "nosedir": loc["nosedir"],
+                                 "history lookups": loc["history_lookups"], "fiducials in file": sorted(loc["fiducials"])})
+check("(1) all 19 labels map to the configured channels", table["raw_label"].notna().all() and not unknown
+      and (subj["unrecognised_channels"].fillna("") == "").all(), f"unrecognised {unknown}" if unknown else "")
+check("(1) valid 3D coordinates for all 19 channels, coordinate frame established from the provider's record",
+      geom is not None, geom_error or f"frame {geom['frame']} via lookup {geom['lookup']}")
+og = op.get("geometry") or {}
+same = geom is not None and og.get("montage_hash") == geom["hash"] and np.allclose(og.get("pos_m", np.nan),
+                                                                                    geom["pos_m"], atol=1e-9)
+check("(1) the operator was built from the coordinates stored in the .set file (not a template)", same,
+      f"operator geometry {og.get('montage_hash')} vs file {geom and geom['hash']}")
+check("(1) every smoke subject used the operator of its own electrode geometry",
+      "montage_hash" in subj and (subj["montage_hash"] == og.get("montage_hash")).all()
+      and (subj["operator_id"] == op["operator_id"]).all())
+if geom is not None:
+    import mne
+    from mne.transforms import apply_trans
+
+    info = canonical_info(cfg, geom)                    # positions as the forward model receives them (head)
+    head = np.array([info["chs"][info["ch_names"].index(c)]["loc"][:3] for c in channels])
+    trans = mne.read_trans(Path(mne.__file__).parent / "data" / "fsaverage" / "fsaverage-trans.fif")
+    err_mm = float(np.max(np.linalg.norm(apply_trans(trans, head) - np.asarray(geom["pos_m"]), axis=1)) * 1000)
+    check("(1) head -> fsaverage MRI transformation returns the stored positions (< 0.01 mm)", err_mm < 0.01,
+          f"max {err_mm:.2e} mm")
+    print("comparison with MNE's colin27_1005 template (provenance only): max distance "
+          f"{geom['template_deviation_mm']:.3g} mm" + (" -> the stored positions ARE this template (EEGLAB lookup), "
+                                                       "not individual measurements" if (geom['template_deviation_mm']
+                                                                                         or 1) < 0.01 else ""))
 
 # (2) flat channels
 flat = {}
@@ -85,7 +120,6 @@ check("(2) no confirmed flat channel entered reconstruction", all(not v for v in
 print("bad-channel report (reported only, not interpolated):", dict(zip(subj["key"], subj["bad_channels"])))
 
 # (3) operator selected from this run's manifest
-op = man["source_operator"]
 W = np.asarray(op["W"])
 check("(3) inverse operator is 68 x 19 with the configured channels in order",
       W.shape == (68, len(channels)) == tuple(op["shape"]) and op["channels"] == channels,
@@ -127,7 +161,8 @@ if len(rep) and rep["n_boundary_events"].max() > 0:
     if worst not in probe:
         probe.append(worst)
 reg = build_registry(paths, cfg=cfg)[0].set_index("key")
-op_mem = {"W": W, "ch_names": op["channels"], "roi_names": op["roi_names"]}
+op_mem = {"W": W, "ch_names": op["channels"], "roi_names": op["roi_names"], "operator_id": op["operator_id"],
+          "geometry": op.get("geometry")}
 rows = []
 for k in probe:
     if k in keys:                                               # processed and saved by the smoke test
@@ -163,7 +198,30 @@ check("(5) every accepted window inside one continuous segment with the margin",
 check("(5) no recording failed or was dropped because of boundary events",
       tab["status"].isin(["ok", "below_min_windows"]).all() and (tab["status"] == "ok").any(), str(tab["status"].tolist()))
 
-(smoke / "d3_montage_checks.json").write_text(json.dumps({"checks": checks, "smoke_run": str(smoke)}, indent=1))
+# (6) outputs of the smoke subject(s): PSD, PLV and |ciPLV| finite and in range
+n_win, bad_out = 0, []
+for k in keys:
+    with np.load(Path(smoke, "subjects", k, "arrays.npz")) as z:
+        plv, cip, psd, rel = z["plv"], z["ciplv"], z["psd_abs"], z["psd_rel"]
+        n_win += len(plv)
+        if not (np.isfinite(plv).all() and np.isfinite(cip).all() and np.isfinite(psd).all() and np.isfinite(rel).all()):
+            bad_out.append(f"{k}: non-finite values")
+        if len(plv) and not ((plv >= 0).all() and (plv <= 1 + 1e-6).all() and (cip >= 0).all() and (cip <= 1 + 1e-6).all()
+                             and np.allclose(plv, plv.transpose(0, 1, 3, 2)) and np.allclose(cip, cip.transpose(0, 1, 3, 2))
+                             and (psd > 0).all() and (rel >= 0).all() and (rel <= 1 + 1e-6).all()):
+            bad_out.append(f"{k}: values out of range or asymmetric")
+        if plv.shape[1:] != (len(cfg["connectivity"]["bands"]), 68, 68):
+            bad_out.append(f"{k}: PLV shape {plv.shape}")
+check("(6) PSD, PLV and |ciPLV| of the smoke subject(s) are finite, in [0, 1], symmetric and 68 x 68 per band",
+      n_win > 0 and not bad_out, f"{n_win} windows; {bad_out}" if bad_out else f"{n_win} windows")
+
+provenance = {"coordinate_source": cfg["channels"]["coordinates"]["source"], "coordinate_frame": og.get("coord_frame"),
+              "coordinate_lookup": og.get("coord_lookup"), "montage_hash": og.get("montage_hash"),
+              "template_deviation_mm": og.get("coord_template_deviation_mm"), "operator_id": op["operator_id"],
+              "operator_verification_rel_error": op["verification_rel_error"]}
+print("\nprovenance:", provenance)
+(smoke / "d3_montage_checks.json").write_text(json.dumps({"checks": checks, "smoke_run": str(smoke),
+                                                          "provenance": provenance}, indent=1))
 bad = [c["check"] for c in checks if not c["passed"]]
 print(f"\n{len(checks) - len(bad)}/{len(checks)} checks passed" + (f"; FAILED: {bad}" if bad else ""))
 sys.exit(1 if bad else 0)

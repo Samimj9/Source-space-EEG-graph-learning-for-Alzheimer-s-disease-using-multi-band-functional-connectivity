@@ -127,7 +127,15 @@ def load_raw(path: str | Path, dataset: str, cfg: dict):
     scale = float(cfg["units"]["scale"][dataset])
     if scale != 1.0:
         raw.apply_function(lambda x: x * scale, picks="all", channel_wise=False)
-    raw.set_montage(make_montage(cfg["channels"]["montage"]), match_case=False)
+    geometry = None
+    if (cfg["channels"].get("coordinates") or {}).get("source") == "eeglab_chanlocs":
+        # Dataset 3 (entry 46): the coordinates stored in this file, in an established frame; never a template
+        from . import chanlocs
+
+        geometry = chanlocs.geometry_of(path, keep, cfg)
+        raw.set_montage(chanlocs.montage(geometry))
+    else:
+        raw.set_montage(make_montage(cfg["channels"]["montage"]), match_case=False)
 
     info = {
         "orig_sfreq": float(raw.info["sfreq"]),
@@ -136,6 +144,7 @@ def load_raw(path: str | Path, dataset: str, cfg: dict):
         "dropped_channels": [c for c in mapping.values() if c not in keep],
         "unrecognised_channels": unknown,
         "channel_naming": mapping_mode(mapping),
+        **({"geometry": geometry} if geometry is not None else {}),
     }
     return raw, info
 

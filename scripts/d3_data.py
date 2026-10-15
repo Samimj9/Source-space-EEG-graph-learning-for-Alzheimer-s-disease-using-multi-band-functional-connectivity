@@ -4,8 +4,10 @@
     python scripts/d3_data.py check      # participants (36 AD / 29 HC, FTD excluded) + header of every recording
 
 Resumable and verified (size + MD5 against the OpenNeuro bucket). FTD recordings are never downloaded or used.
-The check reads headers only (channel names, sampling rate, duration, discontinuity events) and writes
-``<processed>/d3_header_report_<time>.csv``; it exits 1 if a recording is missing or lacks a channel.
+The check reads headers only (channel names, sampling rate, duration, discontinuity events, and the electrode
+coordinates stored in each file: frame, lookup source, montage hash, distance to MNE's colin27_1005 template;
+methodology log entry 46) and writes ``<processed>/d3_header_report_<time>.csv``; it exits 1 if a recording is
+missing, lacks a channel, or has coordinates that are invalid or in a frame that cannot be established.
 """
 
 import argparse
@@ -15,8 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from adgraph.config import load_paths, load_yaml
-from adgraph.io import bids
+from adgraph.config import common_channels, load_paths, load_yaml
+from adgraph.io import bids, chanlocs
 from adgraph.io.eeg import channel_mapping, read_header
 
 parser = argparse.ArgumentParser()
@@ -61,7 +63,11 @@ for r in recs.itertuples():
     raw = read_header(r.path, cfg["input"]["format"])
     mapping, unknown = channel_mapping(raw.ch_names, cfg["channels"]["recorded"])
     desc = [str(d).lower() for d in raw.annotations.description]
-    rows.append({"key": r.key, "n_channels": len(raw.ch_names), "sfreq": raw.info["sfreq"],
+    try:                                         # electrode coordinates stored in the file (entry 46)
+        geo = chanlocs.provenance(chanlocs.geometry_of(r.path, common_channels(cfg), cfg))
+    except chanlocs.CoordinateError as exc:
+        geo = {"coord_error": str(exc)}
+    rows.append({**geo, "key": r.key, "n_channels": len(raw.ch_names), "sfreq": raw.info["sfreq"],
                  # EEGLAB "boundary" events mark discontinuities (e.g. data removed by cleaning): a 20 s
                  # window must not span one; reported here, decided by the author (methodology log entry 44)
                  "n_boundary_events": sum(d == "boundary" for d in desc), "n_annotations": len(desc),
@@ -74,13 +80,20 @@ rep.to_csv(out, index=False)
 print(rep.groupby("label").agg(recordings=("key", "size"), sfreq=("sfreq", lambda s: sorted(set(s))),
                                duration_min_s=("duration_s", "min"), duration_median_s=("duration_s", "median")))
 bad = rep[rep["missing_channels"] != ""]
+coord_bad = rep[rep["coord_error"].fillna("") != ""] if "coord_error" in rep else rep.iloc[:0]
 problems = ([f"missing recordings: {missing}"] if missing else []) + \
-           ([f"recordings without all 19 channels: {bad['key'].tolist()}"] if len(bad) else [])
+           ([f"recordings without all 19 channels: {bad['key'].tolist()}"] if len(bad) else []) + \
+           ([f"electrode coordinates invalid or frame not established: "
+             f"{coord_bad[['key', 'coord_error']].to_dict('records')}"] if len(coord_bad) else [])
+if "montage_hash" in rep:
+    print("\nelectrode coordinates stored in the files (frame, lookup, distance to MNE colin27_1005 template):")
+    print(rep.groupby(["montage_hash", "coord_frame", "coord_lookup"], dropna=False)
+          .agg(recordings=("key", "size"), template_deviation_mm=("coord_template_deviation_mm", "max")))
 disc = rep[rep["n_boundary_events"] > 0]
 if len(disc):
-    print(f"\nWARNING: {len(disc)} recording(s) contain EEGLAB 'boundary' events (discontinuities): "
-          f"{disc[['key', 'n_boundary_events']].to_dict('records')}. The pipeline does not yet exclude windows that "
-          "span them; report this before building graphs (a decision for the author, not applied automatically).")
+    print(f"\n{len(disc)} recording(s) contain EEGLAB 'boundary' events (discontinuities): "
+          f"{disc[['key', 'n_boundary_events']].to_dict('records')}. They are split there and no window crosses "
+          "one (methodology log entry 45).")
 else:
     print("\nno discontinuity ('boundary') events in any recording: continuous data, windows are valid as cut")
 print(f"\nheader report: {out}")

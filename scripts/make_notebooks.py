@@ -442,7 +442,10 @@ resting-state EEG, 19 channels (10-20), 500 Hz. Used: the **36 AD and 29 HC** pa
 
 Processing (`configs/pipeline_d3.yaml`): the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given
 (nothing repeated). Recordings are split at the EEGLAB 'boundary' events that the provider's cleaning left
-(data removed there): each continuous segment is resampled on its own and no window crosses a discontinuity. Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
+(data removed there): each continuous segment is resampled on its own and no window crosses a discontinuity.
+The forward and inverse models use the electrode coordinates stored in the `.set` files (methodology log entry 46;
+the provider assigned them by an EEGLAB lookup of the DIPFIT Colin27/MNI template, so they are a shared template, not
+individual measurements), one verified operator per distinct electrode geometry. Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
 50 % windows, window rejection, fsaverage source model, 68 Desikan-Killiany ROIs, bands, PLV / |ciPLV| and PSD
 as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation added).
 """ + HOWTO + """
@@ -450,7 +453,8 @@ as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation ad
 D1/D2 pin `CODE_COMMIT.txt` is never changed by D3 notebooks.
 
 **Steps:** 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
-2. input check (36 AD / 29 HC, 19 channels in every file, EEGLAB boundary events per recording) · 3. smoke test (first subject) and its inspection ·
+2. input check (36 AD / 29 HC, 19 channels in every file, EEGLAB boundary events and stored electrode
+coordinates per recording) · 3. smoke test (first subject) and its inspection ·
 3b. real-data montage checks · 4. full graph construction (65 recordings, resumable; **only after you set
 `CONFIRM_D3_FULL_BUILD = True`**) · 5. validation and completion report · 6. summary.
 Output: `<outputs>/graphsD3_v4_<config hash>/` (never mixed with the D1/D2 graph runs). Experiments on D3:
@@ -472,7 +476,9 @@ for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
         md("""## 3b. Real-data montage checks (must all PASS)
 Explicitly selected inputs (never "the newest"): the D3 smoke run and the operator recorded in its manifest,
 the frozen D1/D2 run by `graph_run_id 6d75de9975f0d9ae`, the header report of step 2. Checks: (1) electrode
-labels and template positions of all 19 channels; (2) no confirmed flat channel entered reconstruction (a flat
+labels and the coordinates stored in the `.set` file: valid 3D positions for all 19 channels, coordinate frame
+established from the provider's lookup record, the operator built from exactly these positions, the head ->
+fsaverage MRI transformation returning them, every subject on the operator of its own geometry; (2) no confirmed flat channel entered reconstruction (a flat
 channel stops its subject with `FlatChannelError`); (3) inverse operator 68 × 19 with the configured channels,
 verified against the full MNE inverse; (4) 68 ROI names and order identical to D1/D2; (5) EEGLAB 'boundary'
 discontinuities are handled (methodology log entry 45): the recording is split at every boundary, each continuous
@@ -480,7 +486,8 @@ segment is processed on its own and windows lie inside one segment, at least the
 runs the smoke subject and, in memory (nothing saved), the recording with the most boundary events, prints the
 per-participant table (boundary events, segments, candidate windows, windows excluded for a discontinuity,
 windows rejected by QC, accepted windows) and requires **zero accepted windows crossing a discontinuity or its
-margin**. A failure stops the notebook here."""),
+margin**; (6) PSD, PLV and |ciPLV| finite, in range and 68 × 68 per band. The coordinate source, frame, montage
+hash and operator id are saved in `d3_montage_checks.json`. A failure stops the notebook here."""),
         code('sh("python scripts/d3_verify_smoke.py")'),
         md("""## 4. Full graph construction (resumable)
 Starts only after you have reviewed steps 2-3b: set `CONFIRM_D3_FULL_BUILD = True` and run this cell (and the
@@ -502,6 +509,8 @@ m = json.load(open(run / 'manifest.json'))
 print('graph run:', run)
 print('graph_run_id', m['graph_run_id'], '| commit', m['git_commit'], '| operator error',
       m['source_operator']['verification_rel_error'])
+print('electrode geometry:', {k: v for k, v in m['source_operator'].get('geometry', {}).items() if k != 'pos_m'},
+      '| operators:', len(m.get('source_operators', [])) or 1)
 print('per dataset:', m['summary']['per_dataset'])
 print('excluded by design:', len(m['registry'].get('excluded_by_design', {}).get('D3', [])), 'FTD participants')
 s = pd.read_csv(run / 'subjects.csv')

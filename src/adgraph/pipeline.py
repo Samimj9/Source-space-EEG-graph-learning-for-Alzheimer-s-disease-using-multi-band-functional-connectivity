@@ -27,6 +27,7 @@ from .features.psd import check_relative_range, window_band_powers
 from .graphs.store import PSD_KINDS, WINDOW_COLUMNS, GraphStore, require_complete_cohort, window_id
 from .io.eeg import list_recordings, load_raw, make_montage
 from .io.layout import check_layout, spatial_consistency
+from .io import chanlocs
 from .io.fingerprint import InputHashes, auxiliary_inputs
 from .io.participants import load_participants
 from .preprocessing import discontinuities as disc
@@ -69,12 +70,15 @@ class GraphRunIncomplete(RuntimeError):
     nothing is assembled and no completion marker is written (methodology log entry 38)."""
 
 
-def canonical_info(cfg: dict):
-    """Sensor ``Info`` shared by both datasets: common channels, montage, average-reference projection."""
+def canonical_info(cfg: dict, geometry: dict | None = None):
+    """Sensor ``Info`` shared by both datasets: common channels, montage, average-reference projection.
+
+    ``geometry`` (Dataset 3, entry 46): electrode coordinates read from the recordings
+    (``io.chanlocs``) instead of the configured template montage."""
     import mne
 
     info = mne.create_info(common_channels(cfg), cfg["preprocessing"]["sfreq"], "eeg")
-    info.set_montage(make_montage(cfg["channels"]["montage"]))
+    info.set_montage(chanlocs.montage(geometry) if geometry is not None else make_montage(cfg["channels"]["montage"]))
     raw = mne.io.RawArray(np.zeros((len(info["ch_names"]), 1)), info, verbose="error")
     raw.set_eeg_reference("average", projection=True, verbose="error")
     raw.apply_proj(verbose="error")
@@ -295,22 +299,38 @@ def default_hash_cache(run_dir: Path) -> Path:
 
 
 # ---------------------------------------------------------------------- shared operator
-def operator_identity(cfg: dict) -> dict:
-    """Everything the sensor->ROI operator depends on (the source-model configuration)."""
+def operator_identity(cfg: dict, geometry: dict | None = None) -> dict:
+    """Everything the sensor->ROI operator depends on (the source-model configuration and, for file
+    coordinates, the electrode geometry: one operator per distinct geometry, entry 46)."""
     import mne
 
-    return {"kind": "operator", "code_version": CODE_VERSIONS["operator"], "source": cfg["source"],
-            "channels": common_channels(cfg), "montage": cfg["channels"]["montage"],
-            "reference": cfg["preprocessing"]["reference"], "mne": mne.__version__,
-            "code": code_identity("operator")}
+    ident = {"kind": "operator", "code_version": CODE_VERSIONS["operator"], "source": cfg["source"],
+             "channels": common_channels(cfg), "montage": cfg["channels"]["montage"],
+             "reference": cfg["preprocessing"]["reference"], "mne": mne.__version__,
+             "code": code_identity("operator")}
+    if geometry is not None:
+        ident["geometry"] = {k: geometry[k] for k in ("source", "frame", "lookup", "hash", "pos_m")}
+    return ident
 
 
-def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, force: bool = False) -> dict:
+def subject_geometries(registry: pd.DataFrame, cfg: dict) -> dict:
+    """{key: electrode geometry} read from every recording when the configuration uses file coordinates
+    (``channels.coordinates.source: eeglab_chanlocs``); {} otherwise. Raises ``CoordinateError`` for a recording
+    whose coordinates are invalid or whose frame cannot be established (no template fallback)."""
+    if not chanlocs.enabled(cfg):
+        return {}
+    return {rec.key: chanlocs.geometry_of(rec.path, common_channels(cfg), cfg) for rec in registry.itertuples()}
+
+
+def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, force: bool = False,
+                 geometry: dict | None = None) -> dict:
     """Load the verified operator from the cache if its source-model hash matches; else build it once.
 
     fsaverage is fetched and the forward/inverse model computed only when no valid cached
-    operator exists (or ``force``)."""
-    ident = operator_identity(cfg)
+    operator exists (or ``force``). ``geometry``: electrode coordinates from the recordings (entry 46)."""
+    ident = operator_identity(cfg, geometry)
+    geo = ({"geometry": {**chanlocs.provenance(geometry), "channels": geometry["channels"], "pos_m": geometry["pos_m"]}}
+           if geometry is not None else {})
     op_id = stable_hash(ident)
     cache_dir = Path(cache_dir)
     name = f"operator_{op_id}"
@@ -325,7 +345,7 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
                 "fwd_ch_names": z["fwd_ch_names"].tolist(), "n_sources": int(z["n_sources"]),
                 "roi_coords": z["roi_coords"] if "roi_coords" in z.files else None,
                 "verification_rel_error": float(z["verification_rel_error"]), "operator_id": op_id,
-                "from_cache": True}
+                "from_cache": True, **geo}
     if state in ("corrupt", "incompatible") or (state == "complete" and force):
         supersede(cache_dir / f"{name}.npz", cache_dir)
     with progress.reporter(3, "source operator", unit="steps", eta=False) as bar:
@@ -333,7 +353,7 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
         fetch_fsaverage(subjects_dir)
         bar.advance(timed=False)
         bar.set(_step="forward model + inverse operator -> 68x30 ROI operator")
-        info = canonical_info(cfg)
+        info = canonical_info(cfg, geometry)
         op = build_roi_operator(info, cfg, subjects_dir)
         bar.advance(timed=False)
         bar.set(_step="verifying against the full MNE inverse")
@@ -354,7 +374,7 @@ def get_operator(cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, for
         log.info("operator %s vs cached %s (same source model, other code version): max |dW| / max |W| = %.1e",
                  op_id, c["operator_id"], c["max_rel_diff"])
     return {**op, "verification_rel_error": op_err, "operator_id": op_id, "from_cache": False,
-            "compared_with_cached": previous}
+            "compared_with_cached": previous, **geo}
 
 
 def compare_with_cached_operators(cache_dir: Path, ident: dict, W: np.ndarray, exclude: str = "") -> list[dict]:
@@ -421,6 +441,13 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                                          "mmse", "acer", "comment", "path", "size_bytes")}
     progress.set(stage="loading EDF")
     raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+    geo_rows = {}
+    if "geometry" in load_qc:                     # Dataset 3: never an operator built for another geometry
+        g = load_qc["geometry"]
+        if (op.get("geometry") or {}).get("montage_hash") != g["hash"]:
+            raise chanlocs.CoordinateError(f"{rec.key}: electrode geometry {g['hash']} differs from the operator's "
+                                           f"{(op.get('geometry') or {}).get('montage_hash')}")
+        geo_rows = {**chanlocs.provenance(g), "operator_id": op["operator_id"]}
     split = disc.enabled(cfg)
     if split:                                     # Dataset 3: EEGLAB boundary events (entry 45)
         cuts, n_events = disc.boundary_cuts(raw)
@@ -440,7 +467,7 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                     "n_windows_continuous_grid_crossing_discontinuity": p["continuous_windows_spanning_cut"],
                     "discontinuity_samples": json.dumps([round(c, 3) for c in disc.cuts_original(cuts, sf_in, sf_new)])}
         if not p["usable"]:                       # no continuous stretch can hold one window
-            return _no_window_subject(rec, cfg, op, load_qc, crop, offset, seg_rows)
+            return _no_window_subject(rec, cfg, op, load_qc, crop, offset, {**seg_rows, **geo_rows})
     progress.set(stage="preprocessing (resample, filter, bad channels, reference)")
     try:
         raw, pp_qc = preprocess(raw, cfg, segments=p["usable"] if split else None, offset_new=offset)
@@ -476,7 +503,7 @@ def process_subject(rec, cfg: dict, op: dict) -> tuple[dict, pd.DataFrame, dict,
                    "n_windows_rejected": res["n_windows_total"] - n,
                    "qc_edge_window_ptp_ratio": edge_window_ptp_ratio(res["qc_windows"]),
                    "sample_offset": offset, "processed_n_samples": int(raw.n_times), **crop, **seg_rows,
-                   "status": status}
+                   **geo_rows, "status": status}
     if split:                                     # time line of the cropped recording, not of the concatenation
         subject_row["processed_n_samples"] = disc.resampled_length(int(round((crop["crop_stop_s"] - crop["crop_start_s"])
                                                                              * sf_in)), sf_in, sf_new)
@@ -533,13 +560,14 @@ def save_subject(unit_dir: Path, identity: dict, arrays: dict, windows: pd.DataF
     write_marker(unit_dir, "subject", identity, files)
 
 
-def subject_states(run_dir: Path, registry: pd.DataFrame, cfg: dict, operator_id: str) -> pd.DataFrame:
-    """Checkpoint state of every subject, read from disk only (no computation)."""
+def subject_states(run_dir: Path, registry: pd.DataFrame, cfg: dict, operator_id: str | dict) -> pd.DataFrame:
+    """Checkpoint state of every subject, read from disk only (no computation). ``operator_id``: one id, or
+    {key: id} when operators differ by electrode geometry (Dataset 3)."""
     status = StatusTable(run_dir / "status.csv")
     rows = []
     for rec in registry.itertuples():
         unit_dir = run_dir / "subjects" / rec.key
-        expected = subject_identity(cfg, rec, operator_id)
+        expected = subject_identity(cfg, rec, operator_id[rec.key] if isinstance(operator_id, dict) else operator_id)
         state, marker = check_unit(unit_dir, "subject", expected)
         reason = ",".join(identity_diff(marker.get("identity"), expected)) if state == "incompatible" else ""
         table = status.get(rec.key)
@@ -567,11 +595,15 @@ def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = Non
     (Input files not yet in the hash cache are hashed: identities depend on their content.)"""
     run_dir = Path(run_dir) if run_dir else graph_run_dir(out_root, cfg, limit)
     registry, *_ = build_registry(paths, limit, InputHashes(input_hash_cache or default_hash_cache(run_dir)), cfg)
-    ident = operator_identity(cfg)
-    op_id = stable_hash(ident)
     cache = Path(operator_cache) if operator_cache else run_dir.parent / "_operator_cache"
-    op_state, _ = check_unit(cache, f"operator_{op_id}", ident)
-    subj = subject_states(run_dir, registry, cfg, op_id) if run_dir.exists() else \
+    geoms = subject_geometries(registry, cfg)     # Dataset 3: one operator per electrode geometry (entry 46)
+    idents = {g["hash"]: operator_identity(cfg, g) for g in geoms.values()} or {None: operator_identity(cfg)}
+    ids = {h: stable_hash(i) for h, i in idents.items()}
+    states = {h: check_unit(cache, f"operator_{ids[h]}", i)[0] for h, i in idents.items()}
+    op_id = ids[None] if None in ids else ",".join(sorted(ids.values()))
+    op_state = ",".join(sorted(set(states.values())))
+    by_key = {k: ids[g["hash"]] for k, g in geoms.items()} if geoms else op_id
+    subj = subject_states(run_dir, registry, cfg, by_key) if run_dir.exists() else \
         pd.DataFrame({"key": registry["key"], "dataset": registry["dataset"], "state": "pending",
                       "checkpoint": "missing", "changed": "", "message": ""})
     asm = "missing"
@@ -586,7 +618,7 @@ def status(paths: dict, cfg: dict, out_root: str | Path, limit: int | None = Non
 # ---------------------------------------------------------------------- assembly
 def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dict, op: dict,
              no_meta: list, no_rec: list, limit: int | None, keys_failed: dict, aux_inputs: dict | None = None,
-             exclusions: dict | None = None) -> Path:
+             exclusions: dict | None = None, all_ops: list | None = None) -> Path:
     """Concatenate completed subject units into the cohort store (skipped if already assembled).
 
     Refuses (``GraphRunIncomplete``) a cohort with failed subjects or without any graph: an
@@ -599,7 +631,9 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
         units[rec.key] = (json.loads(mp.read_text())["files"] if rec.key not in keys_failed and mp.exists()
                           else {"failed": keys_failed.get(rec.key, "missing")})
     ident = {"kind": "graph_assembly", "code_version": CODE_VERSIONS["graph_assembly"],
-             "config_hash": config_hash(cfg), "operator_id": op["operator_id"], "units": units,
+             "config_hash": config_hash(cfg),
+             "operator_id": ",".join(sorted(o["operator_id"] for o in all_ops)) if all_ops else op["operator_id"],
+             "units": units,
              "subset_limit": limit, "auxiliary_inputs": {k: v["sha256"] for k, v in (aux_inputs or {}).items()},
              "code": code_identity("graph")}
     state, _ = check_unit(run_dir, "assembly", ident)
@@ -668,7 +702,11 @@ def assemble(run_dir: Path, registry: pd.DataFrame, recs: pd.DataFrame, cfg: dic
                             "shape": list(np.asarray(op["W"]).shape), "n_sources": op["n_sources"],
                             "channels": list(op["ch_names"]), "shared_across_datasets": True,
                             "verification_rel_error": op["verification_rel_error"],
-                            "roi_names": list(op["roi_names"]), "W": np.asarray(op["W"]).tolist()},
+                            "roi_names": list(op["roi_names"]), "W": np.asarray(op["W"]).tolist(),
+                            **({"geometry": op["geometry"]} if op.get("geometry") else {})},
+        **({"source_operators": [{"operator_id": o["operator_id"], "geometry": o.get("geometry"),
+                                  "verification_rel_error": o["verification_rel_error"],
+                                  "W": np.asarray(o["W"]).tolist()} for o in all_ops]} if all_ops else {}),
         "segmentation": {"window_samples": win_s, "step_samples": step_s},
         "boundary_processing": (boundary_report(cfg) if boundary_aware(cfg) else
                                 {"version": "v3", "description": "continuous resampling, filtering and FFT Hilbert "
@@ -794,24 +832,37 @@ def run(paths: dict, cfg: dict, out_root: str | Path, subjects_dir: str | Path, 
     log.info("input content hashes: %d files read, %d from cache", hashes.n_hashed,
              len(registry) + len(aux) - hashes.n_hashed)
     mem_log = MemoryLog(run_dir / "memory_log.csv")
+    geoms = subject_geometries(registry, cfg)     # Dataset 3: coordinates from each recording (entry 46)
     with MemoryTracker() as m:
-        op = get_operator(cfg, subjects_dir, operator_cache, force)
-    mem_log.add("operator", "from cache" if op.get("from_cache") else "built + verified", m.record())
+        if geoms:                                 # one verified operator per distinct electrode geometry
+            uniq = {g["hash"]: g for g in geoms.values()}
+            ops = {h: get_operator(cfg, subjects_dir, operator_cache, force, geometry=g) for h, g in uniq.items()}
+            op_of = {k: ops[g["hash"]] for k, g in geoms.items()}
+            log.info("electrode geometries: %s", {h: sum(g["hash"] == h for g in geoms.values()) for h in uniq})
+            if len({(tuple(o["ch_names"]), tuple(o["roi_names"])) for o in ops.values()}) != 1:
+                raise RuntimeError("operators of different electrode geometries disagree on channels or ROI order")
+        else:
+            op = get_operator(cfg, subjects_dir, operator_cache, force)
+            ops, op_of = {None: op}, {k: op for k in registry["key"]}
+    # the operator of most subjects describes the run; with several geometries all are in the manifest
+    op = max(ops.values(), key=lambda o: sum(x is o for x in op_of.values()))
+    mem_log.add("operator", ",".join("from cache" if o.get("from_cache") else "built + verified"
+                                     for o in ops.values()), m.record())
     table = StatusTable(run_dir / "status.csv")
     table.ensure(registry["key"].tolist())
     save_ts = cfg["output"].get("save_roi_timeseries", False)
     failed = {}
-    idents = {rec.key: subject_identity(cfg, rec, op["operator_id"]) for rec in registry.itertuples()}
+    idents = {rec.key: subject_identity(cfg, rec, op_of[rec.key]["operator_id"]) for rec in registry.itertuples()}
     # checkpoint-aware progress: subjects whose marker already matches are shown as done from the
     # start (full validation still happens below; a corrupt one is then recomputed and counted)
     likely_done = {k for k, i in idents.items() if marker_matches(run_dir / "subjects" / k, "subject", i)}
     with progress.reporter(len(registry), "subjects", initial=len(likely_done), unit="recordings",
                            counts={"done": 0, "resumed": 0, "failed": 0, "pending": len(registry)}) as bar:
-        _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar)
+        _run_subjects(registry, run_dir, cfg, op_of, idents, likely_done, table, save_ts, failed, mem_log, bar)
     check_run_complete(run_dir, registry, failed)
     with MemoryTracker() as m:
         out = assemble(run_dir, registry, recs, cfg, op, no_meta, no_rec, limit, failed, aux,
-                       design_exclusions(paths, cfg))
+                       design_exclusions(paths, cfg), all_ops=list(ops.values()) if len(ops) > 1 else None)
     mem_log.add("assembly", "done", m.record())
     return out
 
@@ -850,7 +901,7 @@ def check_run_complete(run_dir: Path, registry: pd.DataFrame, failed: dict) -> N
         "Completed subjects are saved; after fixing the cause, rerun the same command (only failed ones rerun).")
 
 
-def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_ts, failed, mem_log, bar):
+def _run_subjects(registry, run_dir, cfg, op_of, idents, likely_done, table, save_ts, failed, mem_log, bar):
     """Subject loop of ``run``: one subject in memory at a time, each saved as soon as it finishes."""
     def counts(kind):
         bar.counts[kind] += 1
@@ -882,7 +933,7 @@ def _run_subjects(registry, run_dir, cfg, op, idents, likely_done, table, save_t
         t_start = time.perf_counter()
         try:
             with MemoryTracker() as m:            # one subject in memory at a time; released below
-                arrays, windows, subject_row, roi_ts, qc_tables = process_subject(rec, cfg, op)
+                arrays, windows, subject_row, roi_ts, qc_tables = process_subject(rec, cfg, op_of[rec.key])
         except Exception as exc:  # recorded, never silent; KeyboardInterrupt etc. propagate
             log.exception("%s failed", rec.key)
             row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex",

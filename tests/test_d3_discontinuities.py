@@ -30,6 +30,14 @@ WIN = 5000
 Rec = namedtuple("Rec", "key dataset subject_id label y age sex mmse acer comment path size_bytes")
 
 
+@pytest.fixture(autouse=True)
+def _provider_chanlocs(monkeypatch):
+    """Placeholder recordings carry the provider's chanlocs (template lookup; entry 46)."""
+    from synthetic_chanlocs import patch_reader
+
+    patch_reader(monkeypatch, CFG["channels"]["recorded"])
+
+
 def write_set(path, data_uv, events, sf=SF):
     """Minimal EEGLAB .set (data embedded); events = [(type, latency 1-based, duration)]."""
     chanlocs = np.array([(c, np.nan, np.nan, np.nan, "EEG") for c in CH],
@@ -65,7 +73,10 @@ def run_subject(monkeypatch, raw, cfg=CFG):
     monkeypatch.setattr(eeg, "read_header", lambda path, fmt: raw.copy())
     W = np.random.default_rng(5).standard_normal((68, len(CH)))
     rec = Rec("D3-9", "D3", 9, "AD", 1, 70.0, "F", 20.0, np.nan, "", "x.set", 1)
-    return pl.process_subject(rec, cfg, {"W": W, "ch_names": CH, "roi_names": [f"r{i}" for i in range(68)]})
+    from synthetic_chanlocs import operator_geometry
+
+    return pl.process_subject(rec, cfg, {"W": W, "ch_names": CH, "roi_names": [f"r{i}" for i in range(68)],
+                                         "operator_id": "op", "geometry": operator_geometry(cfg)})
 
 
 def no_crossing(windows, row):
