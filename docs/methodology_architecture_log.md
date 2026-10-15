@@ -2900,6 +2900,54 @@ template head (fsaverage) is unchanged and must be stated.
 
 ---
 
+## 47. Investigation: the channel-mapping QC statistic `qc_spatial_rho` (no pipeline change)
+
+**Date:** 2026-10-15. **Requested by:** the author (warnings in D1, D2 and D3; D3-1 rho = +0.109499 although its
+coordinates were verified, entry 46). **Tool:** `scripts/diagnose_spatial.py` (read-only). Nothing in the
+pipeline, the configurations, the graph runs or the pins was changed.
+
+**What the statistic is.** `io.layout.spatial_consistency`, called in `pipeline.process_subject`: Spearman rho
+between inter-electrode distance and **|r|** (absolute Pearson correlation). It is computed over all samples of the
+preprocessed signal: cropped, resampled, band-passed for D1/D2, interpolated for D1/D2, **average-referenced**.
+Positions are `info["chs"][i]["loc"]`, head frame, the same index `i` as the data rows. A warning is logged when
+rho is not below −0.1 (entry 37).
+
+**Evidence.**
+
+| Signal | rho(dist, \|r\|) | rho(dist, r) | Far third of pairs: mean r, % negative |
+|---|---|---|---|
+| D3-1, before average reference (A1–A2; common signal = 96.5 % of variance, mean r = +0.96) | −0.676 | −0.676 | +0.95, 0 % |
+| D3-1, after average reference (pipeline; reproduces +0.109499) | **+0.109** | **−0.798** | −0.41, 93 % |
+| Simulation, 400 random dipoles, 3-shell sphere, D3 montage, reference-free | +0.066 | −0.968 | −0.40, 100 % |
+| same, average reference | +0.041 | −0.912 | −0.37, 98 % |
+| same, D1/D2 30-channel montage, average reference | −0.071 | −0.898 | −0.37, 99 % |
+
+**Can each statistic detect a wrong mapping?** Same signal, positions shuffled 1000×:
+- D3-1, |r|: the correct mapping's +0.109 is above 95.5 % of the shuffled mappings.
+- D3-1, signed r: no shuffle reached −0.798 (5–95 % of the null: [−0.146, +0.099]).
+- Swapping one distant pair raises the signed rho to −0.41 (Fp1↔O2) or −0.55 (F7↔T6).
+- Swapping neighbouring electrodes is barely visible to either statistic.
+
+**Conclusion.**
+- **Volume conduction:** nearby electrodes are positively correlated, and distant electrodes **negatively**
+  correlated. Each source produces a dipolar field with opposite poles; this holds even reference-free, and
+  average referencing removes the common signal.
+- **Effect of |r|:** taking |r| folds the strong negative far-field correlations into large values, so with a
+  correct mapping the statistic sits near 0 (or slightly positive). The −0.1 threshold therefore warns for correct
+  mappings by construction. Its validation used a purely positive Gaussian mixing kernel without referencing
+  (`tests/test_channel_mapping.py`), which does not produce these negative correlations.
+- **Before average reference** the |r| statistic was negative (−0.68), but there it is dominated by the common
+  reference signal.
+- **No mapping or geometry error is indicated** for D3-1: the signed statistic is −0.80, far outside the shuffle
+  null.
+
+**Proposed correction (not applied; needs the author's decision; D3 first, D1/D2 would only ever be
+re-evaluated as QC):** use the signed correlation (drop `np.abs`) on the same signal, and warn when the observed
+rho is not clearly better than shuffled mappings, e.g. a permutation p ≥ 0.01, instead of a fixed −0.1. The QC
+statistic would then be redefined; the graphs are unaffected, since nothing depends on it.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
