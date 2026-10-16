@@ -60,6 +60,9 @@ graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(paths["
 out = Path(args.out or f"{paths['processed_dir']}/{results_root}")
 if cfg.get("graph_family") in ("LX", "LX10"):    # the frozen participant split must equal the one saved at build
     from adgraph.evaluation.splits import xu_partition
+    from adgraph.lcmvxu.validate import require_validated
+
+    require_validated(graphs)                    # only stores whose full validation passed (entry 53)
 
     saved = json.loads((graphs / "xu_split.json").read_text())
     subj = pd.read_csv(graphs / "subjects.csv")

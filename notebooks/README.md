@@ -18,7 +18,8 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 pin back to its pre-Dataset 3 commit; changes no result).
 
 D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<outputs>/D3_LCMV_XU/`, own code pin):
-[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, then `LX_Exp0` ... `LX_Exp7` (one at a time),
+[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, `LX_01_correct_and_validate` once (entry 53), then
+`LX_Exp0` ... `LX_Exp8` (one at a time),
 then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
 
 ## Experiment notebooks

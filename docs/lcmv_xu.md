@@ -28,8 +28,9 @@ Authors' code: github.com/XQJMJ/MF-MGCN (`Model.py`, inspected at its current HE
   - If a segment interior holds 300 s, the first 300 s of the first such segment are used: 291 windows.
   - Otherwise the interiors are used in time order as separate pieces until 300 s are reached. Each piece keeps its
     own window grid and pieces are never joined.
-  - Less than 300 s is selected only if the recording lacks it; this is reported, and the participant is not
-    excluded for it.
+  - No piece is added once less than one window is still needed, so the selection never exceeds 300 s (entry 53;
+    the build at b38685e added a final 10 s piece there, see §11). Less than 300 s is selected when the recording
+    does not hold 300 s as whole windows; this is reported, and the participant is not excluded for it.
   - Checked on the real files: D3-1 (no boundaries) is contiguous with 291 candidates. D3-56 has 56 boundaries
     and 57 segments, no 300 s stretch, so 7 pieces totalling 300 s give 233 candidates. Zero windows violate a
     margin.
@@ -295,4 +296,71 @@ inputs. It is not a reproduction of MF-MGCN and replaces none of Exp 0–7.
    T4 GPU.
 3. `LX_99_report.ipynb` (CPU): the comparison table, ROC curves and confusion matrices across all experiments.
 
+1b. `LX_01_correct_and_validate.ipynb` (CPU, once, after the build at b38685e): the targeted correction of §11
+   and the full validation of both corrected stores. Experiments use only validated stores.
+
 `LX_98_run_all_optional.ipynb` runs all experiments in sequence, but only after `RUN_EVERYTHING = True` is set.
+
+## 11. Correction `corr1` of the dataset built at b38685e (methodology log entry 53)
+
+The full build (65/65 participants; mode B 16,422 windows, mode A 650) failed one validation check:
+`D3-23: window [65725, 68225)`. Two participants also reported more than 300 s selected (D3-23 305.62 s, D3-58
+309.62 s). Both were investigated on the public ds004504 files with the build's own code:
+
+- **The flagged window is safe.** It is the first window of segment 10 (piece 5) of D3-23. The segment starts at input sample
+  129,800 (259.6 s, the boundary itself), and the window starts at input sample 131,450: exactly 1,650 input samples
+  = 2 × 825 = the margin after the boundary. No other boundary lies within its margin. The margin equals the
+  delta analytic-kernel half-length, so every filtered value in the window uses only samples of its own segment.
+  The validator rebuilt the cut as `round(129800 / 500, 3) × 250` in floating point, which is slightly more than
+  64,900, so the strict condition `start − margin < cut` fired at exact equality: a false positive from the
+  rounded-seconds metadata, not an unsafe window.
+- **The over-target selections were a selection bug.** With less than one window still needed (4.38 s for D3-23,
+  0.38 s for D3-58), `max(need − got, window)` added one more 10 s piece holding one window each. Those two windows
+  lie outside a 300 s selection. They are D3-23 [90130, 92630) (segment 12, piece 7) and D3-58 [79030, 81530)
+  (segment 2, piece 2). Both are boundary-safe and accepted.
+
+Fix (code):
+
+- `recording.select` stops instead of adding a piece. D3-23 now has 295.62 s and D3-58 299.62 s. A further piece
+  could only hold a window by exceeding 300 s.
+- `recording.segment_table` records the exact integer positions: `boundary_cuts_in` (input samples) and
+  `segments_in` (`[index, start_in, n_in, orig_start]`).
+- `validate.boundary_violations_exact` checks every window in exact rational arithmetic, in its own segment, with
+  the same strict conditions. The validator is not relaxed: one sample closer to a boundary still fails, and
+  stores without exact positions keep the legacy check.
+- New checks:
+  - selected EEG ≤ 300 s, both as reported and as covered by the windows;
+  - sample weights sum to 1 per participant;
+  - window counts equal those in `subjects.csv`.
+
+Correction of the stored dataset (`python scripts/lx_build.py correct`; `lcmvxu.correct`):
+
+- **New stores:** `graphsLX_v1_811690218bfa_corr1` and `graphsLX10_v1_811690218bfa_corr1`. The originals, their 65
+  participant checkpoints, the LCMV operators and the pin `b38685e` are not modified.
+- **Not recomputed:** no beamformer, connectivity or feature. The kept windows' rows of every aligned array (PLV,
+  |ciPLV|, source and sensor PSD and DE) are copied with one mask, in their original order, together with the windows
+  table. `sample_weight` is recomputed (1 / windows of the participant). `subjects.csv` gets the corrected selection
+  and counts plus the exact positions.
+- **Verified first; nothing is written if a check fails:**
+  - For all 65 participants, from the EEGLAB header alone (no signal), the stored boundary positions, segment
+    durations and segment table are reproduced, and the original selection reproduces every stored candidate
+    window exactly.
+  - The corrected selection is a subset of the original one.
+  - For changed participants only, the signal is reloaded and segmented (no source model). The stored peak-to-peak
+    values and decisions must be reproduced, and the adaptive rejection rule is re-applied to the corrected candidate
+    set. No kept window may change decision. On the public files: D3-23 threshold 86.26 → 85.96 µV, D3-58
+    83.57 → 83.68 µV, no change.
+  - The frozen participant split is unchanged, and the mode A windows and arrays are bit-identical (the removed
+    windows are not among anyone's first ten).
+- **Known, documented consequence, not recomputed by decision:** the LCMV data covariance of D3-23 and D3-58 was
+  estimated from their accepted windows including the removed one (one extra clean 10 s window of the same
+  participant; no label or other participant involved). `lcmv_covariance_n_windows` records this.
+- **Records:** `correction.json`, `correction_participants.csv` and `correction_removed_windows.csv` in both stores.
+  The manifest's `correction` field names the source `graph_run_id`.
+- **Expected counts:** mode B 16,420 windows; mode A 650. The tool reports the counts it actually finds.
+
+Experiments refuse a store unless its `validation.json` passed for its current `graph_run_id`
+(`validate.require_validated`). `latest_complete_graph_run` picks the corrected stores, which were assembled later.
+`lx_build.py build` does nothing once the corrected stores exist. It also refuses to recompute checkpoints made by
+another code version unless `--allow-recompute` is passed.
+

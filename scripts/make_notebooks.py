@@ -854,7 +854,8 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 pin back to its pre-Dataset 3 commit; changes no result).
 
 D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<outputs>/D3_LCMV_XU/`, own code pin):
-[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, then `LX_Exp0` ... `LX_Exp7` (one at a time),
+[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, `LX_01_correct_and_validate` once (entry 53), then
+`LX_Exp0` ... `LX_Exp8` (one at a time),
 then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
 
 ## Experiment notebooks
@@ -926,6 +927,70 @@ for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
 from adgraph.colab import sh
 print('{name} code commit:', EXP_COMMIT)
 print('suite pin (Exp 0-7, unchanged):', (Path(LX) / 'CODE_COMMIT.txt').read_text().split()[0])""")]
+
+
+def lx_correct_notebook() -> dict:
+    return notebook([
+        md("""# LX · 01 · Correct and validate the D3 LCMV / Xu dataset (`corr1`; run once, CPU)
+The full build at `b38685e` (65/65 participants) failed one validation check, D3-23 [65725, 68225). That window is
+safe: it lies exactly at the 3.3 s filter margin, and the validator rebuilt the boundary from seconds rounded to
+1 ms in floating point. D3-23 and D3-58 also selected 305.62 s and 309.62 s: an extra final 10 s piece with one
+window each, outside the 300 s target. Methodology log entry 53, `docs/lcmv_xu.md` §11.
+
+This notebook:
+1. **moves the suite code pin once** to the corrected code, only while no LX experiment has completed work;
+2. writes **new** stores `graphsLX_v1_*_corr1` (mode B) and `graphsLX10_v1_*_corr1` (mode A) from the existing
+   ones:
+   - it removes only the windows outside the corrected 300 s selection (expected: one each for D3-23 and D3-58),
+     consistently across every array and table;
+   - no beamformer, connectivity or feature is recomputed, and nothing is rebuilt;
+   - every step is verified first (EEGLAB headers; the stored windows; the rejection rule re-applied for the two
+     changed participants), and nothing is written if a check fails;
+3. runs the **full validation of both corrected stores** (exact boundary positions, 300 s cap, split, shapes,
+   weights, counts).
+
+The original stores, the 65 participant checkpoints and their LCMV operators are not modified. Experiments then
+use only the validated corrected stores. **Do not run `lx_build.py build` again**; it does nothing once the
+corrected stores exist. No model is trained here."""),
+        code(SETUP_LX),
+        md("## 1. Move the suite pin to the corrected code (once; only if no LX experiment has completed work)"),
+        code("""import glob
+from pathlib import Path
+pin = Path(LX) / 'CODE_COMMIT.txt'
+pinned = pin.read_text().split()[0]
+has_fix = subprocess.run(['git', '-C', '/content/repo', 'cat-file', '-e',
+                          f'{pinned}:src/adgraph/lcmvxu/correct.py']).returncode == 0
+if not has_fix:
+    done = glob.glob(LX + '/experiments_*/**/*.done.json', recursive=True)
+    if done:
+        raise RuntimeError(f'{len(done)} completed LX experiment unit(s) are pinned to {pinned[:10]}; '
+                           'the pin is not moved automatically. Ask before continuing.')
+    _run(['git', '-C', '/content/repo', 'checkout', '-q', f'origin/{BRANCH}'])
+    _run([sys.executable, 'scripts/colab_setup.py', '--family', 'LX', '--update-code'])
+    for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+        del sys.modules[m]
+from adgraph.colab import sh
+print('suite pin:', pin.read_text().split()[0], '| previous:', pinned[:10])"""),
+        md("## 2. Correction (new versioned stores; originals unchanged)"),
+        code('sh("python scripts/lx_build.py correct")'),
+        md("## 3. Full validation of both corrected stores (all checks must PASS)"),
+        code('sh("python scripts/lx_build.py validate")'),
+        md("## 4. What changed"),
+        code("""import json
+import pandas as pd
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+run = sorted(glob.glob(LX + '/graphsLX_v*_corr1'))[-1]
+summary = json.load(open(run + '/correction.json'))
+print('participants changed:', summary['participants_changed'])
+display(pd.read_csv(run + '/correction_removed_windows.csv'))
+display(pd.read_csv(run + '/correction_participants.csv').query('changed'))
+print('mode B windows:', summary['n_windows_mode_B'], '| mode A windows:', summary['n_windows_mode_A'])
+print('beamforming repeated:', summary['beamforming_repeated'],
+      '| connectivity / features recomputed:', summary['connectivity_or_features_recomputed'])
+for d in (run, run.replace('graphsLX_', 'graphsLX10_')):
+    v = json.load(open(d + '/validation.json'))
+    print(Path(d).name, 'validation passed:', v['passed'], '| windows:', v['n_windows'])"""),
+    ])
 
 
 def lx_build_notebook() -> dict:
@@ -1115,6 +1180,7 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     outputs[nbdir / "d3" / "D3_99_comparison.ipynb"] = d3_comparison_notebook()
     outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook(d1d2_configs)   # D1/D2 paper figures
     outputs[nbdir / "lcmv_xu" / "LX_00_build_dataset.ipynb"] = lx_build_notebook()
+    outputs[nbdir / "lcmv_xu" / "LX_01_correct_and_validate.ipynb"] = lx_correct_notebook()
     for n, name, title, gpu in LX_EXPERIMENTS:
         stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
         outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{stem}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)

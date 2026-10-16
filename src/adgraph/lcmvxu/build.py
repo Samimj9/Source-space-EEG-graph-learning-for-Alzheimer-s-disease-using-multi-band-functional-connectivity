@@ -75,7 +75,7 @@ def recording_qc(rec, cfg: dict) -> tuple[dict, list, list, int, dict]:
     row.update({"orig_sfreq": float(raw.info["sfreq"]), **seg_info, **sel,
                 "segments_samples": json.dumps([[s.orig_start, s.orig_start + s.n] for s in segs]),
                 **chanlocs.provenance(load_qc["geometry"])})
-    for k in ("boundary_positions_s", "segment_durations_s"):
+    for k in ("boundary_positions_s", "boundary_cuts_in", "segments_in", "segment_durations_s"):
         row[k] = json.dumps(row[k])
     return row, segs, pieces, margin, load_qc["geometry"]
 

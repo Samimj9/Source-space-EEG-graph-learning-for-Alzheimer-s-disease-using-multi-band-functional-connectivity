@@ -11,10 +11,15 @@
    * If an interior holds 300 s, the first 300 s of the FIRST such segment (in time) are selected: one
      uninterrupted interval, 291 windows of 10 s with a 1 s step.
    * Otherwise the interiors are taken in time order, each as one separate piece (never joined), until 300 s are
-     selected; the last piece is shortened to what is still needed (but never below one window). Pieces shorter
-     than one window are skipped. Fewer than 300 s are selected only when the recording does not hold them; the
-     shortfall is reported, the participant is not excluded for it.
+     selected; the last piece is shortened to what is still needed. Pieces shorter than one window are skipped,
+     and no piece is added once less than one window is still needed (it could only hold a window by exceeding
+     300 s; methodology log entry 53). The selection therefore never exceeds 300 s; fewer than 300 s are selected
+     when the recording does not hold them as whole windows; the shortfall is reported, the participant is not
+     excluded for it.
 4. **Windows.** 10 s windows, 1 s step, inside each piece only (a piece of length L gives floor((L - 10) / 1) + 1).
+5. **Exact positions.** Segment ``j`` starts at input sample ``start_in`` (exact integer); its resampled sample
+   ``k`` lies at input position ``start_in + k * sf_in / sf`` exactly. ``segment_table`` records these integers
+   (and the integer cut samples), so boundary validation never goes through rounded seconds.
 """
 
 from __future__ import annotations
@@ -36,6 +41,15 @@ class Segment:
     @property
     def n(self) -> int:
         return self.data.shape[1]
+
+
+@dataclass
+class SegmentShape:
+    """Length-only stand-in for ``Segment`` (selection from the boundary geometry alone, without the signal)."""
+    index: int
+    orig_start: int
+    n: int
+    sfreq: float
 
 
 @dataclass
@@ -68,24 +82,41 @@ def segments(raw, cfg: dict) -> tuple[list[Segment], dict]:
 
     sf_in, sf = raw.info["sfreq"], float(cfg["preprocessing"]["sfreq"])
     cuts, n_events = disc.boundary_cuts(raw)
-    parts = disc.split(raw.n_times, cuts)
-    out, removed = [], 0
-    for j, (a, b) in enumerate(parts):
-        n = disc.exact_length(b - a, sf_in, sf)
-        removed += (b - a) - n
-        if disc.resampled_length(n, sf_in, sf) < 2:
+    table, info = segment_table(raw.n_times, cuts, n_events, sf_in, sf)
+    out = []
+    for t in table:
+        if not t["kept"]:
             continue
-        seg = disc._slice(raw, a, a + n)
+        seg = disc._slice(raw, t["start_in"], t["start_in"] + t["n_in"])
         seg.resample(sf, npad=disc.resample_npad(sf_in), pad="reflect_limited", verbose="error")
         x = seg.get_data()
+        if x.shape[1] != t["n"]:
+            raise RuntimeError(f"segment {t['index']}: resampled to {x.shape[1]} samples, expected {t['n']}")
         x = x - x.mean(axis=0, keepdims=True)                   # common average (instantaneous)
-        out.append(Segment(j, int(round(a * sf / sf_in)), x, sf))
+        out.append(Segment(t["index"], t["orig_start"], x, sf))
+    return out, info
+
+
+def segment_table(n_times: int, cuts, n_events: int, sf_in: float, sf: float) -> tuple[list[dict], dict]:
+    """Segment geometry from the boundary cuts alone (no signal): per segment its index, exact input-rate start
+    ``start_in`` and trimmed length ``n_in``, resampled length ``n`` and ``orig_start`` (= round(start_in * sf /
+    sf_in), the 250 Hz position used for ``start_sample``); plus the recording-level info of ``segments``."""
+    parts = disc.split(n_times, cuts)
+    table, removed = [], 0
+    for j, (a, b) in enumerate(parts):
+        n_in = disc.exact_length(b - a, sf_in, sf)
+        removed += (b - a) - n_in
+        n = disc.resampled_length(n_in, sf_in, sf)
+        table.append({"index": j, "start_in": int(a), "stop_in": int(b), "n_in": int(n_in), "n": int(n),
+                      "orig_start": int(round(a * sf / sf_in)), "kept": n >= 2})
     info = {"n_boundary_events": int(n_events), "n_discontinuities": int(len(cuts)),
             "boundary_positions_s": [round(float(c) / sf_in, 3) for c in cuts],
+            "boundary_cuts_in": [int(c) for c in cuts],
+            "segments_in": [[t["index"], t["start_in"], t["n_in"], t["orig_start"]] for t in table if t["kept"]],
             "segment_durations_s": [round((b - a) / sf_in, 3) for a, b in parts],
             "samples_trimmed_for_exact_resampling": int(removed),
-            "original_duration_s": round(raw.n_times / sf_in, 3)}
-    return out, info
+            "original_duration_s": round(n_times / sf_in, 3)}
+    return table, info
 
 
 def select(segs: list[Segment], cfg: dict, margin: int) -> tuple[list[Piece], dict]:
@@ -101,9 +132,9 @@ def select(segs: list[Segment], cfg: dict, margin: int) -> tuple[list[Piece], di
     else:
         got = 0
         for i, a, b in interiors:
-            if got >= need:
+            if need - got < win:              # no further window fits within the 300 s target (entry 53)
                 break
-            length = min(b - a, max(need - got, win))
+            length = min(b - a, need - got)   # >= win: every interior holds one window
             pieces.append(Piece(i, a, a + length))
             got += length
         mode = "multi_segment" if len(pieces) > 1 else ("single_short_segment" if pieces else "none")

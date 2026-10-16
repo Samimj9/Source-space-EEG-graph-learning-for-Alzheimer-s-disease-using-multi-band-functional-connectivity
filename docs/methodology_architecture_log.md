@@ -3112,6 +3112,45 @@ inputs (`docs/lcmv_xu.md` §9).
 
 ---
 
+## 53. LCMV / Xu suite: exact boundary validation, five-minute cap and targeted correction `corr1`
+
+**Finding (2026-10-16).** The full build at b38685e (65/65 participants) failed validation for one window,
+D3-23 [65725, 68225). D3-23 and D3-58 also reported 305.62 s and 309.62 s selected instead of at most 300 s.
+
+**Diagnosis**, reproduced on the public files with the build's own code:
+
+1. The window lies exactly at the margin: input sample 131,450, 1,650 = 2 × 825 samples after the boundary at
+   129,800, with no other cut nearby. It is therefore safe.
+   - The validator compared against `round(cut / 500, 3) × 250`, a float slightly above 64,900, with a strict
+     inequality.
+   - It was a metadata-precision false positive.
+2. The multi-segment selection added a final piece of one full window when less than one window was still needed
+   (`max(need − got, win)`). This gave one extra window each: D3-23 [90130, 92630) and D3-58 [79030, 81530).
+   - Both windows are boundary-safe.
+   - They lie outside a 300 s selection.
+
+**Decision.** Fix the cause and do not relax the check:
+
+- exact integer positions (`boundary_cuts_in`, `segments_in`);
+- exact validation with the same strict conditions;
+- new checks for the 300 s cap, the weights and the counts;
+- `select` never exceeds 300 s.
+
+The stored dataset is corrected without rebuilding, as the author asked:
+
+- new stores `*_corr1` drop only the windows outside the corrected selection (two expected);
+- every aligned array is subset consistently;
+- no LCMV, connectivity or feature is recomputed;
+- everything is verified against the header, the stored windows and the re-applied rejection rule;
+- the originals are kept.
+
+**Consequence accepted.** The LCMV covariance of the two changed participants keeps the one extra clean window it
+was estimated from. A full rebuild would differ only in that covariance; the rejection decisions are unchanged.
+Experiments use only stores whose validation passed. No LX experiment had been run, so moving the suite pin to the
+corrected code (`UPDATE_LX_CODE = True`, once) invalidates nothing.
+
+**Details:** `docs/lcmv_xu.md` §11; decisions row 57.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
