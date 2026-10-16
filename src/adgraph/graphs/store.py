@@ -11,6 +11,7 @@ A run directory contains
                                            for ROI order (j, k), not a direction of
                                            influence; never used as an adjacency)
                      psd_abs/psd_log/psd_rel            (n_windows, n_bands, n_rois) float32
+                     psd_de, sensor_psd_de              optional: differential entropy of the band-passed window
                      sensor_psd_abs/_log/_rel           (n_windows, n_bands, n_channels) float32
                    and constants: bands, band_edges, roi_names, channels,
                    roi_coords (n_rois, 3) MNI mm label centroids (optional; visualization only)
@@ -33,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 CONNECTIVITY = ("plv", "ciplv")            # adjacency-valid (non-negative, symmetric) measures
-PSD_KINDS = ("abs", "log", "rel")
+PSD_KINDS = ("abs", "log", "rel", "de")    # de = differential entropy (LCMV / Xu suite, entry 50; optional)
 ARRAY_KEYS = CONNECTIVITY + ("ciplv_signed",) + tuple(f"psd_{k}" for k in PSD_KINDS) + tuple(f"sensor_psd_{k}" for k in PSD_KINDS)
 WINDOW_COLUMNS = ("window_id", "key", "dataset", "subject_id", "label", "y", "window_index",
                   "start_sample", "stop_sample", "tmin", "tmax", "sample_weight")

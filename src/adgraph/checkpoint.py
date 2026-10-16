@@ -51,12 +51,15 @@ CODE_SCOPES = {
     "graph": ("config.py", "pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
               "graphs/store.py"),
     "experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features"),
+    "lx_graph": ("config.py", "pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
+                 "graphs/store.py", "evaluation/splits.py", "lcmvxu"),
 }
 # Numerical libraries whose version can change results of each kind of computation.
 SCOPE_LIBRARIES = {
     "operator": ("numpy", "scipy", "mne"),
     "graph": ("numpy", "scipy", "pandas", "mne"),
     "experiment": ("numpy", "scipy", "pandas", "sklearn", "torch"),
+    "lx_graph": ("numpy", "scipy", "pandas", "mne"),
 }
 
 STATES = ("pending", "running", "completed", "failed")

@@ -27,8 +27,17 @@ from pathlib import Path
 
 import yaml
 
-SETTING_NAMES = ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1", "within_D3")
-GRAPH_FAMILIES = (None, "D3")          # graph-run family an experiment reads (None = D1/D2)
+SETTING_NAMES = ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1", "within_D3",
+                 "xu_dev_cv", "xu_holdout")
+# graph-run family an experiment reads -> (graph-run prefix under processed_dir, results root, allowed settings).
+# None = D1/D2; D3 = wMNE D3 runs; LX / LX10 = D3 LCMV / Xu suite (entry 50), modes B (all windows) / A (tenfold).
+FAMILIES = {
+    None: ("graphs", "experiments", ("within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1")),
+    "D3": ("graphsD3", "experiments_D3", ("within_D3",)),
+    "LX": ("D3_LCMV_XU/graphsLX", "D3_LCMV_XU/experiments_B_all_windows", ("xu_dev_cv", "xu_holdout")),
+    "LX10": ("D3_LCMV_XU/graphsLX10", "D3_LCMV_XU/experiments_A_xu_tenfold", ("xu_dev_cv", "xu_holdout")),
+}
+GRAPH_FAMILIES = tuple(FAMILIES)
 
 
 def deep_merge(base: dict, over: dict) -> dict:
@@ -123,6 +132,10 @@ def validate(v: dict) -> None:
     d3 = {s for s in v.get("settings") or [] if s.endswith("D3")}
     if (v.get("graph_family") == "D3") != bool(d3) or (d3 and set(v["settings"]) != d3):
         raise ValueError(f"{v.get('name')}: D3 settings and graph_family D3 go together and are never mixed with D1/D2")
+    allowed = FAMILIES[v.get("graph_family")][2]
+    if set(v.get("settings") or []) - set(allowed):
+        raise ValueError(f"{v.get('name')}: settings {v.get('settings')} not allowed for graph_family "
+                         f"{v.get('graph_family')} ({allowed}); families are never mixed")
     unknown = set(v.get("settings") or []) - set(SETTING_NAMES)
     if unknown:
         raise ValueError(f"{v.get('name')}: unknown settings {sorted(unknown)}")

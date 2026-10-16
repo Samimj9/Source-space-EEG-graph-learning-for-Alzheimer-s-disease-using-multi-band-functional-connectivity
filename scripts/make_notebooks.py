@@ -853,6 +853,10 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 [advanced/Restore_D1D2_code_pin.ipynb]({COLAB}/advanced/Restore_D1D2_code_pin.ipynb) (sets the D1/D2 code
 pin back to its pre-Dataset 3 commit; changes no result).
 
+D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<outputs>/D3_LCMV_XU/`, own code pin):
+[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, then `LX_Exp0` ... `LX_Exp7` (one at a time),
+then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |
@@ -864,6 +868,187 @@ pin back to its pre-Dataset 3 commit; changes no result).
 ```
 {{DRIVE_LAYOUT}}```
 """.replace("{rows}", rows).replace("{DRIVE_LAYOUT}", DRIVE_LAYOUT)
+
+
+# ============================================================================ D3 LCMV / Xu-protocol suite
+SETUP_LX = (SETUP_D3
+            .replace("# ===== Dataset 3 setup: nothing to edit.", "# ===== D3 LCMV / Xu suite setup: nothing to edit.")
+            .replace("UPDATE_D3_CODE = False   # leave False. True only if you were asked to switch D3 to newer code\n"
+                     "# Dataset 3 has its own code pin, <outputs>/D3_CODE_COMMIT.txt (all D3 notebooks run that commit);\n"
+                     "# the D1/D2 pin CODE_COMMIT.txt is only reported, never read for checkout or changed here.",
+                     "UPDATE_LX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The LCMV / Xu suite has its own code pin, <outputs>/D3_LCMV_XU/CODE_COMMIT.txt (all LX notebooks run\n"
+                     "# that commit); the D1/D2 and D3 pins are only reported, never changed here.")
+            .replace("'--family', 'D3']\n     + (['--update-code'] if UPDATE_D3_CODE else []))",
+                     "'--family', 'LX']\n     + (['--update-code'] if UPDATE_LX_CODE else []))")
+            + "LX = OUT + '/D3_LCMV_XU'\nprint('suite outputs:', LX)\n")
+assert "UPDATE_LX_CODE" in SETUP_LX and "'LX'" in SETUP_LX
+
+LX_HOWTO = HOWTO + """
+**Suite:** D3 LCMV beamforming + Xu et al. (2025) protocol (methodology log entry 50, `docs/lcmv_xu.md`). All outputs
+are under `<outputs>/D3_LCMV_XU/`; D1/D2 and the earlier D3 (wMNE) runs and results are never touched."""
+
+LX_EXPERIMENTS = [
+    (0, "lx_exp0_sensor_psd_de", "Sensor-space PSD / DE classical baselines (LR, SVM)", False),
+    (1, "lx_exp1_source_psd_de", "LCMV source-space PSD / DE classical baselines (LR, SVM)", False),
+    (2, "lx_exp2_conn_minimal", "Source connectivity-only GCN (5 bands x PLV / |ciPLV|)", True),
+    (3, "lx_exp3_single_band", "Single-band GCN with matched-band PSD nodes (5 bands x PLV / |ciPLV|)", True),
+    (4, "lx_exp4_band_mean", "Band-averaged multiband GCN (all-band PSD or DE nodes)", True),
+    (5, "lx_exp5_multibranch", "Multi-band GNN: shared and band-specific branches, mean / attention fusion", True),
+    (6, "lx_exp6_psd_strength", "Full multiband GCN (PSD + node strength) with ablations", True),
+    (7, "lx_exp7_earm_gnn", "EARM-GNN: adaptive EEG-guided edge gates, residual blocks, band attention", True),
+]
+
+
+def lx_build_notebook() -> dict:
+    return notebook([
+        md("""# LX · 00 · Build the D3 LCMV / Xu-protocol dataset
+OpenNeuro ds004504 v1.0.9 derivatives (**already on Drive, not downloaded again**): 36 AD + 29 HC (FTD excluded by
+design), 19 channels with the verified EEGLAB electrode coordinates. Every EEGLAB `boundary` cuts the recording;
+each continuous segment is resampled on its own; five minutes of usable EEG per participant are selected
+deterministically; 10 s windows with a 1 s step (90 % overlap) never cross a boundary or its filter margin.
+Per participant: LCMV beamformer (own data covariance, rank-aware, unit-noise-gain), 68 Desikan-Killiany ROIs,
+five Xu bands (delta 0.5-4, theta 4-8, alpha 8-13, beta 13-25, gamma 25-45 Hz), PSD, differential entropy,
+PLV and |ciPLV|. Two graph stores: **mode B** (all accepted windows) and **mode A** (Xu tenfold: 10 samples per
+participant, 65 -> 650).
+""" + LX_HOWTO + """
+**Steps:** 1. input check (participants, channels, coordinates) · 2. recording QC of all 65 participants (durations,
+boundaries, segments, five-minute selection; no source model) · 3. smoke test: one participant through the full
+LCMV path, verified against MNE's own `apply_lcmv_raw` · 4. full build (starts automatically only if the smoke test
+passed; resumable per participant) · 5. validation (no window crosses a boundary, frozen participant split,
+shapes, finiteness) · 6. participant QC report. A GPU is not needed for this notebook."""),
+        code(SETUP_LX),
+        md("## 1. Input check (36 AD / 29 HC, 19 channels and verified electrode coordinates in every file)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 2. Recording QC of every participant (no source model)"),
+        code('sh("python scripts/lx_build.py inspect")'),
+        md("## 3. Smoke test: one participant, full LCMV path (separate `_limit1` run)"),
+        code("""sh("python scripts/lx_build.py build --limit 1")
+sh("python scripts/lx_build.py validate --limit 1")
+SMOKE_PASSED = True                       # reached only if both commands above succeeded"""),
+        md("## 4. Full build (all 65 participants; resumable, completed participants are skipped)"),
+        code("""if not SMOKE_PASSED:
+    raise RuntimeError('smoke test did not pass; the full build is not started')
+sh("python scripts/lx_build.py build")"""),
+        md("## 5. Validation of both graph stores"),
+        code('sh("python scripts/lx_build.py validate")'),
+        md("## 6. Participant QC report"),
+        code("""import glob, json
+import pandas as pd
+run = sorted(p for p in glob.glob(LX + '/graphsLX_v*') if '_limit' not in p)[-1]
+qc = pd.read_csv(run + '/qc_report.csv')
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+display(qc[[c for c in ['key', 'label', 'original_duration_s', 'n_boundary_events', 'n_segments', 'n_usable_segments',
+                        'selection_mode', 'selected_duration_s', 'n_windows_candidate', 'n_windows_accepted',
+                        'n_windows_rejected', 'n_tenfold', 'lcmv_rank', 'status', 'reason'] if c in qc]])
+print(qc['status'].value_counts().to_dict(), '| windows (mode B):', int(qc['n_windows_kept'].sum()),
+      '| samples (mode A):', int(qc['n_tenfold'].sum()))
+print('frozen split:', {k: v for k, v in json.load(open(run + '/xu_split.json')).items() if k.startswith('n_')})"""),
+    ])
+
+
+def lx_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    cfg_b = f"configs/experiments/lx/{name}.yaml"
+    cfg_a = f"configs/experiments/lx/tenfold/{name.replace('lx_', 'lx10_')}.yaml"
+    variants, proto = protocol(f"lx/{name}")
+    return notebook([
+        md(f"""# LX · Experiment {n} · {title}
+
+{proto}
+""" + LX_HOWTO + f"""
+**Validation (identical for Exp 0-7):** the frozen participant split saved with the dataset (`xu_split.json`):
+`xu_dev_cv` = 5-fold participant-grouped CV inside the 80 % development participants; `xu_holdout` = fit on all
+development participants, evaluated once on the 20 % holdout participants. Normalization, class weights and
+(classical models only) the C selection use training participants only. Participant-level metrics (mean window
+score per participant) are primary; window-level metrics are secondary.
+
+**Runs both modes:** A (Xu tenfold, 650 samples; `{cfg_a}`) first, then B (all accepted windows; `{cfg_b}`).
+Resumable: every completed fold is saved to Drive. Results: `<outputs>/D3_LCMV_XU/experiments_A_xu_tenfold/` and
+`.../experiments_B_all_windows/`.""" + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_LX),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results (saved outputs only)"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {cfg}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    exp = Path(cfg).stem
+    reports = sorted(glob.glob(f'{LX}/{root}/{exp}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+        for png in sorted(glob.glob(reports[-1] + '/figures/*.png'))[:6]:
+            display(Image(filename=png))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {sorted(ERRORS)}; completed units are saved. Run all again.')"""),
+    ], gpu=gpu)
+
+
+def lx_master_notebook() -> dict:
+    return notebook([
+        md("""# LX · 98 · Optional master runner: Exp 0-7, mode A then mode B
+""" + LX_HOWTO + """
+**Optional.** The normal workflow is one experiment notebook at a time. With the default `RUN_EVERYTHING = False`,
+*Run all* only shows the status of every experiment and starts nothing. Set `RUN_EVERYTHING = True` deliberately
+to run all eight experiments in both modes (resumable; failures are reported and the next experiment continues),
+followed by the comparison report. Use a **GPU runtime**."""),
+        code(SETUP_LX),
+        md("## 1. Status of all experiments"),
+        code("""import glob
+for cfg in sorted(glob.glob('configs/experiments/lx/tenfold/lx10_exp*.yaml')) + sorted(glob.glob('configs/experiments/lx/lx_exp*.yaml')):
+    sh(f"python scripts/experiment.py status --config {cfg}")"""),
+        md("## 2. Run everything (disabled by default)"),
+        code("""RUN_EVERYTHING = False   # deliberately set True to run Exp 0-7 in modes A and B
+if RUN_EVERYTHING:
+    sh("python scripts/lx_run_all.py")
+else:
+    print('Not started (RUN_EVERYTHING = False).')"""),
+    ], gpu=True)
+
+
+def lx_report_notebook() -> dict:
+    return notebook([
+        md("""# LX · 99 · Comparison across Exp 0-7 (saved outputs only)
+""" + LX_HOWTO + """
+One row per mode x experiment x variant x setting: participant-level metrics (primary) and window-level metrics
+(secondary), confusion counts, ROC curves, and the compute environment (CPU / GPU) of each result. Nothing is
+trained, selected or ranked. Each run writes a new `reports/report_<time>/` folder."""),
+        code(SETUP_LX),
+        md("## Comparison"),
+        code("""sh("python scripts/lx_report.py")
+import glob
+import pandas as pd
+from IPython.display import Image, display
+rep = sorted(glob.glob(LX + '/reports/report_*'))[-1]
+pd.set_option('display.max_rows', 500, 'display.width', 250)
+t = pd.read_csv(rep + '/comparison.csv')
+if len(t):
+    display(t[['mode', 'experiment', 'variant', 'setting', 'n_participants', 'participant_accuracy',
+               'participant_balanced_accuracy', 'participant_sensitivity', 'participant_specificity',
+               'participant_precision', 'participant_f1', 'participant_roc_auc', 'window_roc_auc',
+               'window_balanced_accuracy', 'device']].round(3))
+for png in sorted(glob.glob(rep + '/figures/*.png')):
+    print(png)
+    display(Image(filename=png))"""),
+    ])
 
 
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
@@ -887,6 +1072,11 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
         entries.append(entry)
     outputs[nbdir / "d3" / "D3_99_comparison.ipynb"] = d3_comparison_notebook()
     outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook(d1d2_configs)   # D1/D2 paper figures
+    outputs[nbdir / "lcmv_xu" / "LX_00_build_dataset.ipynb"] = lx_build_notebook()
+    for n, name, title, gpu in LX_EXPERIMENTS:
+        outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)
+    outputs[nbdir / "lcmv_xu" / "LX_98_run_all_optional.ipynb"] = lx_master_notebook()
+    outputs[nbdir / "lcmv_xu" / "LX_99_report.ipynb"] = lx_report_notebook()
     for path, nb in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")

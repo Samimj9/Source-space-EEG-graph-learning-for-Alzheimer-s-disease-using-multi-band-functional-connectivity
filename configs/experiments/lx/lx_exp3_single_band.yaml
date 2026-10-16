@@ -1,0 +1,10 @@
+# LX Exp 3: single-band GCN (Exp 3 Tier 1 design: single-band connectivity + matched-band [log, rel] PSD node
+# features, GCN, fixed hyperparameters). 5 Xu bands x {PLV, |ciPLV|} = 10 variants.
+extends: ../exp3_conn_psd_fixedhp.yaml
+experiment: lx_exp3_single_band
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[delta], [theta], [alpha], [beta], [gamma]]

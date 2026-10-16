@@ -1,0 +1,23 @@
+# LX Exp 5: multi-band GNN, one graph per Xu band, matched-band [log, rel] PSD node features (F = 2), fused band
+# embeddings (Exp 5 design, exp5_multiband_fixedhp.yaml, restated for 5 bands). Tier 1 variants (shared GCN,
+# mean / attention fusion) plus the band-specific multibranch encoders of the Exp 5 Tier 2 definition
+# (shared_encoder: false, one GCN per band). {PLV, |ciPLV|} x 4 = 8 variants; fixed hyperparameters.
+extends: ../gnn_fixed_base.yaml
+experiment: lx_exp5_multibranch
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+graph:
+  band_mode: multi
+  bands: [delta, theta, alpha, beta, gamma]
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  shared__mean: {model.shared_encoder: true, model.fusion: mean}
+  shared__attention: {model.shared_encoder: true, model.fusion: attention}
+  separate__mean: {model.shared_encoder: false, model.fusion: mean}            # band-specific branches
+  separate__attention: {model.shared_encoder: false, model.fusion: attention}  # band-specific branches

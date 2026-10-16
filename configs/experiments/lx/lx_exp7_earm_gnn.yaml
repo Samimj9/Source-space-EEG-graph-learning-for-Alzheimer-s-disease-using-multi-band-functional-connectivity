@@ -1,0 +1,12 @@
+# LX Exp 7: EARM-GNN (Exp 7 design, src/adgraph/models/earm.py, docs/earm_gnn.md) unchanged except for the five
+# Xu bands: EEG-derived adjacency A_EEG (PLV or |ciPLV|) as the graph prior, adaptive gated adjacency
+# A_adaptive = A_EEG (.) G_theta with G_theta = sigmoid(b_k + U diag(s_k) U^T), residual encoder blocks, band
+# embeddings, attention band fusion; nodes [log PSD, rel PSD, strength] per band. Variants: full and the two
+# pre-specified ablations (fixed adjacency, mean fusion), each for PLV and |ciPLV|.
+extends: ../exp7_earm_gnn.yaml
+experiment: lx_exp7_earm_gnn
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+graph:
+  bands: [delta, theta, alpha, beta, gamma]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0, save_model_state: true}

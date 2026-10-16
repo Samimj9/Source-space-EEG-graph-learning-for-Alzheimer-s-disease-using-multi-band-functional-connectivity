@@ -102,6 +102,15 @@ e.g. `D1-3`, `D2-3`.
   `CODE_COMMIT.txt` (`scripts/code_pin.py`).
 - Never mix D3 graph runs or results with D1/D2 ones. Cross-dataset D3 ↔ D1/D2 is not implemented yet.
 
+### D3 LCMV beamforming + Xu protocol suite (`docs/lcmv_xu.md`, methodology log entry 50)
+
+- Separate pipeline: `src/adgraph/lcmvxu/`, `configs/lcmv_xu/pipeline.yaml`, `configs/experiments/lx/` (mode B, all
+  windows) and `lx/tenfold/` (mode A, 10 samples per participant); notebooks `notebooks/lcmv_xu/`.
+- Outputs only under `<processed>/D3_LCMV_XU/` (graphs `graphsLX_v1_*` / `graphsLX10_v1_*`, results
+  `experiments_B_all_windows/` / `experiments_A_xu_tenfold/`); own pin `D3_LCMV_XU/CODE_COMMIT.txt` (`--family LX`).
+- Per-participant LCMV, 68 DK ROIs, Xu's five bands, 10 s / 1 s windows, frozen 80/20 participant split
+  (`xu_dev_cv`, `xu_holdout`). Never mix with D1/D2 or the wMNE D3 runs.
+
 ## Repository layout
 
 ```

@@ -1,0 +1,10 @@
+# LX Exp 2: connectivity-only GCN (Exp 2 Tier 1 design: single-band source connectivity, constant node feature,
+# fixed hyperparameters). 5 Xu bands x {PLV, |ciPLV|} = 10 variants.
+extends: ../exp2_conn_minimal_fixedhp.yaml
+experiment: lx_exp2_conn_minimal
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[delta], [theta], [alpha], [beta], [gamma]]

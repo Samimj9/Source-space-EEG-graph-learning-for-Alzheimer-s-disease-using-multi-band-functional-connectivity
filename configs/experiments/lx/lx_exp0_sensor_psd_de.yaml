@@ -1,0 +1,15 @@
+# LX Exp 0: sensor-space spectral baselines (Exp 0 design), 19 electrodes x 5 Xu bands. LR and SVM, each with
+# PSD features [log, rel] (the original baseline) and, as a DISTINCT configuration, differential entropy [de].
+extends: ../exp0_sensor_psd.yaml
+experiment: lx_exp0_sensor_psd_de
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+features:
+  source: sensor
+  bands: [delta, theta, alpha, beta, gamma]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  model.name: [logreg, svm]
+variants:
+  psd: {features.psd_kinds: [log, rel]}
+  de: {features.psd_kinds: [de]}

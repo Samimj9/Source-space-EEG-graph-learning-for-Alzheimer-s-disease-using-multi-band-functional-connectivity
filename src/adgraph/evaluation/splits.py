@@ -22,7 +22,12 @@ SETTINGS = {
     "cross_D2_to_D1": (("D2",), "D1", ("y",)),
     # Dataset 3 (OpenNeuro ds004504, AD/HC; methodology log entry 44): its own graph runs (graphsD3_v*)
     "within_D3": (("D3",), None, ("y",)),
+    # D3 LCMV / Xu-protocol suite (methodology log entry 50): one frozen participant split (xu_partition)
+    "xu_dev_cv": (("D3",), None, ("y",)),       # 5-fold participant CV inside the 80 % development set only
+    "xu_holdout": (("D3",), None, ("y",)),      # fit on the whole development set, test once on the 20 % holdout
 }
+XU_SETTINGS = ("xu_dev_cv", "xu_holdout")
+XU_SPLIT = {"test_fraction": 0.2, "seed": 20250702, "dev_folds": 5}
 CROSS_SETTINGS = ("cross_D1_to_D2", "cross_D2_to_D1")
 
 
@@ -59,6 +64,23 @@ def stratified_subject_folds(subj: pd.DataFrame, k: int, seed: int,
     return [(keys[tr].tolist(), keys[te].tolist()) for tr, te in skf.split(keys, _strata(subj, strata))]
 
 
+def xu_partition(subj: pd.DataFrame, test_fraction: float = XU_SPLIT["test_fraction"],
+                 seed: int = XU_SPLIT["seed"]) -> tuple[list[str], list[str]]:
+    """Frozen participant split of the LCMV / Xu suite: (development keys, holdout test keys).
+
+    Stratified by diagnosis: per class, round(test_fraction * n) participants (at least one) are drawn with a
+    fixed seed from the sorted keys. Depends only on the participant table, so every experiment (Exp 0-7) and both
+    modes get the identical split; the dataset build saves it (xu_split.json)."""
+    rng = np.random.default_rng(seed)
+    test = []
+    for y in sorted(subj["y"].unique()):
+        keys = sorted(subj.loc[subj["y"] == y, "key"])
+        n = max(1, int(round(test_fraction * len(keys))))
+        test += sorted(rng.choice(keys, size=n, replace=False).tolist())
+    test = sorted(test)
+    return sorted(set(subj["key"]) - set(test)), test
+
+
 def make_splits(meta: pd.DataFrame, setting: str, k: int = 5, n_repeats: int = 20, seed: int = 0,
                 target: str = "y", scheme: str = "kfold") -> list[Split]:
     """Outer splits for one evaluation setting.
@@ -76,6 +98,12 @@ def make_splits(meta: pd.DataFrame, setting: str, k: int = 5, n_repeats: int = 2
             raise ValueError(f"{setting}: empty source or target")
         return [Split(setting, r, 0, tuple(src), tuple(tgt)) for r in range(n_repeats)]
     subj = subj[subj["dataset"].isin(train_ds)].reset_index(drop=True)
+    if setting in XU_SETTINGS:
+        dev, test = xu_partition(subj)
+        if setting == "xu_holdout":           # repeats = model seeds; the split never changes
+            return [Split(setting, r, 0, tuple(dev), tuple(test)) for r in range(n_repeats)]
+        subj = subj[subj["key"].isin(dev)].reset_index(drop=True)   # holdout participants never enter the CV
+        k = XU_SPLIT["dev_folds"]
     splits = []
     if scheme == "loso":
         keys = subj["key"].tolist()

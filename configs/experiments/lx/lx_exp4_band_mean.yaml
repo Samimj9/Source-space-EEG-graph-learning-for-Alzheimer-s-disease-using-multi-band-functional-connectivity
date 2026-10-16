@@ -1,0 +1,14 @@
+# LX Exp 4: multiband GCN on the band-averaged adjacency (Exp 4 Tier 1 design), node features = all-band source
+# PSD [log, rel] (F = 10) and, as a DISTINCT configuration closest to Xu, all-band DE (F = 5). {PLV, |ciPLV|}.
+extends: ../exp4_band_mean_fixedhp.yaml
+experiment: lx_exp4_band_mean
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+graph:
+  bands: [delta, theta, alpha, beta, gamma]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  psd: {node_features.psd_kinds: [log, rel]}
+  de: {node_features.psd_kinds: [de]}

@@ -1,0 +1,29 @@
+# LX Exp 6: full multi-band GCN (Exp 6 Tier 1 design): one graph per Xu band, shared encoder, attention fusion,
+# node features per ROI and band [log PSD, rel PSD, node strength] (F = 3). Full model for PLV and |ciPLV|; the
+# Exp 6 ablation types for PLV: no PSD, no strength, no learned fusion, and each band dropped (5 Xu bands).
+extends: ../gnn_fixed_base.yaml
+experiment: lx_exp6_psd_strength
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+graph:
+  band_mode: multi
+  bands: [delta, theta, alpha, beta, gamma]
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+  fusion: attention
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+variants:
+  plv__full: {graph.connectivity: plv}
+  ciplv__full: {graph.connectivity: ciplv}
+  plv__no_psd: {graph.connectivity: plv, node_features.components: [strength]}
+  plv__no_strength: {graph.connectivity: plv, node_features.components: [psd]}
+  plv__no_learned_fusion: {graph.connectivity: plv, model.fusion: mean}
+  plv__drop_delta: {graph.connectivity: plv, graph.bands: [theta, alpha, beta, gamma]}
+  plv__drop_theta: {graph.connectivity: plv, graph.bands: [delta, alpha, beta, gamma]}
+  plv__drop_alpha: {graph.connectivity: plv, graph.bands: [delta, theta, beta, gamma]}
+  plv__drop_beta: {graph.connectivity: plv, graph.bands: [delta, theta, alpha, gamma]}
+  plv__drop_gamma: {graph.connectivity: plv, graph.bands: [delta, theta, alpha, beta]}

@@ -17,6 +17,10 @@ Optional: secondary analyses in [notebooks/additional](additional), and
 [advanced/Restore_D1D2_code_pin.ipynb](https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/ecstatic-davinci-a2e8mh/notebooks/advanced/Restore_D1D2_code_pin.ipynb) (sets the D1/D2 code
 pin back to its pre-Dataset 3 commit; changes no result).
 
+D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<outputs>/D3_LCMV_XU/`, own code pin):
+[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, then `LX_Exp0` ... `LX_Exp7` (one at a time),
+then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |

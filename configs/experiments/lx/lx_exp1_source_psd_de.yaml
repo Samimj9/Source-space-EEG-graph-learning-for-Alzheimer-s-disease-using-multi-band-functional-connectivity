@@ -1,0 +1,15 @@
+# LX Exp 1: LCMV source-space spectral baselines (Exp 1 design), 68 ROIs x 5 Xu bands. LR and SVM, PSD [log, rel]
+# and, as a DISTINCT configuration, differential entropy [de].
+extends: ../exp1_source_psd.yaml
+experiment: lx_exp1_source_psd_de
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+features:
+  source: source
+  bands: [delta, theta, alpha, beta, gamma]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  model.name: [logreg, svm]
+variants:
+  psd: {features.psd_kinds: [log, rel]}
+  de: {features.psd_kinds: [de]}

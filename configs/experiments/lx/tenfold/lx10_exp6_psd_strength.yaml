@@ -1,0 +1,5 @@
+# Mode A (author reproduction, methodology log entry 50): the same experiment on the tenfold store graphsLX10_*
+# (the first 10 accepted 10 s windows of each participant, 1 s step: 65 participants -> 650 samples).
+extends: ../lx_exp6_psd_strength.yaml
+experiment: lx10_exp6_psd_strength
+graph_family: LX10

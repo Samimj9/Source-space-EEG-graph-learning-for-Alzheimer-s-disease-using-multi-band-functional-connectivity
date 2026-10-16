@@ -21,6 +21,7 @@ results: <processed_dir>/experiments). Nothing needs to be edited.
 """
 
 import argparse
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,10 +53,21 @@ paths = load_paths(args.paths)
 cfg = load_experiment(args.config)
 # graph family: D1/D2 (default) or Dataset 3 (`graph_family: D3`: graph runs graphsD3_v*, results in
 # experiments_D3/), never mixed: every results root holds the results of one graph run
-d3 = cfg.get("graph_family") == "D3"
-graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(
-    paths["processed_dir"], prefix="graphsD3" if d3 else "graphs")
-out = Path(args.out or f"{paths['processed_dir']}/experiments" + ("_D3" if d3 else ""))
+from adgraph.experiments.config import FAMILIES
+
+prefix, results_root, _ = FAMILIES[cfg.get("graph_family")]
+graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(paths["processed_dir"], prefix=prefix)
+out = Path(args.out or f"{paths['processed_dir']}/{results_root}")
+if cfg.get("graph_family") in ("LX", "LX10"):    # the frozen participant split must equal the one saved at build
+    from adgraph.evaluation.splits import xu_partition
+
+    saved = json.loads((graphs / "xu_split.json").read_text())
+    subj = pd.read_csv(graphs / "subjects.csv")
+    dev, test = xu_partition(subj.loc[subj["status"] == "ok", ["key", "dataset", "y"]])
+    if (dev, test) != (saved["development"], saved["test"]):
+        raise SystemExit(f"participant split differs from {graphs / 'xu_split.json'}; refusing to run")
+    print(f"frozen participant split: {len(dev)} development, {len(test)} holdout test participants "
+          f"(saved in {graphs / 'xu_split.json'})")
 experiment = cfg["experiment"]
 entries = experiment_entries(args.config)
 exp_dir = out / experiment

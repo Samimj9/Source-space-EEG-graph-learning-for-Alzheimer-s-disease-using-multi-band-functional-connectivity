@@ -3000,6 +3000,58 @@ participants and 3,974 graphs; D3 Exp 0/1 are complete and Exp 6 is running.
 
 ---
 
+## 50. D3 LCMV beamforming + Xu et al. (2025) protocol suite (Exp 0-7), a separate pipeline
+
+**Date:** 2026-10-16. **Requested by:** the author. **Full description:** `docs/lcmv_xu.md`. **Code:**
+`src/adgraph/lcmvxu/`, `configs/lcmv_xu/pipeline.yaml`, `configs/experiments/lx/`, `scripts/lx_*.py`,
+`notebooks/lcmv_xu/`.
+
+A new pipeline next to, not instead of, the existing ones. Outputs only in `<processed>/D3_LCMV_XU/`. It has its own
+code pin (`colab_setup.py --family LX`), configuration hash and checkpoint scope (`lx_graph`). D1/D2, the wMNE D3
+graph run `graphsD3_v4_da723b33554c`, `experiments_D3/`, `D3_CODE_COMMIT.txt` and the D1/D2 pin are not touched.
+
+**Decisions:**
+- **Source model:** per-participant time-domain LCMV beamformer on fsaverage with fixed cortical-normal
+  orientation. Covariance from the participant's own accepted broadband samples, rank estimated from the data,
+  `reg = 0.05`, unit-noise-gain-invariant weights. `mean_flip` over the 68 Desikan-Killiany ROIs, same order as
+  before. Every participant's 68 × 19 operator is verified against MNE's `apply_lcmv_raw`.
+- **Bands:** Xu's five bands; alpha is not split. 1.0 Hz FIR transitions, delta lower transition capped at 0.5 Hz.
+- **Features:** PSD (abs/log/rel), differential entropy, PLV and |ciPLV|.
+- **Recordings:** split at every EEGLAB boundary; each segment resampled on its own.
+  - The only trimming is the 3.3 s delta-kernel margin from each segment end.
+  - Five minutes are selected deterministically: the first uninterrupted 300 s, else separate pieces in time
+    order, never joined.
+  - 10 s windows with a 1 s step; the existing peak-to-peak rejection; the pre-specified ≥ 5-window rule.
+  - The participant QC report lists every participant.
+- **650 samples:** the authors' code reads 10 samples per participant (65 × 10). Mode A reproduces that count with
+  the first 10 accepted windows, i.e. the literal 90 %-overlap tenfold reading. Mode B uses every accepted window
+  of the five minutes (up to 291 per participant). The paper's "309 s" and the 32 DE values per node could not be
+  verified; this is documented and not imitated.
+- **Validation:** one frozen, stratified 80/20 participant split (seed 20250702; 52 development / 13 holdout),
+  identical for all experiments and both modes. Settings `xu_dev_cv` (5-fold participant CV inside the development
+  set) and `xu_holdout` (one fit on the development set, evaluated on the holdout). Participant-level metrics are
+  primary.
+  - Xu's code instead reports the best epoch per CV fold over all 65 participants. Here the last-epoch model is
+    used, with no selection on evaluation data.
+- **Experiments:** Exp 0-7 keep their existing definitions with five bands. DE variants are added as distinct
+  configurations: Exp 0, 1 (classical) and Exp 4.
+  - Exp 5 adds the band-specific branches of its Tier 2 definition.
+  - Exp 6 keeps its ablation types for five bands.
+  - Exp 7 is EARM-GNN unchanged.
+- **Shared code changes:** `graphs.store.PSD_KINDS` gains the optional kind `de`; the settings `xu_dev_cv` and
+  `xu_holdout`; the experiment families `LX` / `LX10`. Existing stores, settings and families behave as before.
+
+**Checks run before delivery** (no long tests, by request):
+- imports and configuration expansion (16 configs);
+- recording handling on two real files (D3-1 and D3-56): zero window/boundary violations;
+- LCMV operator vs `apply_lcmv_raw`: 1.6e-15, on a spherical head model, because fsaverage is not downloadable in
+  this environment; the fsaverage path is checked by the Colab smoke test;
+- feature shapes and finiteness;
+- split disjointness;
+- a short synthetic run of Exp 1, 5, 6 and 7 in both settings.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

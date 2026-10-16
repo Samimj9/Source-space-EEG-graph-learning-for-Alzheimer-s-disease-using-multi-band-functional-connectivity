@@ -1,0 +1,100 @@
+# D3 LCMV + Xu-protocol dataset (methodology log entry 50, docs/lcmv_xu.md). A NEW, separate pipeline:
+# OpenNeuro ds004504 v1.0.9 provider derivatives (36 AD + 29 HC; FTD excluded by design), 19 channels, LCMV
+# beamformer on fsaverage, 68 Desikan-Killiany ROIs, Xu et al. (2025) bands, 10 s windows with 90 % overlap.
+# Outputs: <processed>/D3_LCMV_XU/ (never mixed with D1/D2 or the wMNE D3 runs graphsD3_v4_*).
+# Code: src/adgraph/lcmvxu/. Notebook: notebooks/lcmv_xu/LX_00_build_dataset.ipynb.
+version: 1
+datasets: [D3]
+output_subdir: D3_LCMV_XU
+
+input:
+  format: eeglab                  # derivatives/sub-XXX/eeg/sub-XXX_task-eyesclosed_eeg.set (MNE: uV -> V)
+
+channels:                         # identical to configs/pipeline_d3.yaml (verified montage, entry 46)
+  recorded: [Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz]
+  drop: []
+  montage: eeglab_chanlocs
+  coordinates:
+    source: eeglab_chanlocs
+    units: mm
+    head_radius_m: [0.06, 0.13]
+    frame: mri
+    accepted_lookups: [standard_BEM/elec/standard_1005.elc, standard_BEM/elec/standard_1020.elc]
+    compare_template: colin27_1005
+  verify_layout: false
+
+units:
+  plausible_std_v: [1.0e-7, 2.0e-4]   # median channel std of the selected, average-referenced data
+  flat_std_v: 1.0e-7                  # a channel below 0.1 uV is not a measurement: the subject stops (entry 44)
+  scale:
+    D3: 1.0
+
+preprocessing:
+  sfreq: 250.0                    # every continuous segment is resampled on its own (fixed 4 s padding, even length)
+  bandpass: false                 # the provider's 0.5-45 Hz Butterworth filter is used as given
+  reference: average              # instantaneous; applied per sample (common average of the 19 channels)
+
+discontinuities:                  # EEGLAB 'boundary' events split the recording (entry 45); nothing crosses one
+  source: eeglab_boundary
+  handling: split
+
+bands:                            # Xu et al. (2025), Front. Neurosci. 19:1555657 (exact, no alpha split)
+  delta: [0.5, 4.0]
+  theta: [4.0, 8.0]
+  alpha: [8.0, 13.0]
+  beta: [13.0, 25.0]
+  gamma: [25.0, 45.0]
+
+filters:
+  # Band-pass for phase / DE: MNE FIR zero-phase firwin, the same 1.0 Hz transition on every edge, lower edge
+  # capped at l_freq (delta: 0.5 Hz lower transition, i.e. ~0 Hz stop edge; the provider already high-passed at
+  # 0.5 Hz). Each band's finite analytic kernel (h + i*H{h}) is applied to each continuous segment separately.
+  transition_bandwidth_hz: 1.0
+  # Windows keep the largest kernel half-length (delta) from both ends of their continuous segment, so no filter
+  # output inside a window depends on samples across a discontinuity or beyond a recording end.
+
+windowing:                        # Xu et al. (2025)
+  window_s: 10.0
+  step_s: 1.0                     # 90 % overlap
+  selection_s: 300.0              # five minutes of usable EEG per participant (deterministic, see lcmvxu.recording)
+  rejection:                      # the existing per-subject adaptive peak-to-peak rule (unchanged constants)
+    mad_k: 5.0
+    max_bad_channel_fraction: 0.15
+  min_windows: 5                  # the pre-specified exclusion rule (CLAUDE.md rule 4)
+  tenfold_samples: 10             # mode A (author reproduction): 10 samples per participant (65 -> 650)
+
+source:
+  subject: fsaverage
+  spacing: ico5
+  bem: fsaverage-5120-5120-5120-bem-sol.fif
+  mindist_mm: 5.0
+  orientation: fixed_normal       # forward converted to cortical-normal orientation (surf_ori, force_fixed)
+  method: lcmv
+  lcmv:
+    reg: 0.05                     # Tikhonov loading: 5 % of the mean eigenvalue of the data covariance
+    weight_norm: unit-noise-gain-invariant   # rank-deficient (average reference, ICA) safe normalization
+    noise_cov: ad_hoc             # diagonal; only whitens (one channel type)
+    rank: data                    # numerical rank of each participant's data covariance (mne.compute_rank)
+    covariance: accepted_windows  # each participant's own accepted samples (broadband), labels never used
+  parcellation: aparc             # Desikan-Killiany, 68 cortical ROIs (sorted names, same order as before)
+  roi_mode: mean_flip             # sign-flip by cortical normals, then average over the label
+
+psd:
+  method: welch
+  welch:
+    segment_s: 2.0                # 0.5 Hz resolution: delta bins 0.5-3.5 Hz
+    overlap: 0.5
+    window: hann
+    average: mean
+  relative_range: [0.5, 45.0]
+  sensor: true
+
+features:
+  differential_entropy: true      # DE = 0.5 * ln(2*pi*e*var(band-passed window)) per node and band (Xu)
+  save_signed_ciplv: false        # not used by any experiment of this suite (memory)
+  save_roi_timeseries: true       # selected ROI time courses per participant (float32), for reuse
+
+split:                            # Xu-style participant-independent validation (lcmvxu / evaluation.splits)
+  test_fraction: 0.2              # 80 % development / 20 % independent holdout, stratified by diagnosis
+  seed: 20250702                  # fixed (Xu et al. publication date); saved participant IDs in every run
+  dev_folds: 5                    # participant-grouped 5-fold CV inside the development partition
