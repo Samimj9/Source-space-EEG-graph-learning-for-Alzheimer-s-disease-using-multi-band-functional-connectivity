@@ -245,7 +245,7 @@ completed on CPU and on GPU combine in one result, and the report shows each res
 
 Methodology log entry 52, decisions row 56. Model: `src/adgraph/models/xu_dual.py`. Config:
 `configs/experiments/lx/lx_exp8_xu_dual_gcn.yaml` (mode A: `tenfold/lx10_exp8_xu_dual_gcn.yaml`). Notebook:
-`notebooks/lcmv_xu/LX_Exp8_xu_dual_gcn.ipynb`. Exp 8 is a **new** experiment. It takes Xu's paper architecture
+`notebooks/lcmv_xu/LX_Exp8_xu_dual_adjacency.ipynb`. Check (no data): `scripts/lx_exp8_inspect.py`. Exp 8 is a **new** experiment. It takes Xu's paper architecture
 (two GCN layers with different adjacencies, per band, flattened into fully connected layers) and gives it our
 inputs. It is not a reproduction of MF-MGCN and replaces none of Exp 0–7.
 
@@ -256,7 +256,8 @@ inputs. It is not a reproduction of MF-MGCN and replaces none of Exp 0–7.
 | Layer 1 | Pearson correlation of DE feature vectors | the window's weighted PLV, or \|ciPLV\| as a separate variant, D^-1/2(A+I)D^-1/2; never binarized |
 | Layer 2 | binary same-region electrode matrix (5 regions) | fixed atlas matrix: same lobe and same hemisphere; frontal, parietal, temporal, occipital, cingulate, insula. Self-loops added, D^-1/2(A+I)D^-1/2 |
 | Bands | 5, GCN per band (Fig. 3; shared in code) | 5, band-specific weights (shared weights as an ablation) |
-| Head | flatten 19×2×5 → 128 → 32 → 2 | flatten 68×2×5 → 128 → 32 → 1 logit (K = 16, L = 2, S = 128, F = 32 as published, not tuned) |
+| Head | flatten 19×2×5 → 128 → 32 → 2 | fusion by flattening 68×2×5 → 32 → 32 → 1 logit |
+| Widths | K = 16, S = 128, F = 32 chosen on the test set (Figs. 8–9); L = 2 | K = S = F = 32 (our pre-specified fixed-protocol widths, `gnn_fixed_base.yaml`); L = 2 (Xu Table 1, not tuned); dropout 0.3; nothing tuned |
 | Training | lr 0.001, batch 10, 200 epochs, best epoch | lr 0.001, weight decay 1e-4, batch 32, 60 epochs, last epoch (the fixed schedule of Exp 2–7) |
 | Validation | see §4 | frozen 80/20 participant split + 5-fold participant CV in the 80 %, as Exp 0–7 |
 
@@ -275,8 +276,14 @@ inputs. It is not a reproduction of MF-MGCN and replaces none of Exp 0–7.
   - weights shared across bands (as in Xu's code).
 - **Band weights:** no band attention; the bands are concatenated. The `band_weight_*` prediction columns hold the
   uniform 1/5.
-- **Parameters:** 91,899 for the primary variant (Xu's 19-electrode model: about 29k). The difference comes from the
-  68-ROI flatten input.
+- **Parameters:** 24,011 for the primary variant (F = 4), 23,531 with DE only, 23,107 with shared weights. Xu's
+  19-electrode model has 29,204 as coded (29,332 in the paper).
+- **Mathematics**, per band b, with N(A) = D^-1/2 (A + I) D^-1/2:
+  - H1_b = ReLU(N(A_func,b) X_b W1_b + c1_b), with A_func,b the window's PLV or |ciPLV|;
+  - H2_b = ReLU(N(A_anat) H1_b W2_b + c2_b);
+  - z = flatten([H2_δ … H2_γ]), then logit = w3ᵀ ReLU(W_F ReLU(W_S dropout(z))).
+  - Single-adjacency ablations replace A_anat by A_func,b (both layers functional) or A_func,b by A_anat (both
+    anatomical); the implementation is otherwise unchanged.
 - **Code pin:** Exp 8 runs its own pin (`D3_LCMV_XU/lx_exp8_xu_dual_gcn_CODE_COMMIT.txt`). The suite pin used by
   Exp 0–7 is not moved, so their completed checkpoints stay valid.
 

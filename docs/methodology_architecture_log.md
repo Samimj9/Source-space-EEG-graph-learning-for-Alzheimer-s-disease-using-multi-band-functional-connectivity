@@ -3094,9 +3094,12 @@ inputs (`docs/lcmv_xu.md` §9).
   binarized (unlike the integer cast in Xu's code).
 - **Layer 2:** a fixed 68 × 68 atlas matrix (same lobe and same hemisphere; cingulate and insula as their own groups)
   with self-loops and the same normalization. It is atlas group membership, not structural connectivity.
-- **Bands and head:** band-specific weights for the five Xu bands; then flatten and fully connected layers
-  128 → 32 → 1. K = 16, L = 2, S = 128 and F = 32 are Xu's published values, fixed a priori; Xu chose them on its
-  test set, we do not tune them.
+- **Bands and head:** band-specific weights for the five Xu bands; fusion by flattening; fully connected layers
+  S → F → 1.
+  - Xu chose K, S and F on its test set (Figs. 8–9), so they are **not** adopted (amended the same day, before any
+    run). K = S = F = 32 are our pre-specified fixed-protocol widths, with dropout 0.3.
+  - L = 2 is Xu's node-output size (Table 1, not tuned). Nothing is tuned on our data.
+  - Primary variant: 24,011 parameters.
 - **Training and validation:** the same fixed schedule, splits, scaling, weights and metrics as Exp 0–7.
 - **Variants:** three node-feature sets of stored features (DE; log + rel PSD; log + rel PSD + DE + strength) ×
   {PLV, |ciPLV|}, plus four PLV ablations (both layers functional, both anatomical, bilateral lobes, shared

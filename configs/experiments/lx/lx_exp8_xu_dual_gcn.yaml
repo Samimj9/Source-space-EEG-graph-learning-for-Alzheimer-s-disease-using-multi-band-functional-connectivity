@@ -5,7 +5,9 @@
 #   layer 1 = the window's weighted PLV or |ciPLV| (normalized D^-1/2 (A+I) D^-1/2), band-specific weights;
 #   layer 2 = FIXED atlas adjacency (same lobe, same hemisphere; cingulate and insula as their own groups),
 #             atlas-derived group membership, NOT measured white-matter connectivity;
-#   flatten (68 x 2 x 5) -> FC 128 -> FC 32 -> 1 logit; K = 16, L = 2, S = 128, F = 32 as published (not tuned).
+#   flatten (68 x L x 5) -> FC S -> FC F -> 1 logit. Xu selected K, S and F on their test set (paper Figs. 8-9),
+#   so they are NOT used: K = S = F = 32 are our pre-specified fixed-protocol widths (gnn_fixed_base.yaml hidden /
+#   mlp_hidden), dropout 0.3 as there; L = 2 is Xu's node-output size (a design value, not tuned in the paper).
 # Node-feature variants (our stored features, definitions unchanged):
 #   de             [differential entropy]                                 F = 1 (closest to Xu's DE nodes)
 #   psd            [log PSD, relative PSD]                                F = 2 (as Exp 3 / 5)
@@ -36,11 +38,11 @@ sparsify:
 model:
   architecture: xu_dual_gcn
   encoder: xu_dual_gcn           # display label
-  hidden: 16                     # K
-  node_out: 2                    # L
-  fc1: 128                       # S
-  fc2: 32                        # F
-  dropout: 0.2                   # after flattening, as Xu's code
+  hidden: 32                     # K (fixed protocol hidden width; Xu's 16 was chosen on their test set)
+  node_out: 2                    # L (Xu Table 1; not tuned in the paper)
+  fc1: 32                        # S (fixed protocol mlp_hidden; Xu's 128 was chosen on their test set)
+  fc2: 32                        # F (fixed protocol mlp_hidden; Xu's 32 was chosen on their test set)
+  dropout: 0.3                   # fixed protocol dropout, applied after flattening
   band_specific: true
   layer1: functional
   layer2: anatomical

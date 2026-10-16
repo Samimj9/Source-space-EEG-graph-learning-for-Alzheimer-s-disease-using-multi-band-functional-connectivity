@@ -1,4 +1,4 @@
-"""Comparison of all completed D3 LCMV / Xu experiments (Exp 0-7, modes A and B); saved outputs only.
+"""Comparison of all completed D3 LCMV / Xu experiments (Exp 0-8, modes A and B); saved outputs only.
 
     python scripts/lx_report.py
 
@@ -94,8 +94,9 @@ if len(table):
 
     for (mode, setting) in sorted({(m, s) for m, s, _ in curves}):
         exps = sorted(e for m, s, e in curves if (m, s) == (mode, setting))
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8), squeeze=False)
-        figc, axc = plt.subplots(2, 4, figsize=(16, 8), squeeze=False)
+        rows_ = int(np.ceil(len(exps) / 4))           # Exp 0-8: one panel per experiment
+        fig, axes = plt.subplots(rows_, 4, figsize=(16, 4 * rows_), squeeze=False)
+        figc, axc = plt.subplots(rows_, 4, figsize=(16, 4 * rows_), squeeze=False)
         for ax, axm, exp in zip(axes.ravel(), axc.ravel(), exps):
             best_cm = None
             for variant, y, sc, thr in curves[(mode, setting, exp)]:

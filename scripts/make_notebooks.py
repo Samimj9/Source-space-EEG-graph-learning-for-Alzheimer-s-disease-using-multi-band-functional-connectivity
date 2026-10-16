@@ -918,7 +918,7 @@ dirs = [Path(LX) / 'experiments_A_xu_tenfold' / '{a_name}', Path(LX) / 'experime
 has_work = any(any(d.rglob('*.done.json')) for d in dirs if d.exists())
 EXP_COMMIT, _ = resolve_code_pin(Path(LX) / '{name}_CODE_COMMIT.txt', head, update=UPDATE_EXP8_CODE, has_work=has_work)
 _run(['git', '-C', '/content/repo', 'checkout', '-q', EXP_COMMIT])
-for f in ('{cfg_b}', 'src/adgraph/models/xu_dual.py'):
+for f in ('{cfg_b}', 'src/adgraph/models/xu_dual.py', 'scripts/lx_exp8_inspect.py'):
     if not Path('/content/repo', f).exists():
         raise RuntimeError(f'pin {{EXP_COMMIT[:10]}} lacks {{f}}: set UPDATE_EXP8_CODE = True and run again')
 for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
@@ -995,6 +995,9 @@ Resumable: every completed fold is saved to Drive. Results: `<outputs>/D3_LCMV_X
 `.../experiments_B_all_windows/`.""" + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
         code(SETUP_LX),
         *(lx_own_pin_cells(name, cfg_b) if n in LX_OWN_PIN else []),
+        *([md("## 0b. Architecture check (no data): anatomical matrix, layers, parameter count per variant, one "
+              "forward/backward pass on synthetic inputs of the real shapes"),
+           code('sh("python scripts/lx_exp8_inspect.py")')] if n in LX_OWN_PIN else []),
         md("## 1. Status (from the checkpoints on Drive)"),
         code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
 import torch
@@ -1028,6 +1031,16 @@ for mode, cfg in CONFIGS.items():
             display(Image(filename=png))
 if ERRORS:
     raise RuntimeError(f'units did not complete in mode(s) {sorted(ERRORS)}; completed units are saved. Run all again.')"""),
+        *([md("## 4. Comparison Exp 0-8 (all completed results of the suite; participant- and window-level metrics)"),
+           code("""sh("python scripts/lx_report.py")
+rep = sorted(glob.glob(LX + '/reports/report_*'))[-1]
+t = pd.read_csv(rep + '/comparison.csv')
+cols = ['mode', 'experiment', 'variant', 'setting', 'n_participants', 'participant_accuracy',
+        'participant_balanced_accuracy', 'participant_f1', 'participant_roc_auc', 'window_accuracy',
+        'window_balanced_accuracy', 'window_f1', 'window_roc_auc', 'device']
+display(t[[c for c in cols if c in t]].round(3)) if len(t) else print('no completed results yet')
+for png in sorted(glob.glob(rep + '/figures/*.png')):
+    display(Image(filename=png))""")] if n in LX_OWN_PIN else []),
     ], gpu=gpu)
 
 
@@ -1103,7 +1116,8 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook(d1d2_configs)   # D1/D2 paper figures
     outputs[nbdir / "lcmv_xu" / "LX_00_build_dataset.ipynb"] = lx_build_notebook()
     for n, name, title, gpu in LX_EXPERIMENTS:
-        outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)
+        stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+        outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{stem}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)
     outputs[nbdir / "lcmv_xu" / "LX_98_run_all_optional.ipynb"] = lx_master_notebook()
     outputs[nbdir / "lcmv_xu" / "LX_99_report.ipynb"] = lx_report_notebook()
     for path, nb in outputs.items():

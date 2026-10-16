@@ -17,10 +17,10 @@ Per band b (band-specific weights, as drawn in Xu's Fig. 3; ``band_specific: fal
     H1_b = ReLU( N(A_func_b) X_b W1_b + c1_b )         N(A) = D^-1/2 (A + I) D^-1/2   (Kipf & Welling)
     H2_b = ReLU( N(A_anat)  H1_b W2_b + c2_b )
 
-then the node outputs of all bands are flattened (R x L x J, Xu's Fig. 4), dropout, and fully connected layers
-S -> F -> 1 logit (binary cross-entropy; equivalent to Xu's two-class softmax). Dimensions K (hidden), L (node
-output), S, F are Xu's published values (16, 2, 128, 32), fixed a priori and not tuned on our data. Because the
-flatten input is 68 x 2 x 5 = 680 instead of 19 x 2 x 5 = 190, the model has more parameters than Xu's.
+then the node outputs of all bands are fused by flattening (R x L x J, Xu's Fig. 4), dropout, and fully connected
+layers S -> F -> 1 logit (binary cross-entropy; equivalent to Xu's two-class softmax). Xu chose K, S and F on their
+test set (paper Figs. 8-9), so the experiment config uses our pre-specified fixed-protocol widths instead
+(K = S = F = 32); L = 2 is Xu's node-output size (Table 1, not tuned). No value is tuned on our data.
 """
 
 from __future__ import annotations
@@ -97,8 +97,8 @@ class BandGCN(nn.Module):
 
 
 class XuDualGCN(nn.Module):
-    def __init__(self, in_dim: int, n_bands: int, n_rois: int, roi_names: list[str], hidden: int = 16,
-                 node_out: int = 2, fc1: int = 128, fc2: int = 32, dropout: float = 0.2, band_specific: bool = True,
+    def __init__(self, in_dim: int, n_bands: int, n_rois: int, roi_names: list[str], hidden: int = 32,
+                 node_out: int = 2, fc1: int = 32, fc2: int = 32, dropout: float = 0.3, band_specific: bool = True,
                  layer1: str = "functional", layer2: str = "anatomical", anatomical_grouping: str = "lobe_hemisphere",
                  n_covariates: int = 0):
         super().__init__()
