@@ -3031,7 +3031,8 @@ graph run `graphsD3_v4_da723b33554c`, `experiments_D3/`, `D3_CODE_COMMIT.txt` an
   identical for all experiments and both modes. Settings `xu_dev_cv` (5-fold participant CV inside the development
   set) and `xu_holdout` (one fit on the development set, evaluated on the holdout). Participant-level metrics are
   primary.
-  - Xu's code instead reports the best epoch per CV fold over all 65 participants. Here the last-epoch model is
+  - Xu's code instead reports the best epoch on five overlapping participant-level 80/20 splits (corrected in
+    entry 51). Here the last-epoch model is
     used, with no selection on evaluation data.
 - **Experiments:** Exp 0-7 keep their existing definitions with five bands. DE variants are added as distinct
   configurations: Exp 0, 1 (classical) and Exp 4.
@@ -3049,6 +3050,37 @@ graph run `graphsD3_v4_da723b33554c`, `experiments_D3/`, `D3_CODE_COMMIT.txt` an
 - feature shapes and finiteness;
 - split disjointness;
 - a short synthetic run of Exp 1, 5, 6 and 7 in both settings.
+
+---
+
+## 51. Review of the LCMV / Xu suite against the full Xu et al. (2025) paper
+
+**Date:** 2026-10-16. **Requested by:** the author, with the full paper (Front. Neurosci. 19:1555657). It was
+compared with the authors' `Model.py` and with commit b38685e. Details: `docs/lcmv_xu.md` §4.
+
+**Result: no dataset or experiment change is needed.** The build may be running; configurations, schemas, hashes,
+outputs and checkpoints are untouched. Only the documentation is corrected.
+
+- **Confirmed matches:**
+  - 5-min segment per participant;
+  - 10 s windows, 90 % overlap (1 s step);
+  - the five bands, exactly;
+  - Gaussian DE of the band-passed signal (natural log vs. Xu's log₂: a constant factor, removed by
+    standardization);
+  - participant-grouped 80/20 split with the same counts (52/13; 7 AD, 6 HC);
+  - all samples of a participant in one partition.
+- **Corrected statements** (`docs/lcmv_xu.md`, entry 50):
+  - Xu's five "folds" are five overlapping participant-level 80/20 splits, not a partition; 15 AD and 13 HC
+    participants are never validated;
+  - Xu's code has no anatomical-region adjacency: its second layer reuses the first layer's edges thresholded
+    at 0.5, and it casts the correlation matrix to integers;
+  - Xu's code reports per-sample metrics, the best of 200 epochs, with HC as the positive class;
+  - the paper's K, S and F were selected on its test set (accuracy steps of 1/130);
+  - the coded model has 29,204 parameters against 29,332 in the paper.
+- **Unresolved:** how 10 samples per participant arise from 5 minutes ("309 s" in the code's folder name), and how
+  the 32 DE values per node are formed. Mode A remains our operationalisation, labelled as such.
+- **Not transferred:** Xu's 19-node dimensions (K = 16, S = 128, F = 32, batch 10, 200 epochs) to our 68-ROI
+  models.
 
 ---
 

@@ -1,6 +1,6 @@
 # D3 LCMV beamforming + Xu-protocol suite (Exp 0–7)
 
-Version 1.0, 2026-10-16. Methodology log entry 50, decisions row 55. A **new, separate** pipeline: outputs only under
+Version 1.1, 2026-10-16. Methodology log entries 50–51, decisions row 55. §4 revised after the full-paper review. A **new, separate** pipeline: outputs only under
 `<processed>/D3_LCMV_XU/`, its own code pin (`D3_LCMV_XU/CODE_COMMIT.txt`) and configuration hash. Nothing of D1/D2
 or of the earlier D3 (wMNE) work is changed: `graphsD3_v4_da723b33554c`, `experiments_D3/`, `D3_CODE_COMMIT.txt`,
 the D1/D2 pin and outputs stay as they are.
@@ -90,38 +90,94 @@ Authors' code: github.com/XQJMJ/MF-MGCN (`Model.py`, inspected at its current HE
   - Gamma's upper edge (45 Hz) coincides with the provider's 45 Hz low-pass (about −3 dB).
 - **Per window**, for the 68 ROIs and the 19 sensors:
   - Welch PSD (2 s Hann, 50 %): absolute, log10 and relative (0.5–45 Hz) band power;
-  - differential entropy DE = ½ ln(2πe·var(band-passed window)), the Xu feature;
+  - differential entropy DE = ½ ln(2πe·var(band-passed window)), one value per node, band and window. Xu use
+    ½ log₂(2πeσ²) (paper Eq. 3): the same quantity scaled by 1/ln 2. That positive constant factor is removed
+    exactly by the per-feature standardization every model of this suite applies on its training data, so the
+    choice of logarithm base does not change any result. Xu's 32-value DE vector per node is not reproduced (§4);
   - PLV and |ciPLV| between ROIs.
   - Stored as `graphs.store` arrays (`psd_de` / `sensor_psd_de` for DE). Signed ciPLV is not stored.
 
-## 4. The 650 samples (investigated; partly unverifiable)
+## 4. Comparison with Xu et al. (paper and code)
 
-**Facts from the authors' code** (`Model.py`):
-- It reads exactly **10 samples per participant**, `sub-{idx}.csv` for idx 1–880, grouped in blocks of 10: AD
-  1–360, CN 361–650. That is 65 participants × 10 = 650 (88 × 10 = 880 including FTD).
-- Each sample is one 19-node graph per band, with **32 DE values per node** and a correlation adjacency (second
-  layer thresholded at 0.5).
-- The data folders are named `xinDE{band}10s309szhenzheng0.9huachuang880`, roughly "DE, 10 s, 309 s, sliding window
-  0.9, 880".
-- The CV is 5-fold over participant indices with fixed lists; every sample of a participant stays in one fold.
-- The code reports, per fold, the **best** validation metric over 200 epochs. That is an optimistic selection on
-  the evaluation fold; we do **not** replicate it.
+Reviewed 2026-10-16 against the full paper (Sections 2.1–3.4, 4.1, 5.4–5.5, Tables 1–2, Figures 3, 8, 9) and the
+authors' `Model.py` (methodology log entry 51). Paper statements are cited by section; code statements by `Model.py`.
 
-**Not verifiable:**
-- The paper text was not retrievable from this environment.
-- How 309 s, "10 s", 90 % overlap and 32 features per node combine is not determined by the code. A full 300 s at
-  10 s / 1 s step gives 291 windows, not 10.
+**Data and samples**
+- Paper §3.1: a 5-min segment per participant. Matches our five-minute selection.
+- Paper §3.2 and §3.4: 10 s windows with 90 % overlap expanded the data "tenfold", 65 to 650 (360 AD, 290 HC).
+  Paper §4.1: 520 training and 130 test samples. Code: exactly 10 samples per participant (`sub-1` … `sub-880`,
+  blocks of 10).
+- **Unresolved:** how 10 samples arise from 5 minutes. A 300 s segment cut into 10 s windows at a 1 s step gives
+  291 windows, not 10. The code's folder name `…10s309s…0.9…880` would fit ten 300 s segments shifted by 1 s
+  (300 + 9 = 309 s), but that is 99.7 %, not 90 %, overlap. Neither text nor code settles it.
+- Our **mode A** (the first 10 accepted windows: 10 consecutive 10 s windows at a 1 s step) is **our
+  operationalisation** of "tenfold by 90 % overlap". It is not a verified reproduction of Xu's samples.
+- Our **mode B** (every accepted window of the five minutes, up to 291 per participant) is the mathematically
+  consistent reading. Neither mode fabricates samples or changes the overlap.
 
-**Implemented, both on the same build:**
-- **Mode B (mathematically consistent; primary).** Every accepted 10 s window (1 s step) of the five-minute
-  selection: up to 291 per participant, ≈ 18,900 in total. These are overlapping windows of 65 participants, not
-  independent samples.
-- **Mode A (author reproduction, as far as verifiable).** Exactly 10 samples per participant (65 → 650): the first
-  10 accepted windows in time order, which are 10 consecutive 10 s windows with a 1 s step. This is the literal
-  reading of "90 % overlap … expanded tenfold". The 32-dimensional DE node feature of the authors' code is not
-  reproduced: our node features are band PSD/DE scalars per window, as in our Exp 0–7.
-- Neither mode fabricates samples or changes the overlap. Every sample keeps its participant ID, label, start/end
-  time and QC values.
+**Features**
+- Paper §2.1 and Eq. 3: Gaussian DE = ½ log₂(2πeσ²) of the band-passed segment, for the bands δ 0.5–4, θ 4–8,
+  α 8–13, β 13–25, γ 25–45 Hz. Our bands match exactly; our DE uses the natural logarithm (§3, equivalent after
+  standardization).
+- Paper §2.2.2 and Table 1: node features X ∈ R^(N×M), M = 32, "the DE calculated from an EEG data segment of
+  duration T". Code: `GCNConv(32, 16)`, i.e. 32 input values per node.
+- **Unresolved:** how the 32 values per node are formed. The paper does not say; the code reads precomputed CSV
+  files. We do not invent a construction. Our node features stay per-window band PSD/DE values, as in Exp 0–7.
+
+**Graphs ("dual-mode connectivity")**
+- Paper §2.2.3, Eqs. 4–7:
+  - first GCN layer: Pearson correlation between the nodes' DE feature vectors;
+  - second GCN layer: binary anatomical-region adjacency (1 if two electrodes share one of five regions: frontal,
+    central, parietal, temporal, occipital).
+- Code:
+  - the first layer reads a precomputed `…CorrelationResult` matrix but casts it to an integer type
+    (`torch.tensor(…, dtype=torch.long)`). That truncates every correlation in (−1, 1) to 0, unless the files were
+    already binary; edges are then taken from the non-zero entries.
+  - the second layer reuses **the same edges**, thresholded at 0.5 (`edge_weight > 0.5`). There is **no**
+    anatomical-region matrix in the code.
+  - Paper and code therefore differ on the second layer, and possibly on the first.
+- **Our suite is not a replication of this design.** Our graphs are 68 LCMV source ROIs with PLV or |ciPLV|
+  adjacency (EARM-GNN adds learned gates on that EEG prior). Xu's spatial-connectivity concept could be adapted in
+  source space as same-lobe adjacency from the Desikan-Killiany atlas labels. That would be **our adaptation**,
+  not Xu's electrode matrix (optional, §7).
+
+**Model and training**
+- Matches between the paper (Table 1, §5.4) and the code:
+  - learning rate 0.001, batch size 10, 200 epochs, cross-entropy, ReLU;
+  - K = 16 (`GCNConv(32, 16)`), L = 2 (`GCNConv(16, 2)`);
+  - S = 128 and F = 32 (`Linear(19·2·5 = 190, 128)`, `Linear(128, 32)`, `Linear(32, 2)`);
+  - dropout 0.2 after epoch 5 (code only).
+- Code only, not in the paper: Adam with weight decay 1e-4. The learning-rate schedule (gamma 0.1) acts only at
+  epoch 200, i.e. has no effect.
+- Parameters: the coded model has **29,204** (one GCN pair shared by the five bands). The paper states **29,332**,
+  128 more, unexplained. Figure 3 draws a separate GCN pair per band, which would give 31,452.
+- These dimensions belong to a 19-node, 32-feature design and are **not** transferred to our 68-ROI models, which
+  keep their fixed, documented hyperparameters.
+
+**Validation and reporting**
+- Paper §4.1: participant-grouped split. All augmented samples of a participant are in one partition; 80 % of
+  participants train (520 samples), 20 % test (130 samples). "A 5-fold cross-validation method was utilized during
+  the training process" (not specified further).
+- Code:
+  - five fixed participant-level 80/20 splits (29 AD + 23 HC train, 7 AD + 6 HC validation; fold 4 has 24 + 5 HC).
+    Within each split no participant is on both sides;
+  - the five validation sets are **not** a partition: they overlap, and 15 AD and 13 HC participants are never
+    validated;
+  - every metric is the **best value over the 200 epochs** on the validation participants, each metric maximized
+    separately;
+  - metrics are computed **per sample** (window), not per participant;
+  - the positive class is **HC** (`y = 0` for AD, `1` for NC), so the reported precision and recall refer to HC.
+- Paper Figures 8–9: K, S and F were chosen by accuracy steps of 1/130, i.e. on the 130 test samples. The final
+  96.15 % equals 125/130. **Hyperparameters were therefore selected on the reported test set.**
+- **Ours:**
+  - one frozen stratified 80/20 participant split (52/13: 7 AD, 6 HC, the same counts as Xu);
+  - 5-fold participant CV (a true partition) inside the 80 % only;
+  - the holdout is evaluated once, with the last-epoch model and no selection on it;
+  - participant-level metrics primary, window-level secondary;
+  - the positive class is **AD**: our sensitivity is Xu's specificity, and our precision/recall are not Xu's
+    precision/recall.
+  - Window-level numbers are the ones comparable in kind to Xu's sample-level numbers; participant-level numbers
+    have no counterpart in the paper.
 
 ## 5. Validation (identical for Exp 0–7 and both modes)
 
@@ -143,8 +199,9 @@ Authors' code: github.com/XQJMJ/MF-MGCN (`Model.py`, inspected at its current HE
   - window level (secondary).
   - Both report accuracy, balanced accuracy, sensitivity, specificity, precision, F1, ROC-AUC and the confusion
     matrix, plus ROC curves (`scripts/lx_report.py`).
-- **Difference from Xu:** they report 5-fold CV over all 65 participants (best epoch per fold). Here: an 80/20
-  holdout, 5-fold CV inside the 80 %, and the last-epoch model.
+- **Difference from Xu** (§4): their code reports the best epoch on five overlapping participant-level 80/20
+  splits, with sample-level metrics and HC as the positive class. Here: one frozen 80/20 holdout, a 5-fold
+  participant CV partition inside the 80 %, the last-epoch model, participant-level metrics primary, AD positive.
 
 ## 6. Experiments (existing definitions, five bands; mode A configs only switch the graph store)
 
@@ -173,7 +230,18 @@ Authors' code: github.com/XQJMJ/MF-MGCN (`Model.py`, inspected at its current HE
 (`compute_environment`, per-fold `compute_fingerprint`). They are not part of the checkpoint identity, so folds
 completed on CPU and on GPU combine in one result, and the report shows each result's environment.
 
-## 7. Run order (Colab, *Run all*)
+## 7. Optional future comparison experiments (not implemented)
+
+- **Xu-adapted MF-MGCN in source space (our adaptation):**
+  - first layer: Pearson correlation between ROI DE feature vectors, e.g. a DE sequence over consecutive windows
+    computed from the saved ROI time courses, without rebuilding the LCMV;
+  - second layer: binary same-lobe adjacency of the 68 Desikan-Killiany labels.
+  - It would be labelled as an adaptation, not a replication.
+- **Xu's training recipe on our inputs:** lr 0.001, batch 10, 200 epochs, as a separate configuration, never by
+  changing the fixed GNN protocol.
+- **Sample-level metrics with HC as positive class:** for a like-for-like comparison with Xu's Table 2.
+
+## 8. Run order (Colab, *Run all*)
 
 1. `notebooks/lcmv_xu/LX_00_build_dataset.ipynb` (CPU): input check → recording QC → one-participant smoke test →
    full build (only if the smoke test passed; resumable) → validation → QC report.
