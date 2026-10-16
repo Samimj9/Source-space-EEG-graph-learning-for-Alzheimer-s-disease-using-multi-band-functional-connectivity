@@ -136,6 +136,12 @@ class GNNModel:
             cfg.pop("architecture")
             cfg.pop("encoder", None)                          # display label only ("earm")
             return EARMGNN(in_dim=in_dim, n_bands=n_bands, n_rois=n_rois, n_covariates=n_covariates, **cfg)
+        if cfg.get("architecture") == "xu_dual_gcn":         # Experiment 8, LCMV / Xu suite (entry 52)
+            from .xu_dual import XuDualGCN
+
+            cfg.pop("architecture")
+            cfg.pop("encoder", None)                          # display label only
+            return XuDualGCN(in_dim=in_dim, n_bands=n_bands, n_rois=n_rois, n_covariates=n_covariates, **cfg)
         from .multiband import MultiBandGNN
 
         return MultiBandGNN(encoder=cfg.pop("encoder"), in_dim=in_dim, n_bands=n_bands, n_covariates=n_covariates,

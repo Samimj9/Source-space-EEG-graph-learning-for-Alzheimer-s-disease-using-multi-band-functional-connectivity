@@ -241,7 +241,46 @@ completed on CPU and on GPU combine in one result, and the report shows each res
   changing the fixed GNN protocol.
 - **Sample-level metrics with HC as positive class:** for a like-for-like comparison with Xu's Table 2.
 
-## 8. Run order (Colab, *Run all*)
+## 9. Experiment 8: Xu-inspired dual-adjacency source-space GCN (our adaptation)
+
+Methodology log entry 52, decisions row 56. Model: `src/adgraph/models/xu_dual.py`. Config:
+`configs/experiments/lx/lx_exp8_xu_dual_gcn.yaml` (mode A: `tenfold/lx10_exp8_xu_dual_gcn.yaml`). Notebook:
+`notebooks/lcmv_xu/LX_Exp8_xu_dual_gcn.ipynb`. Exp 8 is a **new** experiment. It takes Xu's paper architecture
+(two GCN layers with different adjacencies, per band, flattened into fully connected layers) and gives it our
+inputs. It is not a reproduction of MF-MGCN and replaces none of Exp 0–7.
+
+| Element | Xu et al. (paper) | Exp 8 (ours) |
+|---|---|---|
+| Nodes | 19 electrodes | 68 Desikan-Killiany LCMV source ROIs |
+| Node features | 32 DE values per node (construction unpublished) | our stored per-window features: `de` [DE], `psd` [log, rel PSD], `psd_de_strength` [log PSD, rel PSD, DE, node strength] (primary) |
+| Layer 1 | Pearson correlation of DE feature vectors | the window's weighted PLV, or \|ciPLV\| as a separate variant, D^-1/2(A+I)D^-1/2; never binarized |
+| Layer 2 | binary same-region electrode matrix (5 regions) | fixed atlas matrix: same lobe and same hemisphere; frontal, parietal, temporal, occipital, cingulate, insula. Self-loops added, D^-1/2(A+I)D^-1/2 |
+| Bands | 5, GCN per band (Fig. 3; shared in code) | 5, band-specific weights (shared weights as an ablation) |
+| Head | flatten 19×2×5 → 128 → 32 → 2 | flatten 68×2×5 → 128 → 32 → 1 logit (K = 16, L = 2, S = 128, F = 32 as published, not tuned) |
+| Training | lr 0.001, batch 10, 200 epochs, best epoch | lr 0.001, weight decay 1e-4, batch 32, 60 epochs, last epoch (the fixed schedule of Exp 2–7) |
+| Validation | see §4 | frozen 80/20 participant split + 5-fold participant CV in the 80 %, as Exp 0–7 |
+
+- **The anatomical layer is atlas-derived group membership** (coarse anatomical proximity), **not** measured
+  white-matter structural connectivity. It depends only on the ROI names and order of the graph store (added to
+  the variant's identity by `runner.with_store_context`), never on diagnoses, data or predictions.
+- **Lobe assignment:** the conventional FreeSurfer lobar grouping of the Desikan-Killiany labels (`xu_dual.DK_LOBES`).
+  - Precentral and paracentral → frontal; postcentral → parietal.
+  - Entorhinal, parahippocampal, fusiform, temporal pole → temporal.
+  - Cingulate (4 labels) and insula are separate groups. Each insula is therefore connected only to itself in the
+    hemisphere-specific matrix.
+- **Ablations** (PLV, primary features):
+  - both layers functional (the analogue of Xu's MF-MGCNII);
+  - both layers anatomical (no functional connectivity);
+  - bilateral lobes (Xu-like grouping across hemispheres);
+  - weights shared across bands (as in Xu's code).
+- **Band weights:** no band attention; the bands are concatenated. The `band_weight_*` prediction columns hold the
+  uniform 1/5.
+- **Parameters:** 91,899 for the primary variant (Xu's 19-electrode model: about 29k). The difference comes from the
+  68-ROI flatten input.
+- **Code pin:** Exp 8 runs its own pin (`D3_LCMV_XU/lx_exp8_xu_dual_gcn_CODE_COMMIT.txt`). The suite pin used by
+  Exp 0–7 is not moved, so their completed checkpoints stay valid.
+
+## 10. Run order (Colab, *Run all*)
 
 1. `notebooks/lcmv_xu/LX_00_build_dataset.ipynb` (CPU): input check → recording QC → one-participant smoke test →
    full build (only if the smoke test passed; resumable) → validation → QC report.

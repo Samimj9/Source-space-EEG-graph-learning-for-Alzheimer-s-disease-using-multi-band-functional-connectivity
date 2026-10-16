@@ -16,12 +16,15 @@ CONFIGS = {"A": REPO / "configs/experiments/lx/tenfold", "B": REPO / "configs/ex
 parser = argparse.ArgumentParser()
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--modes", nargs="+", default=["A", "B"], choices=["A", "B"])
-parser.add_argument("--experiments", nargs="+", type=int, default=list(range(8)))
+parser.add_argument("--experiments", nargs="+", type=int, default=list(range(8)))   # Exp 8: own notebook + pin
 args = parser.parse_args()
 failed = []
 for mode in args.modes:
     for n in args.experiments:
-        cfg = next(CONFIGS[mode].glob(f"lx*_exp{n}_*.yaml"))
+        cfg = next(CONFIGS[mode].glob(f"lx*_exp{n}_*.yaml"), None)
+        if cfg is None:                             # not in the checked-out commit
+            print(f"mode {mode} Exp {n}: no config in this commit, skipped")
+            continue
         print(f"\n===== mode {mode} · Exp {n} · {cfg.relative_to(REPO)} =====", flush=True)
         r = subprocess.run([sys.executable, "scripts/experiment.py", "run", "--config", str(cfg), "--paths", args.paths],
                            cwd=REPO)

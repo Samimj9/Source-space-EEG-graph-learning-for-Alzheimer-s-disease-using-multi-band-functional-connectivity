@@ -83,6 +83,14 @@ def run_device(v: dict) -> str:
         return "cpu"
 
 
+def with_store_context(v: dict, store: GraphStore) -> dict:
+    """Store facts an architecture needs at build time, added to the variant (and so to its identity):
+    Exp 8 (``xu_dual_gcn``) derives its fixed anatomical adjacency from the store's ROI names and order."""
+    if (v.get("model") or {}).get("architecture") == "xu_dual_gcn":
+        v = {**v, "model": {**v["model"], "roi_names": list(store.roi_names)}}
+    return v
+
+
 def make_model(v: dict, seed: int):
     if v["input"] == "classical":
         from ..models.classical import ClassicalModel
@@ -444,6 +452,7 @@ def run_variant(store: GraphStore, v: dict, setting: str, out_dir: str | Path, d
     ``force`` supersedes them (moved to ``_superseded/``, never deleted or overwritten).
     For real (non-synthetic) graph runs ``out_dir`` must be persistent storage (mounted Drive
     in Colab), else ``EphemeralStorageError`` unless ``allow_ephemeral``."""
+    v = with_store_context(v, store)
     ev = v["evaluation"]
     require_complete_cohort(store)              # never train on an empty, partial or smoke-test graph run
     if not store.manifest.get("synthetic"):

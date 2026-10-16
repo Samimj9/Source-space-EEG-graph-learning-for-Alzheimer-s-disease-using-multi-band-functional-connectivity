@@ -3084,6 +3084,31 @@ outputs and checkpoints are untouched. Only the documentation is corrected.
 
 ---
 
+## 52. Experiment 8 of the LCMV / Xu suite: Xu-inspired dual-adjacency source-space GCN
+
+**Date:** 2026-10-16. **Requested by:** the author. A new experiment, designed after the review in entry 51 and
+before any LCMV / Xu result existed. It is Xu et al.'s two-layer paper architecture (Eqs. 4–7, Fig. 3) with our
+inputs (`docs/lcmv_xu.md` §9).
+
+- **Layer 1:** the window's weighted PLV, or |ciPLV| as a separate variant, Kipf-normalized with self-loops; never
+  binarized (unlike the integer cast in Xu's code).
+- **Layer 2:** a fixed 68 × 68 atlas matrix (same lobe and same hemisphere; cingulate and insula as their own groups)
+  with self-loops and the same normalization. It is atlas group membership, not structural connectivity.
+- **Bands and head:** band-specific weights for the five Xu bands; then flatten and fully connected layers
+  128 → 32 → 1. K = 16, L = 2, S = 128 and F = 32 are Xu's published values, fixed a priori; Xu chose them on its
+  test set, we do not tune them.
+- **Training and validation:** the same fixed schedule, splits, scaling, weights and metrics as Exp 0–7.
+- **Variants:** three node-feature sets of stored features (DE; log + rel PSD; log + rel PSD + DE + strength) ×
+  {PLV, |ciPLV|}, plus four PLV ablations (both layers functional, both anatomical, bilateral lobes, shared
+  weights): 10 variants per mode.
+- **Code:** `models/xu_dual.py`, a `trainer.build_net` branch, and `runner.with_store_context`, which passes the
+  store's ROI names to this architecture only. Other experiments are unaffected.
+- **Pin:** Exp 8 has its own code pin, so the suite pin and the completed Exp 0–7 checkpoints are unchanged.
+- **Checks:** configuration expansion, the atlas matrix (34 regions per hemisphere, symmetric, no cross-hemisphere
+  edges) and a 2-epoch synthetic run of three variants in both settings.
+
+---
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

@@ -897,7 +897,35 @@ LX_EXPERIMENTS = [
     (5, "lx_exp5_multibranch", "Multi-band GNN: shared and band-specific branches, mean / attention fusion", True),
     (6, "lx_exp6_psd_strength", "Full multiband GCN (PSD + node strength) with ablations", True),
     (7, "lx_exp7_earm_gnn", "EARM-GNN: adaptive EEG-guided edge gates, residual blocks, band attention", True),
+    (8, "lx_exp8_xu_dual_gcn", "Xu-inspired dual-adjacency source-space GCN (functional + atlas layers)", True),
 ]
+LX_OWN_PIN = {8}          # added after Exp 0-7 had started on the suite pin: runs its own commit
+
+
+def lx_own_pin_cells(name: str, cfg_b: str) -> list[dict]:
+    a_name = name.replace("lx_", "lx10_")
+    return [md(f"""## 0. This experiment's code pin
+Exp 8 was added after Exp 0-7 had started on the suite pin (`D3_LCMV_XU/CODE_COMMIT.txt`). It runs the commit
+recorded in `D3_LCMV_XU/{name}_CODE_COMMIT.txt` (set on its first run; it never moves while Exp 8 has completed
+work), so the suite pin and every completed Exp 0-7 result stay unchanged. Leave `UPDATE_EXP8_CODE = False`."""),
+            code(f"""UPDATE_EXP8_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+dirs = [Path(LX) / 'experiments_A_xu_tenfold' / '{a_name}', Path(LX) / 'experiments_B_all_windows' / '{name}']
+has_work = any(any(d.rglob('*.done.json')) for d in dirs if d.exists())
+EXP_COMMIT, _ = resolve_code_pin(Path(LX) / '{name}_CODE_COMMIT.txt', head, update=UPDATE_EXP8_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP_COMMIT])
+for f in ('{cfg_b}', 'src/adgraph/models/xu_dual.py'):
+    if not Path('/content/repo', f).exists():
+        raise RuntimeError(f'pin {{EXP_COMMIT[:10]}} lacks {{f}}: set UPDATE_EXP8_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from Exp 8's commit
+from adgraph.colab import sh
+print('{name} code commit:', EXP_COMMIT)
+print('suite pin (Exp 0-7, unchanged):', (Path(LX) / 'CODE_COMMIT.txt').read_text().split()[0])""")]
 
 
 def lx_build_notebook() -> dict:
@@ -966,6 +994,7 @@ score per participant) are primary; window-level metrics are secondary.
 Resumable: every completed fold is saved to Drive. Results: `<outputs>/D3_LCMV_XU/experiments_A_xu_tenfold/` and
 `.../experiments_B_all_windows/`.""" + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
         code(SETUP_LX),
+        *(lx_own_pin_cells(name, cfg_b) if n in LX_OWN_PIN else []),
         md("## 1. Status (from the checkpoints on Drive)"),
         code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
 import torch

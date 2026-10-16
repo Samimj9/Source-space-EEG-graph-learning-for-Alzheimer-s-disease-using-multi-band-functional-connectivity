@@ -1,0 +1,5 @@
+# Mode A (author-style tenfold store graphsLX10_*: the first 10 accepted windows per participant, 650 samples);
+# otherwise identical to ../lx_exp8_xu_dual_gcn.yaml.
+extends: ../lx_exp8_xu_dual_gcn.yaml
+experiment: lx10_exp8_xu_dual_gcn
+graph_family: LX10
