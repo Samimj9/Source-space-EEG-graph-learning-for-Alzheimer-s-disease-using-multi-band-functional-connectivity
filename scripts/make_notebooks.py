@@ -863,6 +863,10 @@ Matched wMNE comparison (separate outputs `<outputs>/D3_WMNE_XU/`, own code pin;
 LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions to `LX_Exp*`), optionally
 `historical/WXH_Exp0` ... `WXH_Exp7` (existing wMNE graphs under the frozen protocol), then `WX_99_compare`.
 
+200-epoch early-stopping protocol for Exp 2-8 of both suites (methodology log entry 56, `docs/early_stopping.md`;
+separate results, own pins `ES200_CODE_COMMIT.txt`): `lcmv_xu/early_stopping/LX_ES_Exp2` ... `LX_ES_Exp8` and
+`wmne_xu/early_stopping/WX_ES_Exp2` ... `WX_ES_Exp8`, one at a time; then `WX_99_compare` pairs them.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |
@@ -1356,6 +1360,114 @@ for f in ('paired.csv', 'historical.csv'):
     ])
 
 
+
+# ============================================================================ 200-epoch early stopping (entry 56)
+ES_PIN = "ES200_CODE_COMMIT.txt"
+
+
+def es_pin_cells(suite: str) -> list[dict]:
+    own, other = ("LX", "WX") if suite == "LX" else ("WX", "LX")
+    prefixes = ["lx_es_", "lx10_es_"] if suite == "LX" else ["wx_es_", "wx10_es_"]
+    return [md(f"""## 0. Code pin of the early-stopping protocol
+The fixed 60-epoch results of this suite stay on the suite pin (unchanged; completed work is never invalidated).
+This notebook runs the commit recorded in `{'D3_LCMV_XU' if suite == 'LX' else 'D3_WMNE_XU'}/{ES_PIN}`. On its first
+run it adopts the other suite's early-stopping commit if that exists, so LCMV and wMNE train with identical code;
+otherwise it records the branch head. It never moves while early-stopping work of this suite exists. Leave
+`UPDATE_ES_CODE = False`."""),
+            code(f"""UPDATE_ES_CODE = False
+LX, WX = OUT + '/D3_LCMV_XU', OUT + '/D3_WMNE_XU'      # both suites' folders (the other one is only read)
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+own_pin, other_pin = Path({own}) / '{ES_PIN}', Path({other}) / '{ES_PIN}'
+sibling = other_pin.read_text().split()[0] if other_pin.exists() and other_pin.read_text().split() else None
+target = head if UPDATE_ES_CODE else (sibling or head)
+dirs = [Path({own}) / 'experiments_A_xu_tenfold', Path({own}) / 'experiments_B_all_windows']
+has_work = any(any(d.glob(pre + '*/**/*.done.json')) for d in dirs if d.exists() for pre in {prefixes!r})
+ES_COMMIT, _ = resolve_code_pin(own_pin, target, update=UPDATE_ES_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', ES_COMMIT])
+if not Path('/content/repo/tests/test_early_stopping.py').exists():
+    raise RuntimeError(f'pin {{ES_COMMIT[:10]}} lacks the early-stopping code: set UPDATE_ES_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from the early-stopping commit
+from adgraph.colab import sh
+print('early-stopping code commit:', ES_COMMIT)
+print('other suite early-stopping commit:', sibling or '(not yet set)')
+if sibling and sibling != ES_COMMIT:
+    print('WARNING: LCMV and wMNE early-stopping pins differ; the comparison would mix training code versions')
+print('suite pin (60-epoch results, unchanged):', (Path({own}) / 'CODE_COMMIT.txt').read_text().split()[0])""")]
+
+
+def es_experiment_notebook(suite: str, n: int, name: str, title: str) -> dict:
+    lo = suite.lower()
+    rest = name[len("lx_"):]
+    cfg_b = f"configs/experiments/{lo}_es/{lo}_es_{rest}.yaml"
+    cfg_a = f"configs/experiments/{lo}_es/tenfold/{lo}10_es_{rest}.yaml"
+    variants, proto = protocol(f"{lo}_es/{lo}_es_{rest}")
+    var = "LX" if suite == "LX" else "WX"
+    return notebook([
+        md(f"""# {suite}-ES · Experiment {n} · {title} · 200-epoch early stopping
+
+The {'LCMV' if suite == 'LX' else 'matched wMNE'} experiment `{rest}` with the **early-stopping protocol**
+`gnn_fixed_hparams_es200_v1` (methodology log entry 56, `docs/early_stopping.md`). It is identical to the 60-epoch
+experiment except training:
+- at most 200 epochs;
+- patience 10, monitoring the inner-validation loss with min_delta 1e-4;
+- the best epoch restored;
+- no refit.
+
+Hyperparameters, seeds, splits and reporting are unchanged, and the protocol is identical for LCMV and wMNE.
+
+**No leakage:** in every outer fit, the inner validation participants (20 %, stratified, whole participants) are
+drawn from that fit's training participants only, so the outer CV fold and the 13 holdout participants are never
+used for stopping or checkpoint selection. {proto}
+""" + (LX_HOWTO if suite == "LX" else WX_HOWTO) + f"""
+**Results** (separate from the 60-epoch results, never overwritten):
+`<outputs>/{'D3_LCMV_XU' if suite == 'LX' else 'D3_WMNE_XU'}/experiments_A_xu_tenfold/{lo}10_es_{rest}/` and
+`.../experiments_B_all_windows/{lo}_es_{rest}/`. Every fold's `hparams.csv` row records the best / stopping epoch,
+the best validation loss, the inner validation participants and both loss curves. Use a **GPU runtime** (T4)."""),
+        code(SETUP_LX if suite == "LX" else SETUP_WX),
+        *es_pin_cells(suite),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results and early-stopping summary (saved outputs only)"),
+        code(f"""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {{cfg}}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{{{var}}}/{{root}}/{{Path(cfg).stem}}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+sh("python scripts/es_report.py --suite {suite}")
+rep = sorted(glob.glob({var} + '/reports/early_stopping_*'))[-1]
+display(pd.read_csv(rep + '/summary.csv').query("experiment.str.contains('{rest}')", engine='python'))
+for png in sorted(glob.glob(rep + '/curves_*{rest}*.png')):
+    display(Image(filename=png))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+    ], gpu=True)
+
+
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     nbdir = Path(nbdir)
     outputs = {nbdir / "01_build_graphs.ipynb": build_graphs_notebook(),
@@ -1392,6 +1504,13 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
         outputs[nbdir / "wmne_xu" / "historical" / f"WXH_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = \
             wxh_experiment_notebook(n, name, title, gpu)
     outputs[nbdir / "wmne_xu" / "WX_99_compare.ipynb"] = wx_compare_notebook()
+    for suite, folder in (("LX", "lcmv_xu"), ("WX", "wmne_xu")):
+        for n, name, title, gpu in LX_EXPERIMENTS:
+            if n < 2:
+                continue                        # classical Exp 0 / 1: no epochs, no early stopping
+            stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+            outputs[nbdir / folder / "early_stopping" / f"{suite}_ES_Exp{n}_{stem}.ipynb"] = \
+                es_experiment_notebook(suite, n, name, title)
     for path, nb in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")

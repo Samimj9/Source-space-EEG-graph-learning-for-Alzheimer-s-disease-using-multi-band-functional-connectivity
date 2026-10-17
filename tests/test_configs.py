@@ -7,7 +7,7 @@ from adgraph.experiments.config import expand_variants, hparam_grid, load_experi
 EXP_DIR = Path("configs/experiments")
 # the LCMV / Xu and wMNE / Xu suites (one repeat, Xu settings) are checked by their own tests
 # (test_lx_schedule.py, test_wmne_xu.py)
-OWN_SUITES = ("lx", "wx", "wx_hist")
+OWN_SUITES = ("lx", "wx", "wx_hist", "lx_es", "wx_es")
 EXPERIMENTS = sorted(p for p in EXP_DIR.glob("**/*.yaml")
                      if "base" not in p.name and p.relative_to(EXP_DIR).parts[0] not in OWN_SUITES)
 EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minimal": 24, "exp3_conn_psd": 24,

@@ -44,7 +44,7 @@ def test_one_notebook_per_experiment_config():
     # the LCMV / Xu and wMNE / Xu suites have their own notebooks (two modes per notebook; test_lx_suite_notebooks)
     configs = {str(p.relative_to(REPO)) for p in (REPO / "configs" / "experiments").rglob("*.yaml")
                if p.stem not in {"base", "classical_base", "gnn_base", "gnn_fixed_base"}
-               and p.relative_to(REPO / "configs" / "experiments").parts[0] not in ("lx", "wx", "wx_hist")}
+               and p.relative_to(REPO / "configs" / "experiments").parts[0] not in ("lx", "wx", "wx_hist", "lx_es", "wx_es")}
     # nested-CV GNN configs are historical records without notebooks (methodology log entry 42)
     configs = {c for c in configs if not (lambda v: v["input"] == "graph" and not v.get("protocol"))(
         load_experiment(REPO / c))}
@@ -153,8 +153,18 @@ def test_lx_suite_notebooks():
     """Every LCMV / wMNE Xu-suite config is run by exactly one suite notebook (modes A and B in one notebook)."""
     exp = REPO / "configs" / "experiments"
     for suite, nbs in (("lx", (NB / "lcmv_xu").glob("LX_Exp*.ipynb")), ("wx", (NB / "wmne_xu").glob("WX_Exp*.ipynb")),
-                       ("wx_hist", (NB / "wmne_xu" / "historical").glob("WXH_Exp*.ipynb"))):
+                       ("wx_hist", (NB / "wmne_xu" / "historical").glob("WXH_Exp*.ipynb")),
+                       ("lx_es", (NB / "lcmv_xu" / "early_stopping").glob("LX_ES_Exp*.ipynb")),
+                       ("wx_es", (NB / "wmne_xu" / "early_stopping").glob("WX_ES_Exp*.ipynb"))):
         want = {str(p.relative_to(REPO)) for p in (exp / suite).rglob("*.yaml")}
         per_nb = [{c for src in _code(nb) for c in want if f"'{c}'" in src} for nb in nbs]
         counts = {c: sum(c in s for s in per_nb) for c in want}
         assert counts and all(n == 1 for n in counts.values()), (suite, counts)
+
+
+def test_early_stopping_notebooks_pin_their_own_code():
+    """ES notebooks keep the suite pins (60-epoch results) and run their own ES200 pin, adopting the other suite's."""
+    for nb in [*(NB / "lcmv_xu" / "early_stopping").glob("*.ipynb"), *(NB / "wmne_xu" / "early_stopping").glob("*.ipynb")]:
+        src = "\n".join(_code(nb))
+        assert "ES200_CODE_COMMIT.txt" in src and "UPDATE_ES_CODE = False" in src and "sibling or head" in src
+        compile(src.replace("display(", "print("), str(nb), "exec")      # syntactically valid cells

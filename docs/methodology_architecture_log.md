@@ -3208,6 +3208,42 @@ Code changes outside new files are limited to:
 
 Running LCMV notebooks use their own pin and are unaffected.
 
+## 56. Early-stopping protocol (200 epochs, patience 10) for the LCMV-Xu and wMNE-Xu GNNs
+
+**Request (2026-10-17).** Train the GNNs of Exp 2-8 in both Xu suites for at most 200 epochs with early stopping
+(patience 10) on a leakage-free validation split, keep the 60-epoch results, and keep LCMV and wMNE comparable.
+
+**Decision.** A new, separately versioned protocol `gnn_fixed_hparams_es200_v1` (`docs/early_stopping.md`):
+- training:
+  - at most 200 epochs;
+  - the inner-validation loss is monitored (participant- and class-balanced BCE);
+  - min_delta 1e-4 (absolute) and patience 10;
+  - the best epoch is restored;
+  - no refit;
+- the hyperparameters, architecture, seeds, splits and reporting of the 60-epoch protocol are unchanged;
+- inner validation:
+  - 20 % of each class of the OUTER TRAINING participants, whole participants, seeded per fit;
+  - the outer CV fold and the 13 holdout participants never enter;
+  - the runner verifies this per fit;
+- every fit records its best and stopping epochs, best validation loss, inner validation participants and curves;
+- configs `configs/experiments/{lx,wx}_es/` extend the 60-epoch configs, with new experiment folders; identity
+  between LX-ES and WX-ES is tested;
+- own pins `ES200_CODE_COMMIT.txt` in each suite folder. The first one set is adopted by the other suite, so both
+  train with one commit. The suite pins and the 60-epoch results are never moved or overwritten.
+
+**Final holdout model.** The early-stopped model (trained on about 41, stopped on about 11 of the 52 development
+participants) is the same procedure that the development CV evaluates. A refit on all 52 for the selected epochs
+is implemented but not used, because it is unvalidated and transfers the epoch count to a larger training set.
+
+**Code.** `models/trainer.py`:
+- an explicit `min_delta`;
+- `restore_best`;
+- an optional refit;
+- `training_summary`.
+
+`experiments/runner.py` records the summary and the leakage check. With early stopping disabled, the training
+path is numerically unchanged. No graph-construction file changed.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import random
 
 import numpy as np
@@ -149,19 +150,43 @@ class GNNModel:
 
     # -- API
     def fit(self, view: DataView) -> "GNNModel":
-        import torch
-        from torch.nn import functional as F
-
+        """Fit on a TRAINING view only. With ``training.early_stopping.enabled`` (methodology log entry 56), the
+        training participants are split once into inner-fit and inner-validation participants
+        (``evaluation.splits.subject_holdout``: stratified by class, whole participants, seeded by the model seed),
+        so the outer test participants (an outer CV fold or the holdout) can never influence stopping. Training
+        runs for at most ``epochs``; the validation loss (participant- and class-balanced BCE) is monitored; an
+        epoch improves when it is lower than the best so far by more than ``min_delta``; training stops after
+        ``patience`` consecutive epochs without improvement; the best epoch's weights are restored. With
+        ``refit: true`` a fresh model is then trained on ALL training participants for the selected number of
+        epochs (same seed; transforms refitted on all training participants)."""
         from ..evaluation.splits import subject_holdout
 
         require_train(view)
         seed_everything(self.seed)
         es = self.train_cfg.get("early_stopping", {}) or {}
+        self.es_info = {"early_stopping": bool(es.get("enabled", False))}
         if es.get("enabled", False):
             tr_idx, va_idx = subject_holdout(view.meta, es.get("val_subject_fraction", 0.2), self.seed, view.target)
             fit_view, val_view = view.take(tr_idx, "train"), view.take(va_idx, "val")
+            fit_keys, val_keys = set(fit_view.meta["key"]), set(val_view.meta["key"])
+            if fit_keys & val_keys or not val_keys or val_view.meta["y"].nunique() < 2:
+                raise RuntimeError("inner validation split is not subject-disjoint or lacks a class")
+            self.es_info.update({"inner_val_keys": sorted(val_keys), "n_inner_fit_participants": len(fit_keys),
+                                 "n_inner_val_participants": len(val_keys)})
         else:
             fit_view, val_view = view, None
+        self._train(fit_view, val_view, int(self.train_cfg.get("epochs", 100)), es)
+        if es.get("enabled", False) and es.get("refit", False):
+            n = self.es_info["best_epoch"]
+            self.selection_history, self.history = self.history, []
+            seed_everything(self.seed)
+            self._train(view, None, n, {})
+            self.es_info["refit_epochs"] = n
+        return self
+
+    def _train(self, fit_view: DataView, val_view: DataView | None, epochs: int, es: dict) -> None:
+        import torch
+        from torch.nn import functional as F
 
         self.scaler.fit(fit_view)
         self.sparsifier.fit(fit_view)
@@ -174,12 +199,13 @@ class GNNModel:
         self.net = self.build_net(x.shape[-1], x.shape[1], n_cov, n_rois=x.shape[2]).to(dev)
         opt = torch.optim.Adam(self.net.parameters(), lr=self.train_cfg.get("lr", 1e-3),
                                weight_decay=self.train_cfg.get("weight_decay", 1e-4))
-        bs, epochs = self.train_cfg.get("batch_size", 32), self.train_cfg.get("epochs", 100)
+        bs = self.train_cfg.get("batch_size", 32)
         gen = torch.Generator().manual_seed(self.seed)
         # whole training set on the device once (not copied per batch); identical batches and results
         x, adj, y, w = x.to(dev), adj.to(dev), y.to(dev), w.to(dev)
         cov = None if cov is None else cov.to(dev)
-        best, best_state, patience = np.inf, None, 0
+        min_delta, max_patience = float(es.get("min_delta", 1e-6)), int(es.get("patience", 15))
+        best, best_state, best_epoch, patience = np.inf, None, None, 0
         from .. import progress
 
         for epoch in range(epochs):
@@ -203,17 +229,36 @@ class GNNModel:
             rec = {"epoch": epoch, "train_loss": total / len(y)}
             if val_view is not None:
                 rec["val_loss"] = self._weighted_loss(val_view)
-                if rec["val_loss"] < best - 1e-6:
-                    best, best_state, patience = rec["val_loss"], copy.deepcopy(self.net.state_dict()), 0
+                if rec["val_loss"] < best - min_delta:
+                    best, best_state, best_epoch, patience = (rec["val_loss"], copy.deepcopy(self.net.state_dict()),
+                                                              epoch + 1, 0)
                 else:
                     patience += 1
             self.history.append(rec)
-            if val_view is not None and patience >= es.get("patience", 15):
+            if val_view is not None and patience >= max_patience:
                 break
-        if best_state is not None:
+        if best_state is not None and es.get("restore_best", True):
             self.net.load_state_dict(best_state)
+        if val_view is not None:
+            self.es_info.update({"max_epochs": epochs, "epochs_run": len(self.history), "best_epoch": best_epoch,
+                                 "best_val_loss": float(best), "stopped_early": len(self.history) < epochs,
+                                 "patience": max_patience, "min_delta": min_delta,
+                                 "restored_best": best_state is not None and es.get("restore_best", True)})
         progress.set(epoch=None)
-        return self
+
+    def training_summary(self) -> dict:
+        """Per-fit training record (saved in hparams.csv of every outer fold): epochs, early-stopping statistics
+        (best epoch counted from 1, stopping epoch, best validation loss), the inner validation participants and
+        the train / validation loss curves."""
+        hist = getattr(self, "selection_history", None) or self.history
+        out = {"max_epochs": int(self.train_cfg.get("epochs", 100)), "epochs_run": len(self.history),
+               **{k: v for k, v in getattr(self, "es_info", {}).items() if k != "inner_val_keys"}}
+        if "inner_val_keys" in getattr(self, "es_info", {}):
+            out["inner_val_keys"] = json.dumps(self.es_info["inner_val_keys"])
+        out["history_train_loss"] = json.dumps([round(h["train_loss"], 6) for h in hist])
+        if any("val_loss" in h for h in hist):
+            out["history_val_loss"] = json.dumps([round(h["val_loss"], 6) for h in hist])
+        return out
 
     def _weighted_loss(self, view: DataView) -> float:
         import torch
@@ -256,6 +301,8 @@ class GNNModel:
                 out["edge_gates"] = g.cpu().numpy()
         out["history_epoch"] = np.array([h["epoch"] for h in self.history])
         out["history_train_loss"] = np.array([h["train_loss"] for h in self.history])
+        if any("val_loss" in h for h in self.history):
+            out["history_val_loss"] = np.array([h.get("val_loss", np.nan) for h in self.history])
         if self.scaler.mean_ is not None:
             out["node_scaler_mean"], out["node_scaler_std"] = self.scaler.mean_, self.scaler.std_
         return out

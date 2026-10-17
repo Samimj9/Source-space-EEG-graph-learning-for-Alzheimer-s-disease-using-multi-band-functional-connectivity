@@ -121,6 +121,14 @@ e.g. `D1-3`, `D2-3`.
   `graphsD3_v4` graphs, `configs/experiments/wx_hist/`); every run verifies the frozen LCMV split and folds.
 - Never write into `D3_LCMV_XU/` from this suite, and never add early stopping to only one of the two suites.
 
+### Early-stopping protocol for both Xu suites (`docs/early_stopping.md`, methodology log entry 56)
+
+- GNN Exp 2-8 only: `configs/experiments/{lx,wx}_es/` (max 200 epochs, patience 10, min_delta 1e-4, best restored,
+  inner validation from outer training participants only); notebooks `notebooks/{lcmv_xu,wmne_xu}/early_stopping/`.
+- Results in new `lx*_es_*` / `wx*_es_*` experiment folders; the 60-epoch results stay untouched.
+- Own pins `ES200_CODE_COMMIT.txt` per suite (the second adopts the first); suite pins are never moved by them.
+- LX-ES and WX-ES configs must stay identical apart from name and family (tested).
+
 ## Repository layout
 
 ```

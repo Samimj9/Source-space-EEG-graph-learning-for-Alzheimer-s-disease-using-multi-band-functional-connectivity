@@ -13,7 +13,9 @@ Outputs per (variant, setting) directory:
     predictions_subjects.csv  repeat, key, dataset, y, score, n_windows
     metrics_repeats.csv       subject-level metrics per repeat (+ per dataset in pooled runs)
     folds.csv                 subject -> (repeat, fold, side)
-    hparams.csv               selected hyperparameters per split + inner-CV scores, n_parameters, fit_seconds
+    hparams.csv               selected hyperparameters per split + inner-CV scores, n_parameters, fit_seconds;
+                              GNNs: epochs run, early-stopping best / stopping epoch, best validation loss,
+                              inner validation participants, train / validation loss curves (entry 56)
     embeddings.npz            optional (evaluation.save_embeddings): fused graph embeddings of the train and
                               test windows of every split, each from that split's single fitted model, stored
                               per model under keys ``r<repeat>_f<fold>__{emb,window_id,key,y,dataset,side}``
@@ -340,6 +342,12 @@ def cross_validate(data: Dataset, v: dict, setting: str, n_repeats: int | None =
                       "scores": json.dumps(scores), "n_parameters": model.n_parameters(), "fit_seconds": fit_seconds,
                       "compute_fingerprint": compute_environment(run_device(v))["fingerprint"],
                       "split_id": sp_id, "seed": seed}
+            if hasattr(model, "training_summary"):      # GNNs: epochs, early stopping, inner validation, curves
+                summary = model.training_summary()
+                inner = set(json.loads(summary.get("inner_val_keys", "[]")))
+                if inner - set(sp.train_keys):        # stopping may only see outer TRAINING participants
+                    raise RuntimeError(f"inner validation participants outside the training set: {sorted(inner)}")
+                hp_row.update(summary)
             emb = None
             if embeddings_out is not None and hasattr(model, "embed"):
                 parts = []

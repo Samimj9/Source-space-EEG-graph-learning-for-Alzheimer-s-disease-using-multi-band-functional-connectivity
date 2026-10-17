@@ -27,6 +27,10 @@ Matched wMNE comparison (separate outputs `<outputs>/D3_WMNE_XU/`, own code pin;
 LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions to `LX_Exp*`), optionally
 `historical/WXH_Exp0` ... `WXH_Exp7` (existing wMNE graphs under the frozen protocol), then `WX_99_compare`.
 
+200-epoch early-stopping protocol for Exp 2-8 of both suites (methodology log entry 56, `docs/early_stopping.md`;
+separate results, own pins `ES200_CODE_COMMIT.txt`): `lcmv_xu/early_stopping/LX_ES_Exp2` ... `LX_ES_Exp8` and
+`wmne_xu/early_stopping/WX_ES_Exp2` ... `WX_ES_Exp8`, one at a time; then `WX_99_compare` pairs them.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |
