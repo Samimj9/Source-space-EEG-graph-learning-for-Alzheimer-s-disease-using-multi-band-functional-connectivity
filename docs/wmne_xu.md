@@ -167,3 +167,42 @@ separately. The report is descriptive.
   6 GB.
 - Drive space: about 5 GB (2.3 GB `graphs.npz` for mode B, plus checkpoints and ROI time series).
 - Experiments: the same compute as the corresponding LX notebooks.
+
+## 7. Source amplitude scale (numerical check, 2026-10-17; `scripts/source_scale_check.py`)
+
+The match report showed mode B source means of `psd_log` −23.165 (wMNE) vs +0.861 (LCMV) and `psd_de` −25.178 vs
++2.479.
+
+**Expected units.**
+- wMNE outputs dipole moment in A·m. Band powers are of order 1e-23 (A·m)², so log10 ≈ −23.
+- The unit-noise-gain LCMV outputs amplitudes in units of the ad-hoc noise SD (0.2 µV). Band powers are of order 1–10,
+  so log10 ≈ 1.
+
+Both are realistic for their definitions.
+
+**Pure scale explains the means.**
+- `psd_log` = log10(band power) and DE = ½·ln(2πe·var), so an amplitude factor a gives Δlog10 P = 2·log10 a and
+  ΔDE = ln a = 1.1513·Δlog10 P.
+- Observed: Δlog10 P = −24.026, so the predicted ΔDE is −27.66. The observed ΔDE is −27.657, a difference of 0.003.
+- Both features therefore see one common amplitude factor of about 10^-12.0, the ratio of the two output units.
+
+**Implementation checked.** The wMNE operator reproduced MNE's own `apply_inverse_raw` + `mean_flip` extraction to
+0.5–1.9e-15 (relative) on all 65 participants. The features are computed by the same `lcmvxu.features` code for both
+methods, and the sensor features are identical.
+
+**Expected differences, not defects:**
+- Relative PSD (scale-free) differs by 0.055 on average, and PLV (0.272 vs 0.312) and |ciPLV| (0.088 vs 0.082)
+  differ. Each ROI signal is a different linear combination of the 19 sensors under the two inverses, so spectra
+  and phase relations differ. These are the quantities the comparison is about.
+- The log-PSD offset is not exactly constant over participants and ROIs. The wMNE operator is the same for everyone,
+  while each participant's LCMV filters depend on their own data covariance.
+
+**What the models see.** Absolute scale cannot affect any model. Classical models standardize their features inside
+each training fold. GNN node features are z-scored per (band, ROI, feature) with training statistics. A constant or
+per-ROI offset is removed; only between-participant and between-window variation remains.
+`scripts/source_scale_check.py` (read-only) quantifies that variation:
+- the participant / ROI / residual shares of the offset;
+- between-participant Spearman agreement per band and ROI;
+- finiteness and amplitude ranges.
+
+No correction is required.
