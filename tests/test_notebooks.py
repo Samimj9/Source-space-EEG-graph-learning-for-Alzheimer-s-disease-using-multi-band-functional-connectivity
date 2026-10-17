@@ -152,10 +152,14 @@ def test_single_experiment_cli_estimate_run_status_report(workspace, config, ext
 def test_lx_suite_notebooks():
     """Every LCMV / wMNE Xu-suite config is run by exactly one suite notebook (modes A and B in one notebook)."""
     exp = REPO / "configs" / "experiments"
-    for suite, nbs in (("lx", (NB / "lcmv_xu").glob("LX_Exp*.ipynb")), ("wx", (NB / "wmne_xu").glob("WX_Exp*.ipynb")),
+    r1 = lambda folder, pre, proto: (NB / folder / "corrected").glob(f"{pre}_R1_*_{proto}.ipynb")   # noqa: E731
+    for suite, nbs in (("lx", [*(NB / "lcmv_xu").glob("LX_Exp*.ipynb"), *r1("lcmv_xu", "LX", "fixed60")]),
+                       ("wx", [*(NB / "wmne_xu").glob("WX_Exp*.ipynb"), *r1("wmne_xu", "WX", "fixed60")]),
                        ("wx_hist", (NB / "wmne_xu" / "historical").glob("WXH_Exp*.ipynb")),
-                       ("lx_es", (NB / "lcmv_xu" / "early_stopping").glob("LX_ES_Exp*.ipynb")),
-                       ("wx_es", (NB / "wmne_xu" / "early_stopping").glob("WX_ES_Exp*.ipynb"))):
+                       ("lx_es", [*(NB / "lcmv_xu" / "early_stopping").glob("LX_ES_Exp*.ipynb"),
+                                  *r1("lcmv_xu", "LX", "es200")]),
+                       ("wx_es", [*(NB / "wmne_xu" / "early_stopping").glob("WX_ES_Exp*.ipynb"),
+                                  *r1("wmne_xu", "WX", "es200")])):
         want = {str(p.relative_to(REPO)) for p in (exp / suite).rglob("*.yaml")}
         per_nb = [{c for src in _code(nb) for c in want if f"'{c}'" in src} for nb in nbs]
         counts = {c: sum(c in s for s in per_nb) for c in want}

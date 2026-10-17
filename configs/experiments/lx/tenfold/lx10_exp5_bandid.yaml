@@ -1,0 +1,4 @@
+# Mode A of lx_exp5_bandid (tenfold store graphsLX10_*; methodology log entry 57).
+extends: ../lx_exp5_bandid.yaml
+experiment: lx10_exp5_bandid
+graph_family: LX10

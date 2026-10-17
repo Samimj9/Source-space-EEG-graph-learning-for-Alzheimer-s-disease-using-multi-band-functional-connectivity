@@ -18,6 +18,12 @@ The K band embeddings are fused:
 ``gate`` and ``attention`` are the learned-fusion candidates; their band weights
 are returned for interpretation. With K = 1 every fusion reduces to identity.
 
+Band identity (methodology log entry 57): with a shared encoder and mean / attention fusion the model is invariant
+to permuting the band graphs, because nothing tells the encoder which band it is processing (per-band z-scoring
+also removes each band's typical level). ``band_identity: onehot`` appends a constant one-hot band indicator
+(K extra node-feature columns, identical for every ROI of band k) to every band's node features before the encoder,
+so the shared weights can act band-specifically. Default ``none`` keeps the original architecture unchanged.
+
 Covariates (EEG + age models): ``cov`` (B, n_covariates), already standardized with
 training statistics, is concatenated to the fused graph embedding immediately before
 the final MLP classifier; it never enters the GNN encoders or the fusion.
@@ -32,6 +38,7 @@ from .encoders import build_encoder
 
 FUSIONS = ("mean", "concat", "gate", "attention")
 READOUTS = ("mean", "max", "sum", "mean_max")
+BAND_IDENTITY = ("none", "onehot")
 
 
 def readout(h: torch.Tensor, kind: str) -> torch.Tensor:
@@ -79,12 +86,16 @@ class MultiBandGNN(nn.Module):
     def __init__(self, encoder: str, in_dim: int, n_bands: int, hidden: int = 64, n_layers: int = 2,
                  dropout: float = 0.2, shared_encoder: bool = True, fusion: str = "attention",
                  readout: str = "mean_max", mlp_hidden: int = 32, encoder_kwargs: dict | None = None,
-                 n_covariates: int = 0):
+                 n_covariates: int = 0, band_identity: str = "none"):
         super().__init__()
         kw = encoder_kwargs or {}
+        if band_identity not in BAND_IDENTITY:
+            raise ValueError(f"band_identity must be one of {BAND_IDENTITY}")
         self.n_bands, self.shared, self.readout_kind = n_bands, shared_encoder, readout
+        self.band_identity = band_identity
+        enc_in = in_dim + (n_bands if band_identity == "onehot" else 0)
         n_enc = 1 if shared_encoder else n_bands
-        self.encoders = nn.ModuleList([build_encoder(encoder, in_dim, hidden, n_layers, dropout, **kw)
+        self.encoders = nn.ModuleList([build_encoder(encoder, enc_in, hidden, n_layers, dropout, **kw)
                                        for _ in range(n_enc)])
         emb = hidden * (2 if readout == "mean_max" else 1)
         self.fusion = BandFusion(fusion, emb, n_bands)
@@ -98,6 +109,10 @@ class MultiBandGNN(nn.Module):
         b, k, r, f = x.shape
         if k != self.n_bands:
             raise ValueError(f"model built for {self.n_bands} band graphs, got {k}")
+        if self.band_identity == "onehot":                  # (B, K, R, F) -> (B, K, R, F + K)
+            eye = torch.eye(k, device=x.device, dtype=x.dtype)[None, :, None, :].expand(b, k, r, k)
+            x = torch.cat([x, eye], dim=-1)
+            f = x.shape[-1]
         if self.shared:
             h = self.encoders[0](x.reshape(b * k, r, f), adj.reshape(b * k, r, r))
             return readout(h, self.readout_kind).view(b, k, -1)

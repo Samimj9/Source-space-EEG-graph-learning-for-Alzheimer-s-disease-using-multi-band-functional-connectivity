@@ -1,0 +1,21 @@
+# CORRECTED ARCHITECTURAL VARIANT (methodology log entry 57, docs/band_identity.md): Exp 5 shared-encoder variants with an explicit one-hot band identity appended to every band's
+# node features (model.band_identity: onehot), so the shared GCN is no longer invariant to band permutation.
+# Everything else (data, features, hyperparameters, seeds, protocol) is identical to lx_exp5_multibranch.
+# The original lx_exp5_multibranch.yaml is kept unchanged as the baseline; this experiment writes its own results folder.
+extends: ../gnn_fixed_base.yaml
+experiment: lx_exp5_bandid
+graph_family: LX
+settings: [xu_dev_cv, xu_holdout]
+graph:
+  band_mode: multi
+  bands: [delta, theta, alpha, beta, gamma]
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  shared__mean__bandid: {model.shared_encoder: true, model.fusion: mean, model.band_identity: onehot}
+  shared__attention__bandid: {model.shared_encoder: true, model.fusion: attention, model.band_identity: onehot}

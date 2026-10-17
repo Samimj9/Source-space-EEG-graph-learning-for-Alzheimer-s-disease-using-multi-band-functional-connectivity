@@ -867,6 +867,10 @@ LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions
 separate results, own pins `ES200_CODE_COMMIT.txt`): `lcmv_xu/early_stopping/LX_ES_Exp2` ... `LX_ES_Exp8` and
 `wmne_xu/early_stopping/WX_ES_Exp2` ... `WX_ES_Exp8`, one at a time; then `WX_99_compare` pairs them.
 
+Corrected band-identity variants R1 (methodology log entry 57, `docs/band_identity.md`; originals kept as baselines;
+own pins `R1_CODE_COMMIT.txt`): `lcmv_xu/corrected/LX_R1_Exp5_bandid_fixed60` (and `_es200`), `LX_R1_Exp6_bandid_*` and
+the `wmne_xu/corrected/WX_R1_*` counterparts.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |
@@ -1468,6 +1472,91 @@ if ERRORS:
     ], gpu=True)
 
 
+
+# ============================================================================ corrected variants R1 (entry 57)
+R1_PIN = "R1_CODE_COMMIT.txt"
+R1_EXPERIMENTS = [(5, "exp5_bandid", "Exp 5 shared encoders + one-hot band identity"),
+                  (6, "exp6_bandid", "Exp 6 PSD + strength (shared GCN) + one-hot band identity")]
+
+
+def r1_notebook(suite: str, n: int, key: str, title: str, protocol: str) -> dict:
+    lo = suite.lower()
+    es = protocol == "es200"
+    cfg_b = f"configs/experiments/{lo}{'_es' if es else ''}/{lo}{'_es' if es else ''}_{key}.yaml"
+    cfg_a = f"configs/experiments/{lo}{'_es' if es else ''}/tenfold/{lo}10{'_es' if es else ''}_{key}.yaml"
+    _, proto = protocol_text = protocol_of(cfg_b)
+    own, other = ("LX", "WX") if suite == "LX" else ("WX", "LX")
+    folder = "D3_LCMV_XU" if suite == "LX" else "D3_WMNE_XU"
+    pins = md(f"""## 0. Code pin of the corrected variants (R1)
+The original experiments and their pins are not touched. This notebook runs the commit recorded in
+`{folder}/{R1_PIN}`. On its first run it adopts the other suite's R1 commit if that exists, so LCMV and wMNE use
+identical code; otherwise it records the branch head. It never moves while R1 work of this suite exists. Leave
+`UPDATE_R1_CODE = False`.""")
+    pin_code = code(f"""UPDATE_R1_CODE = False
+LX, WX = OUT + '/D3_LCMV_XU', OUT + '/D3_WMNE_XU'
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+own_pin, other_pin = Path({own}) / '{R1_PIN}', Path({other}) / '{R1_PIN}'
+sibling = other_pin.read_text().split()[0] if other_pin.exists() and other_pin.read_text().split() else None
+target = head if UPDATE_R1_CODE else (sibling or head)
+has_work = any(any(Path({own}).glob(f'experiments_*/*bandid*/**/*.done.json')) for _ in [0])
+R1_COMMIT, _ = resolve_code_pin(own_pin, target, update=UPDATE_R1_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', R1_COMMIT])
+if not Path('/content/repo/tests/test_xu_audit.py').exists():
+    raise RuntimeError(f'pin {{R1_COMMIT[:10]}} lacks the band-identity code: set UPDATE_R1_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]
+from adgraph.colab import sh
+print('R1 code commit:', R1_COMMIT, '| other suite R1 commit:', sibling or '(not yet set)')
+if sibling and sibling != R1_COMMIT:
+    print('WARNING: LCMV and wMNE R1 pins differ; the comparison would mix code versions')""")
+    var = suite
+    return notebook([
+        md(f"""# {suite}-R1 · Experiment {n} · {title} · {'200-epoch early stopping' if es else 'fixed 60 epochs'}
+
+**Corrected architectural variant** (methodology log entry 57, `docs/band_identity.md`). The original shared-encoder
+models are invariant to permuting the five band graphs (no band identity). This variant appends a one-hot band
+indicator to every band's node features (`model.band_identity: onehot`). Everything else is identical to the
+original experiment, which stays as the baseline in its own folder. {proto}
+""" + (LX_HOWTO if suite == "LX" else WX_HOWTO) + f"""
+**Results:** `<outputs>/{folder}/experiments_A_xu_tenfold/{Path(cfg_a).stem}/` and
+`.../experiments_B_all_windows/{Path(cfg_b).stem}/` (new folders). Use a **GPU runtime** (T4)."""),
+        code(SETUP_LX if suite == "LX" else SETUP_WX),
+        pins, pin_code,
+        md("## 1. Status"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc"""),
+        md("## 3. Results (saved outputs only)"),
+        code(f"""import glob
+from pathlib import Path
+import pandas as pd
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {{cfg}}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{{{var}}}/{{root}}/{{Path(cfg).stem}}/_reports/report_*'))
+    if reports:
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+    ], gpu=True)
+
+
+def protocol_of(cfg_path: str):
+    return protocol(cfg_path.removeprefix("configs/experiments/").removesuffix(".yaml"))
+
+
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     nbdir = Path(nbdir)
     outputs = {nbdir / "01_build_graphs.ipynb": build_graphs_notebook(),
@@ -1504,6 +1593,11 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
         outputs[nbdir / "wmne_xu" / "historical" / f"WXH_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = \
             wxh_experiment_notebook(n, name, title, gpu)
     outputs[nbdir / "wmne_xu" / "WX_99_compare.ipynb"] = wx_compare_notebook()
+    for suite, folder in (("LX", "lcmv_xu"), ("WX", "wmne_xu")):
+        for n, key, title in R1_EXPERIMENTS:
+            for proto in ("fixed60", "es200"):
+                outputs[nbdir / folder / "corrected" / f"{suite}_R1_Exp{n}_bandid_{proto}.ipynb"] = \
+                    r1_notebook(suite, n, key, title, proto)
     for suite, folder in (("LX", "lcmv_xu"), ("WX", "wmne_xu")):
         for n, name, title, gpu in LX_EXPERIMENTS:
             if n < 2:

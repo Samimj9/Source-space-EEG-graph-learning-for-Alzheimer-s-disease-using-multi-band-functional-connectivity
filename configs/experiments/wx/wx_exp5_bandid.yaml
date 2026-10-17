@@ -1,0 +1,4 @@
+# Matched wMNE counterpart of lx_exp5_bandid (identical definition; methodology log entries 55, 57).
+extends: ../lx/lx_exp5_bandid.yaml
+experiment: wx_exp5_bandid
+graph_family: WX

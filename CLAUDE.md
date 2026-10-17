@@ -129,6 +129,14 @@ e.g. `D1-3`, `D2-3`.
 - Own pins `ES200_CODE_COMMIT.txt` per suite (the second adopts the first); suite pins are never moved by them.
 - LX-ES and WX-ES configs must stay identical apart from name and family (tested).
 
+### Band identity in shared multiband encoders (`docs/band_identity.md`, methodology log entry 57)
+
+- A shared-encoder `MultiBandGNN` without `model.band_identity` is invariant to band permutation (Exp 5 shared, Exp 6
+  originals; kept as baselines). Corrected variants: `*_exp5_bandid`, `*_exp6_bandid` (`band_identity: onehot`),
+  notebooks `notebooks/{lcmv_xu,wmne_xu}/corrected/`, own pins `R1_CODE_COMMIT.txt`.
+- `tests/test_xu_audit.py` checks label orientation for every model family and band-permutation sensitivity for every
+  multiband variant; a new shared multiband model must either carry band identity or be documented as invariant.
+
 ## Repository layout
 
 ```

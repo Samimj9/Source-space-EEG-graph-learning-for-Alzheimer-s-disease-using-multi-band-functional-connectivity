@@ -1,0 +1,4 @@
+# Mode A of wx_exp5_bandid: the identical experiment as lx10_exp5_bandid on the matched wMNE tenfold store.
+extends: ../../lx/tenfold/lx10_exp5_bandid.yaml
+experiment: wx10_exp5_bandid
+graph_family: WX10

@@ -1,0 +1,16 @@
+# Mode A of wx_exp6_bandid with the 200-epoch early-stopping protocol (methodology log entries 56, 57).
+extends: ../../wx/tenfold/wx10_exp6_bandid.yaml
+experiment: wx10_es_exp6_bandid
+protocol:                        # fixed hyperparameters (unchanged), training duration by early stopping
+  name: gnn_fixed_hparams_es200_v1
+  hyperparameter_search: none
+training:                        # lr, weight decay, batch size, architecture: unchanged from the 60-epoch protocol
+  epochs: 200                    # maximum
+  early_stopping:
+    enabled: true
+    monitor: val_loss            # participant- and class-balanced BCE on the inner validation participants
+    patience: 10                 # consecutive epochs without improvement before stopping
+    min_delta: 0.0001            # absolute improvement in validation BCE required to count (about 0.015 % of ln 2)
+    val_subject_fraction: 0.2    # inner validation participants drawn from the outer TRAINING participants only
+    restore_best: true           # the best epoch's weights are used for testing
+    refit: false                 # no refit: the early-stopped model is evaluated (identical in CV and holdout)

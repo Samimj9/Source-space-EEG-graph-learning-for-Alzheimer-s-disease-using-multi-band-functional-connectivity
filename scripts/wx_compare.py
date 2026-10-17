@@ -45,6 +45,19 @@ def metrics(y, score, thr) -> dict:
             "n_score_values": int(len(np.unique(np.round(score, 7))))}
 
 
+def fold_aucs(win: pd.DataFrame) -> list[float]:
+    """Participant-level ROC-AUC within each outer fold (development CV), from the window predictions. Reported
+    next to the pooled out-of-fold AUC, which ranks scores of differently calibrated fold models together."""
+    out = []
+    if "fold" not in win or win["fold"].nunique() < 2:
+        return out
+    for _, g in win.groupby(["repeat", "fold"] if "repeat" in win else "fold"):
+        sg = g.groupby("key").agg(y=("y", "first"), score=("score", "mean"))
+        if sg["y"].nunique() == 2:
+            out.append(float(roc_auc_score(sg["y"], sg["score"])))
+    return out
+
+
 rows = []
 for (method, mode), rel in ROOTS.items():
     for done in sorted((processed / rel).glob("*/*/*/final.done.json")):
@@ -57,6 +70,9 @@ for (method, mode), rel in ROOTS.items():
         ps = subj.groupby("key").agg(y=("y", "first"), score=("score", "mean"))
         m = {f"participant_{k}": v for k, v in metrics(ps["y"], ps["score"], thr).items()}
         m["window_roc_auc"] = roc_auc_score(win["y"], win["score"]) if win["y"].nunique() == 2 else np.nan
+        fa = fold_aucs(win)
+        m["participant_mean_fold_auc"] = float(np.mean(fa)) if fa else np.nan       # dev CV only; pooled is primary
+        m["participant_fold_auc_min_max"] = f"{min(fa):.3f}-{max(fa):.3f}" if fa else ""
         rows.append({"method": method, "mode": mode, "experiment": exp.split("_", 1)[1], "variant": variant,
                      "setting": setting, "participants": ",".join(sorted(ps.index)), "n_participants": len(ps),
                      "graph_run": (man.get("graph_run") or {}).get("graph_run_id"), "git_commit": man.get("git_commit"),

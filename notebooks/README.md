@@ -31,6 +31,10 @@ LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions
 separate results, own pins `ES200_CODE_COMMIT.txt`): `lcmv_xu/early_stopping/LX_ES_Exp2` ... `LX_ES_Exp8` and
 `wmne_xu/early_stopping/WX_ES_Exp2` ... `WX_ES_Exp8`, one at a time; then `WX_99_compare` pairs them.
 
+Corrected band-identity variants R1 (methodology log entry 57, `docs/band_identity.md`; originals kept as baselines;
+own pins `R1_CODE_COMMIT.txt`): `lcmv_xu/corrected/LX_R1_Exp5_bandid_fixed60` (and `_es200`), `LX_R1_Exp6_bandid_*` and
+the `wmne_xu/corrected/WX_R1_*` counterparts.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |

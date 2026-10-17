@@ -3244,6 +3244,34 @@ is implemented but not used, because it is unvalidated and transfers the epoch c
 `experiments/runner.py` records the summary and the leakage check. With early stopping disabled, the training
 path is numerically unchanged. No graph-construction file changed.
 
+## 57. Correctness audit of the Xu-suite experiments; band identity for shared multiband encoders (R1)
+
+**Request (2026-10-17).** Audit Exp 0-8 of LCMV-Xu and wMNE-Xu, in both modes and both protocols, for label,
+scoring, evaluation and architecture defects, and correct confirmed problems as versioned variants.
+
+**Findings** (`docs/band_identity.md`, `tests/test_xu_audit.py`):
+- **Labels and evaluation are correct everywhere:**
+  - AD = 1;
+  - P(AD) and SVM-margin orientation;
+  - participant aggregation;
+  - thresholds;
+  - training-only fitting;
+  - frozen splits.
+- **One unintended architectural limitation.** The shared-encoder `MultiBandGNN` with mean or attention fusion is
+  invariant to band permutation: it has no band identity, and per-band z-scoring removes band levels. This affects
+  Exp 5 `shared__*` and every Exp 6 variant. With paired band-swapped synthetic participants it gives exactly
+  AUC 0.5.
+- **Intentional properties confirmed:** Exp 0/1, 2/3 and 4.
+- **Band-aware architectures confirmed:** Exp 5 separate, Exp 7 (learned band embedding and gates; equal at init,
+  separated by training) and Exp 8.
+- **Reporting.** The pooled development-CV AUC mixes differently calibrated fold models. The mean fold AUC is now
+  reported next to it; the primary metric is unchanged.
+
+**Decision.** A separate corrected variant, `model.band_identity: onehot`: a one-hot band indicator appended to the
+node features. Configs `*_exp5_bandid` and `*_exp6_bandid` cover LX/WX, modes A/B, fixed 60 and ES200. Notebooks
+are in `corrected/`, with own pins `R1_CODE_COMMIT.txt`. The originals stay as baselines, and no original result is
+invalidated. The holdout was not used to choose the correction.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

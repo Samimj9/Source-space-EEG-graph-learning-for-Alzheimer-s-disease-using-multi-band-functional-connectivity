@@ -47,6 +47,19 @@ def metrics(y, score, thr) -> dict:
             "specificity": spec, "precision": prec, "f1": f1, "roc_auc": auc, "tn": tn, "fp": fp, "fn": fn, "tp": tp}
 
 
+def fold_aucs(win: pd.DataFrame) -> list[float]:
+    """Participant-level ROC-AUC within each outer fold (development CV), from the window predictions. Reported
+    next to the pooled out-of-fold AUC, which ranks scores of differently calibrated fold models together."""
+    out = []
+    if "fold" not in win or win["fold"].nunique() < 2:
+        return out
+    for _, g in win.groupby(["repeat", "fold"] if "repeat" in win else "fold"):
+        sg = g.groupby("key").agg(y=("y", "first"), score=("score", "mean"))
+        if sg["y"].nunique() == 2:
+            out.append(float(roc_auc_score(sg["y"], sg["score"])))
+    return out
+
+
 rows, curves = [], {}
 for fam, mode in MODES.items():
     root = processed / FAMILIES[fam][1]
@@ -68,6 +81,9 @@ for fam, mode in MODES.items():
         ps = subj.groupby("key").agg(y=("y", "first"), score=("score", "mean"))     # mean over repeats
         row.update({f"participant_{k}": v for k, v in metrics(ps["y"], ps["score"], thr).items()})
         row.update({f"window_{k}": v for k, v in metrics(win["y"], win["score"], thr).items()})
+        fa = fold_aucs(win)
+        row["participant_mean_fold_auc"] = float(np.mean(fa)) if fa else np.nan       # dev CV only; pooled is primary
+        row["participant_fold_auc_min_max"] = f"{min(fa):.3f}-{max(fa):.3f}" if fa else ""
         rows.append(row)
         curves.setdefault((mode, setting, exp), []).append((variant, ps["y"].to_numpy(), ps["score"].to_numpy(), thr))
 

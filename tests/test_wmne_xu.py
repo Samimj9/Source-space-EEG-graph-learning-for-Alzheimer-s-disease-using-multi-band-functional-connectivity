@@ -70,7 +70,8 @@ def test_matched_experiments_are_the_lcmv_definitions(wx):
            [{k: v for k, v in y.items() if k not in drop} for y in b]
     units = plan_units(experiment_entries(str(wx)))
     exp = wx.stem.split("_")[1]
-    assert len(units) == 2 * EXPECTED_VARIANTS[exp]
+    n_var = {"exp5": 4, "exp6": 10}[exp] if "bandid" in wx.stem else EXPECTED_VARIANTS[exp]   # entry 57 variants
+    assert len(units) == 2 * n_var
     assert {u[3] for u in units} == {"xu_dev_cv", "xu_holdout"}
     assert {u[2]["graph_family"] for u in units} == {"WX10" if "tenfold" in str(wx) else "WX"}
 

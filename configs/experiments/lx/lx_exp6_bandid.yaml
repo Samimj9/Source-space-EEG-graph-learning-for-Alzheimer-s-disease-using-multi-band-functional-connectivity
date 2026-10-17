@@ -1,0 +1,7 @@
+# CORRECTED ARCHITECTURAL VARIANT (methodology log entry 57, docs/band_identity.md): Exp 6 (shared GCN + attention / mean fusion over the five bands) with an explicit
+# one-hot band identity (model.band_identity: onehot). All ten Exp 6 variants and their ablations otherwise unchanged.
+# The original lx_exp6_psd_strength.yaml is kept unchanged as the baseline; this experiment writes its own results folder.
+extends: lx_exp6_psd_strength.yaml
+experiment: lx_exp6_bandid
+model:
+  band_identity: onehot
