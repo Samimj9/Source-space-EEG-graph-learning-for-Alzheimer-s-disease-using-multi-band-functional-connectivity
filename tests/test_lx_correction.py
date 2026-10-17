@@ -82,12 +82,12 @@ def test_exact_validation_at_the_margin():
     assert boundary_violations(other, subj, M, SF)
 
 
-def make_store(tmp_path):
-    """Original (b38685e-style) mode B and mode A stores of 10 participants, D3-1 fragmented."""
+def make_store(tmp_path, n_participants: int = 10):
+    """Original (b38685e-style) mode B and mode A stores, D3-1 fragmented."""
     rng = np.random.default_rng(0)
     roi, ch, k = ["a-lh", "b-lh", "a-rh", "b-rh"], ["Fp1", "Fp2", "Cz"], len(CFG["bands"])
     headers, rows, wins = {}, [], []
-    for n in range(1, 11):
+    for n in range(1, n_participants + 1):
         key = f"D3-{n}"
         raw = header(FRAGMENTED if n == 1 else CONTIGUOUS)
         headers[f"/data/sub-{n:03d}.set"] = raw

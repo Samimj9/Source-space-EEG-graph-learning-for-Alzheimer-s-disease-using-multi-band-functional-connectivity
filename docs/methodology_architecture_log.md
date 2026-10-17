@@ -3151,6 +3151,25 @@ corrected code (`UPDATE_LX_CODE = True`, once) invalidates nothing.
 
 **Details:** `docs/lcmv_xu.md` §11; decisions row 57.
 
+## 54. LCMV / Xu suite: experiments scheduled zero units (scheduling bug, fixed)
+
+**Finding (2026-10-17).** On the validated `_corr1` stores, `experiment.py run` for LX Exp 0 reported
+`0/0 folds+perms` and trained nothing in either mode.
+
+**Cause.** `experiments.plan.experiment_entries` builds the run plan from fixed setting passes: within-dataset,
+pooled and cross-dataset. `xu_dev_cv` and `xu_holdout` were in no pass, so every LX config produced no entries and no
+units. This affected all LX configs (Exp 0–8, modes A and B, including EARM-GNN and the separately pinned Exp 8). The
+splits, the runner and the configs themselves were correct.
+
+**Fix.**
+- A fourth pass `("xu_dev_cv", "xu_holdout")` is added.
+- `experiment_entries` raises `EmptySchedule` if any configured setting is in no pass.
+- `plan_units` raises if a plan has zero units, and `run_plan` raises if a unit has zero outer folds.
+
+No configuration, split, feature, model, hyperparameter or store changes. A dry run on a synthetic 65-participant
+corrected store schedules 5 development folds + 1 holdout fit per variant for every LX config (Exp 0: 4 variants,
+24 folds), and a synthetic mode A Exp 0 run completes all 8 units.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

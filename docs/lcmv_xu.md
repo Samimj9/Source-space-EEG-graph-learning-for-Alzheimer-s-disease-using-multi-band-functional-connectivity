@@ -364,3 +364,11 @@ Experiments refuse a store unless its `validation.json` passed for its current `
 `lx_build.py build` does nothing once the corrected stores exist. It also refuses to recompute checkpoints made by
 another code version unless `--allow-recompute` is passed.
 
+
+## 12. Scheduling fix (methodology log entry 54)
+
+Before commit `6b4b18d` plus one, the experiment scheduler only knew the within/pooled/cross setting passes, so the
+LX settings were never scheduled and every LX experiment ran zero units. `xu_dev_cv` / `xu_holdout` are now a
+scheduling pass of their own, and a config that would schedule nothing (or leave a setting out) fails with
+`EmptySchedule`. Every variant runs 5 participant-grouped folds in the 52 development participants (`xu_dev_cv`) and
+one fit on all 52, tested once on the 13 holdout participants (`xu_holdout`).

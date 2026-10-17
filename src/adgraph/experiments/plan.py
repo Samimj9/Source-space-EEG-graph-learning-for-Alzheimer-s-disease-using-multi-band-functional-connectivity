@@ -47,18 +47,29 @@ def variant_matches(v: dict, filters) -> bool:
     return False
 
 
-SETTING_PASSES = (("within_D1", "within_D2", "within_D3"), ("pooled",), ("cross_D1_to_D2", "cross_D2_to_D1"))
+SETTING_PASSES = (("within_D1", "within_D2", "within_D3"), ("pooled",), ("cross_D1_to_D2", "cross_D2_to_D1"),
+                  ("xu_dev_cv", "xu_holdout"))
+
+
+class EmptySchedule(RuntimeError):
+    """A configuration scheduled no unit, or left one of its settings unscheduled."""
 
 
 def experiment_entries(config: str | Path, config_root: str | Path = ".") -> list[dict]:
     """Plan entries for ONE experiment config: all its variants and settings, in passes
-    (within-dataset first, then pooled, then cross-dataset). Nothing else is included."""
+    (within-dataset first, then pooled, then cross-dataset, then the LCMV / Xu settings). Every setting of the
+    config is scheduled; one in no pass would be silently dropped, so it raises ``EmptySchedule``."""
     cfg = load_experiment(Path(config_root) / config)
     entries = []
     for p in SETTING_PASSES:
         settings = [x for x in p if x in cfg["settings"]]
         if settings:
             entries.append({"config": str(config), "settings": settings})
+    scheduled = {s for e in entries for s in e["settings"]}
+    missing = [s for s in cfg["settings"] if s not in scheduled]
+    if missing or not entries:
+        raise EmptySchedule(f"{config}: settings {missing or cfg['settings']} are in no scheduling pass "
+                            "(experiments.plan.SETTING_PASSES); nothing would run")
     return entries
 
 
@@ -87,6 +98,8 @@ def plan_units(entries: list[dict], config_root: str | Path = ".") -> list[tuple
                     continue                              # the variant runs only in its own settings
                 units.append((order, e["config"], v, s))
                 order += 1
+    if not units:
+        raise EmptySchedule(f"the plan {[e['config'] for e in entries]} schedules zero units (variants x settings)")
     return units
 
 
@@ -119,6 +132,8 @@ def run_plan(entries: list[dict], store: GraphStore, out_dir: str | Path, config
             before[(v["name"], s)] = st["state"]
             total += st["folds_total"] + st["perms_total"]
             done += (st["folds_completed"] + st["perms_completed"]) if st["state"] != "incompatible" else 0
+            if not st["folds_total"]:
+                raise EmptySchedule(f"{v['name']} / {s}: zero outer folds scheduled")
     desc = units[0][2]["experiment"] if len({u[2]["experiment"] for u in units}) == 1 else "experiments"
     with progress.reporter(total, desc, initial=done, unit="folds+perms", eta=False,
                            counts={"units done": 0, "resumed": 0, "failed": 0, "skipped": 0,
