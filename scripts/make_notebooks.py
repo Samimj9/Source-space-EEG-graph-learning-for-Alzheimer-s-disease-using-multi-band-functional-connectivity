@@ -858,6 +858,11 @@ D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<output
 `LX_Exp0` ... `LX_Exp8` (one at a time),
 then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
 
+Matched wMNE comparison (separate outputs `<outputs>/D3_WMNE_XU/`, own code pin; methodology log entry 55,
+`docs/wmne_xu.md`): [notebooks/wmne_xu](wmne_xu): `WX_00_build_dataset` (build, validate, match against the corrected
+LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions to `LX_Exp*`), optionally
+`historical/WXH_Exp0` ... `WXH_Exp7` (existing wMNE graphs under the frozen protocol), then `WX_99_compare`.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |
@@ -1158,6 +1163,199 @@ for png in sorted(glob.glob(rep + '/figures/*.png')):
     ])
 
 
+
+# ============================================================================ matched wMNE / Xu suite (entry 55)
+SETUP_WX = (SETUP_LX
+            .replace("# ===== D3 LCMV / Xu suite setup: nothing to edit.", "# ===== D3 wMNE / Xu suite setup: nothing to edit.")
+            .replace("UPDATE_LX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The LCMV / Xu suite has its own code pin, <outputs>/D3_LCMV_XU/CODE_COMMIT.txt (all LX notebooks run\n"
+                     "# that commit); the D1/D2 and D3 pins are only reported, never changed here.",
+                     "UPDATE_WX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The wMNE / Xu suite has its own code pin, <outputs>/D3_WMNE_XU/CODE_COMMIT.txt (all WX notebooks run\n"
+                     "# that commit); the LCMV suite pin D3_LCMV_XU/CODE_COMMIT.txt and all other pins are only reported.")
+            .replace("'--family', 'LX']\n     + (['--update-code'] if UPDATE_LX_CODE else []))",
+                     "'--family', 'WX']\n     + (['--update-code'] if UPDATE_WX_CODE else []))")
+            .replace("print('suite outputs:', LX)\n", "WX = OUT + '/D3_WMNE_XU'\nprint('suite outputs:', WX, '| LCMV reference (read only):', LX)\n"))
+assert "UPDATE_WX_CODE" in SETUP_WX and "'WX'" in SETUP_WX and "UPDATE_LX_CODE" not in SETUP_WX
+
+WX_HOWTO = HOWTO + """
+**Suite:** matched wMNE counterpart of the D3 LCMV / Xu suite (methodology log entry 55, `docs/wmne_xu.md`). All
+outputs are under `<outputs>/D3_WMNE_XU/`, with its own code pin `D3_WMNE_XU/CODE_COMMIT.txt`. The LCMV suite
+(`D3_LCMV_XU/`: stores, results, pins), `graphsD3_v4_*` and D1/D2 are only read, never written. Safe to run while
+LCMV experiments run in another Colab session (separate folders and pin; one GPU per session)."""
+
+
+def wx_build_notebook() -> dict:
+    return notebook([
+        md("""# WX · 00 · Build the matched D3 wMNE / Xu-protocol dataset
+The same recordings, segments, five-minute selection, 10 s / 1 s windows, rejection, Xu bands, PSD / DE / PLV /
+|ciPLV|, 68 Desikan-Killiany ROIs, mode A (tenfold) and mode B as the corrected LCMV stores; **only the inverse
+differs**: the historical wMNE settings (depth-weighted MNE, loose 0.2, lambda2 1/9, ad-hoc noise covariance,
+normal component) instead of LCMV. One data-independent 68 x 19 operator for the shared electrode geometry,
+verified against MNE's `apply_inverse_raw` on every participant.
+""" + WX_HOWTO + """
+**Steps:** 1. input check · 2. recording QC (no source model) · 3. smoke test, one participant (`_limit1` run) ·
+4. full build (only if the smoke test passed; resumable per participant) · 5. validation of both stores (exact
+boundary positions, 300 s cap, split, shapes, weights, counts) · 6. **match** against the corrected LCMV stores:
+identical participants, labels, selections, window ids and start / stop samples, tenfold flags, weights, split,
+ROI order and sensor features (the Exp 0 consistency control); experiments refuse stores that do not match ·
+7. QC report. CPU runtime (no GPU needed)."""),
+        code(SETUP_WX),
+        md("## 1. Input check (36 AD / 29 HC, 19 channels and verified electrode coordinates)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 2. Recording QC of every participant (no source model)"),
+        code('sh("python scripts/wx_build.py inspect")'),
+        md("## 3. Smoke test: one participant, full wMNE path (separate `_limit1` run)"),
+        code("""sh("python scripts/wx_build.py build --limit 1")
+sh("python scripts/wx_build.py validate --limit 1")
+SMOKE_PASSED = True                       # reached only if both commands above succeeded"""),
+        md("## 4. Full build (all 65 participants; resumable, completed participants are skipped)"),
+        code("""if not SMOKE_PASSED:
+    raise RuntimeError('smoke test did not pass; the full build is not started')
+sh("python scripts/wx_build.py build")"""),
+        md("## 5. Validation of both stores"),
+        code('sh("python scripts/wx_build.py validate")'),
+        md("## 6. Match against the corrected LCMV stores (read only)"),
+        code('sh("python scripts/wx_build.py match")'),
+        md("## 7. QC report"),
+        code("""import glob, json
+import pandas as pd
+run = sorted(p for p in glob.glob(WX + '/graphsWX_v*') if '_limit' not in p)[-1]
+qc = pd.read_csv(run + '/qc_report.csv')
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+display(qc[[c for c in ['key', 'label', 'selection_mode', 'selected_duration_s', 'n_windows_candidate',
+                        'n_windows_accepted', 'n_tenfold', 'wmne_verification_rel_error', 'status', 'reason'] if c in qc]])
+print(qc['status'].value_counts().to_dict(), '| windows (mode B):', int(qc['n_windows_kept'].sum()),
+      '| samples (mode A):', int(qc['n_tenfold'].sum()))
+for d in (run, run.replace('graphsWX_', 'graphsWX10_')):
+    m = json.load(open(d + '/match.json'))
+    print(d.split('/')[-1], 'matched to', m['reference'].split('/')[-1], '->', 'PASS' if m['passed'] else 'FAIL')"""),
+    ])
+
+
+def wx_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    lx_b = f"configs/experiments/lx/{name}.yaml"
+    cfg_b = f"configs/experiments/wx/{name.replace('lx_', 'wx_')}.yaml"
+    cfg_a = f"configs/experiments/wx/tenfold/{name.replace('lx_', 'wx10_')}.yaml"
+    variants, proto = protocol(f"wx/{name.replace('lx_', 'wx_')}")
+    return notebook([
+        md(f"""# WX · Experiment {n} · {title} (matched wMNE)
+
+The identical experiment as the LCMV notebook (`{lx_b}`; the wMNE configs inherit it unchanged), on the matched
+wMNE stores. {proto}
+""" + WX_HOWTO + f"""
+**Validation:** the frozen LCMV / Xu protocol, verified before any unit runs: the same 65 participants and labels,
+the 52 development / 13 holdout participants of the LCMV `xu_split.json`, identical five development folds; the
+store must have passed validation and the match against the LCMV store. The holdout is never used for selection.
+
+**Runs both modes:** A (`{cfg_a}`) first, then B (`{cfg_b}`). Resumable. Results:
+`<outputs>/D3_WMNE_XU/experiments_A_xu_tenfold/` and `.../experiments_B_all_windows/`."""
+           + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_WX),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results (saved outputs only) and the paired wMNE vs LCMV table"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {cfg}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{WX}/{root}/{Path(cfg).stem}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+sh("python scripts/wx_compare.py")
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {sorted(ERRORS)}; completed units are saved. Run all again.')"""),
+    ], gpu=gpu)
+
+
+WXH_EXPERIMENTS = [
+    (0, "wxh_exp0_sensor_psd", "Sensor-space PSD (LR, SVM)", False),
+    (1, "wxh_exp1_source_psd", "wMNE source PSD (LR, SVM)", False),
+    (2, "wxh_exp2_conn_minimal_fixedhp", "Connectivity-only GCN (4 bands x PLV / |ciPLV|)", True),
+    (3, "wxh_exp3_conn_psd_fixedhp", "Single-band GCN + matched-band PSD (4 bands x PLV / |ciPLV|)", True),
+    (4, "wxh_exp4_band_mean_fixedhp", "Band-averaged GCN", True),
+    (5, "wxh_exp5_multiband_fixedhp", "Multi-band GNN", True),
+    (6, "wxh_exp6_gcn_full", "Full multiband GCN (PSD + strength)", True),
+    (7, "wxh_exp7_earm_gnn", "EARM-GNN", True),
+]
+
+
+def wxh_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    cfg = f"configs/experiments/wx_hist/{name}.yaml"
+    variants, proto = protocol(f"wx_hist/{name}")
+    return notebook([
+        md(f"""# WXH · Experiment {n} · {title} (historical wMNE graphs, frozen protocol)
+
+The existing D3 definition (`configs/experiments/d3/{name.replace('wxh_', 'd3_')}.yaml`, unchanged) on the existing
+wMNE store `graphsD3_v4_*` (20 s windows, 50 % overlap, bands theta / alpha1 / alpha2 / beta), evaluated with the
+frozen LCMV / Xu protocol (same 52 / 13 participants and five development folds, one repeat) instead of `within_D3`.
+**Validation-matched only:** windows and bands differ from the LCMV suite, so this does not isolate the inverse;
+it separates the effect of the validation protocol from the earlier D3 results. {proto}
+""" + WX_HOWTO + f"""
+One mode (all windows of the historical store). Results: `<outputs>/D3_WMNE_XU/experiments_H_historical_graphs/`."""
+           + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_WX),
+        md("## 1. Status"),
+        code(f"""CONFIG = '{cfg}'
+sh(f"python scripts/experiment.py status --config {{CONFIG}}")"""),
+        md("## 2. Run (resumable)"),
+        code("""ERROR = None
+try:
+    sh(f"python scripts/experiment.py run --config {CONFIG}")
+except RuntimeError as exc:
+    ERROR = exc"""),
+        md("## 3. Results (saved outputs only)"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+sh(f"python scripts/experiment.py report --config {CONFIG}")
+reports = sorted(glob.glob(f'{WX}/experiments_H_historical_graphs/{Path(CONFIG).stem}/_reports/report_*'))
+if reports:
+    display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+if ERROR:
+    raise RuntimeError('some units failed; completed units are saved. Run all again.')"""),
+    ], gpu=gpu)
+
+
+def wx_compare_notebook() -> dict:
+    return notebook([
+        md("""# WX · 99 · wMNE versus LCMV under the frozen Xu protocol (saved outputs only)
+Pairs every completed LCMV result with the matched wMNE result of the same mode, experiment, variant and setting
+(same participants, folds, definitions; only the inverse differs) and lists the historical-graph results
+separately. Descriptive: differences are reported, not ranked; the holdout has 13 participants.
+""" + WX_HOWTO),
+        code(SETUP_WX),
+        code("""import glob
+import pandas as pd
+pd.set_option('display.max_rows', 400, 'display.width', 250)
+sh("python scripts/wx_compare.py")
+rep = sorted(glob.glob(WX + '/reports/compare_*'))[-1]
+for f in ('paired.csv', 'historical.csv'):
+    try:
+        display(pd.read_csv(f'{rep}/{f}').round(3))
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        print(f, 'not available yet')"""),
+    ])
+
+
 def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
     nbdir = Path(nbdir)
     outputs = {nbdir / "01_build_graphs.ipynb": build_graphs_notebook(),
@@ -1186,6 +1384,14 @@ def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
         outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{stem}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)
     outputs[nbdir / "lcmv_xu" / "LX_98_run_all_optional.ipynb"] = lx_master_notebook()
     outputs[nbdir / "lcmv_xu" / "LX_99_report.ipynb"] = lx_report_notebook()
+    outputs[nbdir / "wmne_xu" / "WX_00_build_dataset.ipynb"] = wx_build_notebook()
+    for n, name, title, gpu in LX_EXPERIMENTS:
+        stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+        outputs[nbdir / "wmne_xu" / f"WX_Exp{n}_{stem}.ipynb"] = wx_experiment_notebook(n, name, title, gpu)
+    for n, name, title, gpu in WXH_EXPERIMENTS:
+        outputs[nbdir / "wmne_xu" / "historical" / f"WXH_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = \
+            wxh_experiment_notebook(n, name, title, gpu)
+    outputs[nbdir / "wmne_xu" / "WX_99_compare.ipynb"] = wx_compare_notebook()
     for path, nb in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")

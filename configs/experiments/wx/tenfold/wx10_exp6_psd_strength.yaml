@@ -1,0 +1,5 @@
+# Mode A of wx_exp6_psd_strength: the identical experiment as lx10_exp6_psd_strength on the matched wMNE tenfold store
+# graphsWX10_* (first 10 accepted windows per participant; methodology log entry 55).
+extends: ../../lx/tenfold/lx10_exp6_psd_strength.yaml
+experiment: wx10_exp6_psd_strength
+graph_family: WX10

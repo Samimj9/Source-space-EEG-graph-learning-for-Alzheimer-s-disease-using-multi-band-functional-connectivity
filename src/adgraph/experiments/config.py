@@ -36,7 +36,14 @@ FAMILIES = {
     "D3": ("graphsD3", "experiments_D3", ("within_D3",)),
     "LX": ("D3_LCMV_XU/graphsLX", "D3_LCMV_XU/experiments_B_all_windows", ("xu_dev_cv", "xu_holdout")),
     "LX10": ("D3_LCMV_XU/graphsLX10", "D3_LCMV_XU/experiments_A_xu_tenfold", ("xu_dev_cv", "xu_holdout")),
+    # matched wMNE / Xu suite (entry 55): same protocol, wMNE instead of LCMV; and the historical wMNE graphs
+    # (graphsD3_v4, 20 s windows, 4 bands) under the same frozen split (D3H, a separate historical comparison)
+    "WX": ("D3_WMNE_XU/graphsWX", "D3_WMNE_XU/experiments_B_all_windows", ("xu_dev_cv", "xu_holdout")),
+    "WX10": ("D3_WMNE_XU/graphsWX10", "D3_WMNE_XU/experiments_A_xu_tenfold", ("xu_dev_cv", "xu_holdout")),
+    "D3H": ("graphsD3", "D3_WMNE_XU/experiments_H_historical_graphs", ("xu_dev_cv", "xu_holdout")),
 }
+# families evaluated with the frozen LCMV / Xu participant split (reference: the validated LX / LX10 stores)
+XU_FAMILIES = ("LX", "LX10", "WX", "WX10", "D3H")
 GRAPH_FAMILIES = tuple(FAMILIES)
 
 

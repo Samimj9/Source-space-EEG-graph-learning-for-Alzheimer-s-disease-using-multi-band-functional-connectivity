@@ -1,0 +1,5 @@
+# Mode A of wx_exp3_single_band: the identical experiment as lx10_exp3_single_band on the matched wMNE tenfold store
+# graphsWX10_* (first 10 accepted windows per participant; methodology log entry 55).
+extends: ../../lx/tenfold/lx10_exp3_single_band.yaml
+experiment: wx10_exp3_single_band
+graph_family: WX10

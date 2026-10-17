@@ -41,8 +41,10 @@ def test_committed_notebooks_match_the_generator(tmp_path):
 
 
 def test_one_notebook_per_experiment_config():
+    # the LCMV / Xu and wMNE / Xu suites have their own notebooks (two modes per notebook; test_lx_suite_notebooks)
     configs = {str(p.relative_to(REPO)) for p in (REPO / "configs" / "experiments").rglob("*.yaml")
-               if p.stem not in {"base", "classical_base", "gnn_base", "gnn_fixed_base"}}
+               if p.stem not in {"base", "classical_base", "gnn_base", "gnn_fixed_base"}
+               and p.relative_to(REPO / "configs" / "experiments").parts[0] not in ("lx", "wx", "wx_hist")}
     # nested-CV GNN configs are historical records without notebooks (methodology log entry 42)
     configs = {c for c in configs if not (lambda v: v["input"] == "graph" and not v.get("protocol"))(
         load_experiment(REPO / c))}
@@ -145,3 +147,14 @@ def test_single_experiment_cli_estimate_run_status_report(workspace, config, ext
     _cli(tmp_path, "run", cfg)                                       # rerun: completed results reused
     rerun = pd.read_csv(processed / "experiments" / exp / "_run_status.csv")
     assert set(rerun["state"]) == {"completed"} and len(rerun) == len(status)
+
+
+def test_lx_suite_notebooks():
+    """Every LCMV / wMNE Xu-suite config is run by exactly one suite notebook (modes A and B in one notebook)."""
+    exp = REPO / "configs" / "experiments"
+    for suite, nbs in (("lx", (NB / "lcmv_xu").glob("LX_Exp*.ipynb")), ("wx", (NB / "wmne_xu").glob("WX_Exp*.ipynb")),
+                       ("wx_hist", (NB / "wmne_xu" / "historical").glob("WXH_Exp*.ipynb"))):
+        want = {str(p.relative_to(REPO)) for p in (exp / suite).rglob("*.yaml")}
+        per_nb = [{c for src in _code(nb) for c in want if f"'{c}'" in src} for nb in nbs]
+        counts = {c: sum(c in s for s in per_nb) for c in want}
+        assert counts and all(n == 1 for n in counts.values()), (suite, counts)

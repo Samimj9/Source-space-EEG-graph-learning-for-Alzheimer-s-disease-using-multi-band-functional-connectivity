@@ -22,6 +22,11 @@ D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<output
 `LX_Exp0` ... `LX_Exp8` (one at a time),
 then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
 
+Matched wMNE comparison (separate outputs `<outputs>/D3_WMNE_XU/`, own code pin; methodology log entry 55,
+`docs/wmne_xu.md`): [notebooks/wmne_xu](wmne_xu): `WX_00_build_dataset` (build, validate, match against the corrected
+LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions to `LX_Exp*`), optionally
+`historical/WXH_Exp0` ... `WXH_Exp7` (existing wMNE graphs under the frozen protocol), then `WX_99_compare`.
+
 ## Experiment notebooks
 
 | Notebook | Config | Runtime type |

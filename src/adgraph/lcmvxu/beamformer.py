@@ -37,8 +37,10 @@ def sensor_info(cfg: dict, geometry: dict):
     return canonical_info(cfg, geometry)
 
 
-def forward(info, cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, geometry_hash: str):
-    """Fixed-orientation fsaverage forward model for this geometry (cached as a .fif file)."""
+def forward(info, cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, geometry_hash: str,
+            fixed: bool = True):
+    """fsaverage forward model for this geometry (cached as a .fif file): fixed cortical-normal orientation
+    (LCMV), or the free-orientation solution itself (``fixed=False``; the wMNE inverse, ``lcmvxu.wmne``)."""
     import mne
 
     from ..source.inverse import fetch_fsaverage
@@ -57,7 +59,8 @@ def forward(info, cfg: dict, subjects_dir: str | Path, cache_dir: str | Path, ge
         tmp = path.with_name(path.name.replace("-fwd.fif", ".tmp-fwd.fif"))
         mne.write_forward_solution(tmp, fwd, overwrite=True, verbose="error")
         tmp.replace(path)
-    fwd = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True, use_cps=True, verbose="error")
+    if fixed:
+        fwd = mne.convert_forward_solution(fwd, surf_ori=True, force_fixed=True, use_cps=True, verbose="error")
     if list(fwd["info"]["ch_names"]) != list(info["ch_names"]):
         raise RuntimeError("forward channel order differs from the data")
     return fwd

@@ -3170,6 +3170,44 @@ No configuration, split, feature, model, hyperparameter or store changes. A dry 
 corrected store schedules 5 development folds + 1 holdout fit per variant for every LX config (Exp 0: 4 variants,
 24 folds), and a synthetic mode A Exp 0 run completes all 8 units.
 
+## 55. Matched wMNE / Xu suite: wMNE versus LCMV under the frozen protocol
+
+**Request (2026-10-17).** Determine whether the inverse solution affects AD/HC classification, comparing wMNE and LCMV
+under the same participant-independent validation and the same models. Exp 2 was near chance on LCMV (entry 54
+diagnostic), and the earlier D3 wMNE results came from a different protocol. Nothing of the LCMV suite may change.
+
+**Decision.** Two separate comparisons (`docs/wmne_xu.md`):
+- **A. Historical, validation-matched.** The existing wMNE store `graphsD3_v4_da723b33554c`, with the existing D3
+  definitions Exp 0-7, evaluated with the frozen 52 / 13 split and five development folds. Family `D3H`, configs
+  `configs/experiments/wx_hist/`. Its windows (20 s / 50 %) and bands (4) differ from LCMV, so it does not isolate the
+  inverse.
+- **B. Fully matched (primary).** New stores `D3_WMNE_XU/graphsWX*`, built by the same `lcmvxu` code from a
+  configuration identical to the LCMV one except `source`. The inverse uses the historical wMNE settings: depth 0.8,
+  loose 0.2, lambda2 1/9, ad-hoc noise covariance, normal component. Families `WX` / `WX10`. The configs extend the LX
+  configs unchanged.
+
+**Safeguards.**
+- `lcmvxu.protocol` verifies, before any experiment runs, the same participants and labels, the saved partition and
+  identical fold membership against the LCMV store.
+- `lcmvxu.match` verifies matched stores window by window against the corrected LCMV stores, including the sensor
+  features (the Exp 0 consistency control).
+- The suite has its own pin `D3_WMNE_XU/CODE_COMMIT.txt` and its own Drive folder.
+- The fixed 60-epoch GNN schedule is kept. Any early-stopping protocol must be added to both suites together.
+
+**Differences that cannot be eliminated:**
+- the inverse and its orientation model;
+- the LCMV covariance of D3-23 / D3-58 includes the window removed by `corr1`;
+- absolute source PSD units.
+
+Code changes outside new files are limited to:
+- `lcmvxu.build`: the inverse branch and the store names (the LCMV path and config hash are unchanged);
+- `lcmvxu.beamformer.forward`: an optional free-orientation return;
+- `experiments.config.FAMILIES`;
+- `scripts/experiment.py`: the guards;
+- the Colab pin family.
+
+Running LCMV notebooks use their own pin and are unaffected.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

@@ -5,7 +5,11 @@ import pytest
 from adgraph.experiments.config import expand_variants, hparam_grid, load_experiment
 
 EXP_DIR = Path("configs/experiments")
-EXPERIMENTS = sorted(p for p in EXP_DIR.glob("**/*.yaml") if "base" not in p.name)
+# the LCMV / Xu and wMNE / Xu suites (one repeat, Xu settings) are checked by their own tests
+# (test_lx_schedule.py, test_wmne_xu.py)
+OWN_SUITES = ("lx", "wx", "wx_hist")
+EXPERIMENTS = sorted(p for p in EXP_DIR.glob("**/*.yaml")
+                     if "base" not in p.name and p.relative_to(EXP_DIR).parts[0] not in OWN_SUITES)
 EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minimal": 24, "exp3_conn_psd": 24,
                    "exp3b_conn_psd_allbands": 24, "exp4_band_mean": 2, "exp5_multiband": 16, "exp6_multiband_psd_strength": 16,
                    "baseline_age": 1, "probe_dataset": 1, "baseline_conn_classical": 4,
@@ -17,7 +21,8 @@ EXPECTED_COUNTS = {"exp0_sensor_psd": 2, "exp1_source_psd": 2, "exp2_conn_minima
                    "exp7_earm_gnn": 6,
                    # Dataset 3 (ds004504, methodology log entry 44)
                    "d3_exp0_sensor_psd": 2, "d3_exp1_source_psd": 2, "d3_baseline_age": 1, "d3_exp6_gcn_full": 2,
-                   "d3_exp7_earm_gnn": 6}
+                   "d3_exp7_earm_gnn": 6, "d3_exp2_conn_minimal_fixedhp": 8, "d3_exp3_conn_psd_fixedhp": 8,
+                   "d3_exp4_band_mean_fixedhp": 2, "d3_exp5_multiband_fixedhp": 4}
 
 
 @pytest.mark.parametrize("path", EXPERIMENTS, ids=lambda p: p.stem)

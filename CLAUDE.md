@@ -111,6 +111,16 @@ e.g. `D1-3`, `D2-3`.
 - Per-participant LCMV, 68 DK ROIs, Xu's five bands, 10 s / 1 s windows, frozen 80/20 participant split
   (`xu_dev_cv`, `xu_holdout`). Never mix with D1/D2 or the wMNE D3 runs.
 
+### D3 matched wMNE / Xu comparison (`docs/wmne_xu.md`, methodology log entry 55)
+
+- Same `lcmvxu` pipeline with `configs/wmne_xu/pipeline.yaml` (identical to LCMV-Xu except `source`: historical wMNE);
+  `scripts/wx_build.py` (build, validate, `match` against the corrected LCMV stores); notebooks `notebooks/wmne_xu/`.
+- Outputs only under `<processed>/D3_WMNE_XU/` (stores `graphsWX_v1_*` / `graphsWX10_v1_*`, experiments
+  `experiments_{A_xu_tenfold,B_all_windows,H_historical_graphs}/`); own pin `D3_WMNE_XU/CODE_COMMIT.txt` (`--family WX`).
+- Families `WX`, `WX10` (configs `configs/experiments/wx/`, inheriting the LX definitions) and `D3H` (historical
+  `graphsD3_v4` graphs, `configs/experiments/wx_hist/`); every run verifies the frozen LCMV split and folds.
+- Never write into `D3_LCMV_XU/` from this suite, and never add early stopping to only one of the two suites.
+
 ## Repository layout
 
 ```

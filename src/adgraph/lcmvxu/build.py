@@ -38,7 +38,7 @@ from ..io.eeg import load_raw
 from ..io.fingerprint import InputHashes
 from ..preprocessing.clean import FlatChannelError
 from ..provenance import git_commit, git_dirty, versions
-from . import recording
+from . import recording, wmne
 from .beamformer import data_covariance, forward, roi_operator, sensor_info, verify
 from .features import window_features
 
@@ -58,9 +58,12 @@ def root_dir(processed: str | Path, cfg: dict) -> Path:
 
 
 def run_dirs(processed: str | Path, cfg: dict, limit: int | None = None) -> tuple[Path, Path]:
+    """(mode B, mode A) store directories; names from ``store_names`` (LCMV: graphsLX / graphsLX10, the default;
+    wMNE: graphsWX / graphsWX10)."""
     sfx = f"_v{cfg['version']}_{config_hash(cfg)}" + (f"_limit{limit}" if limit else "")
     root = root_dir(processed, cfg)
-    return root / f"graphsLX{sfx}", root / f"graphsLX10{sfx}"
+    b, a = cfg.get("store_names", ["graphsLX", "graphsLX10"])
+    return root / f"{b}{sfx}", root / f"{a}{sfx}"
 
 
 # ---------------------------------------------------------------------------------------------- one participant
@@ -94,6 +97,14 @@ def reject(segs, pieces, cfg: dict) -> tuple[list, np.ndarray, np.ndarray, float
     thr = float(med + rc["mad_k"] * np.median(np.abs(ptp - med)))
     keep = (ptp > thr).mean(axis=1) <= rc["max_bad_channel_fraction"]
     return cands, keep, ptp, thr
+
+
+def method(cfg: dict) -> str:
+    """Inverse solution of this suite: ``lcmv`` (D3_LCMV_XU) or ``wmne`` (D3_WMNE_XU, entry 55)."""
+    m = cfg["source"].get("method", "lcmv")
+    if m not in ("lcmv", "wmne"):
+        raise ValueError(f"source.method must be lcmv or wmne, got {m!r}")
+    return m
 
 
 def process_subject(rec, cfg: dict, ctx: dict) -> tuple[dict, pd.DataFrame, dict, pd.DataFrame, dict]:
@@ -134,22 +145,31 @@ def process_subject(rec, cfg: dict, ctx: dict) -> tuple[dict, pd.DataFrame, dict
                else f"{n_acc} accepted windows (< {cfg['windowing']['min_windows']})")
         row.update({"status": "below_min_windows", "reason": why, "n_windows_kept": 0, "n_tenfold": 0})
         return empty, pd.DataFrame(), row, qc_w, {}
-    # LCMV from this participant's own accepted, broadband samples (labels and other participants never used)
-    mask = {}
-    for (pi, s), ok in zip(cands, keep):
-        if ok:
-            m = mask.setdefault(pieces[pi].segment, np.zeros(segs[pieces[pi].segment].n, bool))
-            m[s:s + win] = True
-    samples = np.concatenate([segs[j].data[:, m] for j, m in sorted(mask.items())], axis=1)
-    op = roi_operator(ctx["info"], ctx["fwd"], data_covariance(ctx["info"], samples), ctx["labels"], cfg)
-    W = op["W"]
     first = next(i for i, ok in enumerate(keep) if ok)
     pi0, s0 = cands[first]
-    err = verify(W, ctx["info"], op["filters"], ctx["labels"], ctx["fwd"]["src"],
-                 segs[pieces[pi0].segment].data[:, s0:s0 + win], cfg)
-    if err > 1e-6:
-        raise RuntimeError(f"{rec.key}: LCMV ROI operator differs from MNE apply_lcmv_raw (rel. err {err:.2e})")
-    del samples
+    if method(cfg) == "wmne":
+        # wMNE (D3_WMNE_XU, entry 55): the data-independent operator of this geometry, verified on this participant
+        W = ctx["wmne"]["W"]
+        err = wmne.verify(W, ctx["info"], ctx["wmne"]["inv"], ctx["labels"],
+                          segs[pieces[pi0].segment].data[:, s0:s0 + win], cfg)
+        if err > 1e-6:
+            raise RuntimeError(f"{rec.key}: wMNE ROI operator differs from MNE apply_inverse_raw (rel. err {err:.2e})")
+        op = {"rank": None}
+    else:
+        # LCMV from this participant's own accepted, broadband samples (labels and other participants never used)
+        mask = {}
+        for (pi, s), ok in zip(cands, keep):
+            if ok:
+                m = mask.setdefault(pieces[pi].segment, np.zeros(segs[pieces[pi].segment].n, bool))
+                m[s:s + win] = True
+        samples = np.concatenate([segs[j].data[:, m] for j, m in sorted(mask.items())], axis=1)
+        op = roi_operator(ctx["info"], ctx["fwd"], data_covariance(ctx["info"], samples), ctx["labels"], cfg)
+        W = op["W"]
+        err = verify(W, ctx["info"], op["filters"], ctx["labels"], ctx["fwd"]["src"],
+                     segs[pieces[pi0].segment].data[:, s0:s0 + win], cfg)
+        if err > 1e-6:
+            raise RuntimeError(f"{rec.key}: LCMV ROI operator differs from MNE apply_lcmv_raw (rel. err {err:.2e})")
+        del samples
     feats, rows, ts = [], [], {}
     n_ten = int(cfg["windowing"]["tenfold_samples"])
     acc_rank = 0
@@ -181,8 +201,9 @@ def process_subject(rec, cfg: dict, ctx: dict) -> tuple[dict, pd.DataFrame, dict
     windows = pd.DataFrame(rows)
     windows["sample_weight"] = 1.0 / len(windows)
     row.update({"status": "ok", "reason": "", "n_windows_kept": int(len(windows)),
-                "n_tenfold": int(windows["xu_tenfold"].sum()), "lcmv_rank": op["rank"],
-                "lcmv_verification_rel_error": err})
+                "n_tenfold": int(windows["xu_tenfold"].sum()),
+                **({"lcmv_rank": op["rank"], "lcmv_verification_rel_error": err} if method(cfg) == "lcmv"
+                   else {"wmne_verification_rel_error": err})})
     return arrays, windows, row, qc_w, {"W": W, "ts": ts}
 
 
@@ -281,7 +302,11 @@ def run(paths: dict, cfg: dict, processed: str | Path, subjects_dir: str | Path,
     for h, g in uniq.items():
         info = sensor_info(cfg, g)
         ctxs[h] = {"geometry": g, "info": info, "labels": labels, "roi_names": [lab.name for lab in labels],
-                   "channels": channels, "fwd": forward(info, cfg, subjects_dir, root / "cache", h)}
+                   "channels": channels}
+        if method(cfg) == "wmne":                  # one data-independent operator per geometry (entry 55)
+            ctxs[h]["wmne"] = wmne.roi_operator(info, cfg, subjects_dir, root / "cache", h, labels)
+        else:
+            ctxs[h]["fwd"] = forward(info, cfg, subjects_dir, root / "cache", h)
     table = StatusTable(run_dir / "status.csv")
     table.ensure(reg["key"].tolist())
     failed = {}
@@ -373,18 +398,20 @@ def assemble(run_dir: Path, run10: Path, reg: pd.DataFrame, cfg: dict, idents: d
         manifest = {
             "graph_run_id": stable_hash(a_ident), "assembled_at": datetime.now(timezone.utc).isoformat(),
             "config_hash": config_hash(cfg), "config": cfg, "git_commit": git_commit(), "git_dirty": git_dirty(),
-            "code": ident["code"], "versions": versions(), "suite": "D3_LCMV_XU",
+            "code": ident["code"], "versions": versions(), "suite": cfg.get("output_subdir", "D3_LCMV_XU"),
             "mode": "B_all_windows" if subset is None else "A_xu_tenfold",
             "inputs": reg[["key", "path", "size_bytes", "sha256"]].to_dict("records"),
             "registry": {"subset_limit": limit, "excluded_by_design": excluded},
             "subject_units": units,
-            "source_operator": {"method": "lcmv", "per_participant": True, "roi_names": ctx["roi_names"],
+            "source_operator": {"method": method(cfg), "per_participant": method(cfg) == "lcmv",
+                                "roi_names": ctx["roi_names"],
                                 "channels": ctx["channels"], "shape": [len(ctx["roi_names"]), len(ctx["channels"])],
                                 "geometry": {k: v for k, v in chanlocs.provenance(ctx["geometry"]).items()},
-                                "lcmv": cfg["source"]["lcmv"], "orientation": cfg["source"]["orientation"],
+                                method(cfg): cfg["source"][method(cfg)], "orientation": cfg["source"]["orientation"],
                                 "roi_mode": cfg["source"]["roi_mode"],
-                                "verification_rel_error_max": float(subjects["lcmv_verification_rel_error"].max())
-                                if "lcmv_verification_rel_error" in subjects else None},
+                                "verification_rel_error_max": float(subjects[f"{method(cfg)}_verification_rel_error"]
+                                                                    .max())
+                                if f"{method(cfg)}_verification_rel_error" in subjects else None},
             "segmentation": {"window_samples": int(cfg["windowing"]["window_s"] * cfg["preprocessing"]["sfreq"]),
                              "step_samples": int(cfg["windowing"]["step_s"] * cfg["preprocessing"]["sfreq"]),
                              "margin_samples": recording.margin_samples(cfg)},

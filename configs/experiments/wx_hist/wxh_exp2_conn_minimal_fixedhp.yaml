@@ -1,0 +1,11 @@
+# HISTORICAL wMNE comparison (methodology log entry 55): the existing D3 definition d3_exp2_conn_minimal_fixedhp.yaml unchanged
+# (its features, bands theta/alpha1/alpha2/beta, model and hyperparameters), on the existing wMNE store
+# graphsD3_v4_* (20 s windows, 50 % overlap), evaluated with the frozen LCMV / Xu protocol instead of
+# within_D3: the same 52 / 13 participants, the same five development folds and the LX evaluation values
+# (one repeat, inner_k 5, seed 0). Validation-matched only: windows and bands differ from the LCMV suite, so
+# this does NOT isolate the inverse solution (the matched configs in configs/experiments/wx/ do).
+extends: ../d3/d3_exp2_conn_minimal_fixedhp.yaml
+experiment: wxh_exp2_conn_minimal_fixedhp
+graph_family: D3H
+settings: [xu_dev_cv, xu_holdout]
+evaluation: {n_repeats: 1, inner_k: 5, seed: 0}

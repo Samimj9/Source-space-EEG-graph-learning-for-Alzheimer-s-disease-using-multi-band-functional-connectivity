@@ -1,0 +1,6 @@
+# Matched wMNE counterpart of lx_exp2_conn_minimal.yaml (methodology log entry 55): the IDENTICAL experiment definition
+# (inherited unchanged: features, model, hyperparameters, epochs, seeds, protocol), read from the matched
+# wMNE store graphsWX_* (D3_WMNE_XU). Only the graph store, and therefore the inverse solution, differs.
+extends: ../lx/lx_exp2_conn_minimal.yaml
+experiment: wx_exp2_conn_minimal
+graph_family: WX

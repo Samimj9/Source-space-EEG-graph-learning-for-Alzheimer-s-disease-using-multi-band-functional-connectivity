@@ -58,6 +58,20 @@ from adgraph.experiments.config import FAMILIES
 prefix, results_root, _ = FAMILIES[cfg.get("graph_family")]
 graphs = Path(args.graphs) if args.graphs else latest_complete_graph_run(paths["processed_dir"], prefix=prefix)
 out = Path(args.out or f"{paths['processed_dir']}/{results_root}")
+if cfg.get("graph_family") in ("WX", "WX10", "D3H"):   # wMNE comparison (entry 55): the LCMV protocol, verified
+    from adgraph.lcmvxu.protocol import reference_store, verify as verify_protocol
+
+    tenfold = cfg["graph_family"] == "WX10"
+    if cfg["graph_family"] in ("WX", "WX10"):
+        from adgraph.lcmvxu.match import require_matched
+        from adgraph.lcmvxu.validate import require_validated
+
+        require_validated(graphs)
+        require_matched(graphs, reference_store(paths["processed_dir"], tenfold))
+    proto = verify_protocol(graphs, paths["processed_dir"], cfg["evaluation"], tenfold)
+    print(f"frozen LCMV / Xu protocol verified against {Path(proto['reference']).name}: {proto['n_participants']} "
+          f"participants, {proto['n_development']} development / {proto['n_holdout']} holdout, identical "
+          f"{len(proto['dev_folds'])} development folds")
 if cfg.get("graph_family") in ("LX", "LX10"):    # the frozen participant split must equal the one saved at build
     from adgraph.evaluation.splits import xu_partition
     from adgraph.lcmvxu.validate import require_validated

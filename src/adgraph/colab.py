@@ -201,6 +201,8 @@ def has_completed_work(output_root: str | Path, family: str = "D1D2") -> bool:
             root.glob("experiments_D3/**/*.done.json"))
     if family == "LX":                            # D3 LCMV / Xu suite (entry 50): its own folder and pin
         return any((root / "D3_LCMV_XU").glob("**/*.done.json"))
+    if family == "WX":                            # matched wMNE / Xu suite (entry 55): its own folder and pin
+        return any((root / "D3_WMNE_XU").glob("**/*.done.json"))
     if any(root.glob("graphs_v*/subjects/*/subject.done.json")):
         return True
     return any(root.glob("experiments/*/*/*/units/*.done.json")) or any(

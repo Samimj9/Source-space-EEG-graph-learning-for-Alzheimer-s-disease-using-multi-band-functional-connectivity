@@ -1,0 +1,5 @@
+# Mode A of wx_exp8_xu_dual_gcn: the identical experiment as lx10_exp8_xu_dual_gcn on the matched wMNE tenfold store
+# graphsWX10_* (first 10 accepted windows per participant; methodology log entry 55).
+extends: ../../lx/tenfold/lx10_exp8_xu_dual_gcn.yaml
+experiment: wx10_exp8_xu_dual_gcn
+graph_family: WX10
