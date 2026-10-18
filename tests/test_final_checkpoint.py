@@ -203,7 +203,11 @@ def test_command_line_status_run_and_report(release_root, tmp_path):
         "--allow-ephemeral-storage")
     assert "completed" in cli("status", "--exp", "exp1", "--inverse", "wmne", "--mode", "A")
     rep = cli("report", "--exp", "exp1", "--inverse", "wmne", "--mode", "A")
-    assert "2 completed results" in rep
+    assert "1 completed results" in rep                                      # development CV only
+    assert not list(release_root.glob("FINAL_v1/results/**/xu_holdout/final.done.json"))
+    p = subprocess.run([sys.executable, str(REPO / "scripts" / "final.py"), "run", "--exp", "exp1", "--settings",
+                        "xu_holdout", "--paths", str(paths)], cwd=REPO, env=env, capture_output=True, text=True)
+    assert p.returncode != 0                                                 # the holdout: final.py holdout only
     p = subprocess.run([sys.executable, str(REPO / "scripts" / "final.py"), "run", "--exp", "exp5", "--graph",
                         "selected", "--paths", str(paths)], cwd=REPO, env=env, capture_output=True, text=True)
     assert p.returncode != 0 and "no graph-construction decision" in p.stdout + p.stderr
