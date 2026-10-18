@@ -15,6 +15,11 @@ the same recordings and configuration except the inverse solution. ``match`` req
 Source-space arrays are expected to differ (that is the comparison); their summary differences are reported only.
 The result is written to ``match.json`` in the target store; experiments of the WX / WX10 families refuse a store
 without a passed ``match.json`` for its current graph_run_id and the current reference.
+
+``match_atlas`` is the same check between a coarser-atlas store (e.g. r18) and the 68-ROI store of the SAME inverse
+and mode (written to ``atlas_match.json``): identical configuration except ``store_names`` and ``source.atlas``,
+identical participants, labels, selection, windows, split, bands, channels, sampling and sensor features; ROI names
+are those of the atlas. Its source arrays differ by construction (other regions); their summaries are reported.
 """
 
 from __future__ import annotations
@@ -36,17 +41,38 @@ SENSOR = ("sensor_psd_abs", "sensor_psd_log", "sensor_psd_rel", "sensor_psd_de")
 SOURCE = ("psd_log", "psd_rel", "psd_de", "plv", "ciplv")
 
 
-def match(target: str | Path, reference: str | Path, sensor_rtol: float = 1e-5) -> dict:
+def _config_diff(a: dict, b: dict, prefix: str = "") -> list[str]:
+    """Dotted keys whose values differ (recursing into dicts)."""
+    out = []
+    for k in sorted(set(a) | set(b)):
+        x, y = a.get(k), b.get(k)
+        if isinstance(x, dict) and isinstance(y, dict):
+            out += _config_diff(x, y, f"{prefix}{k}.")
+        elif x != y:
+            out.append(f"{prefix}{k}")
+    return out
+
+
+def match(target: str | Path, reference: str | Path, sensor_rtol: float = 1e-5, atlas: str | None = None) -> dict:
+    """wMNE store vs LCMV store (``atlas`` None), or a coarser-atlas store vs the 68-ROI store of the same inverse
+    (``atlas`` = the target's atlas; ``match_atlas``)."""
     target, reference = Path(target), Path(reference)
     checks = {}
     mt, mr = (json.loads((d / "manifest.json").read_text()) for d in (target, reference))
-    diff = sorted(k for k in set(mt["config"]) | set(mr["config"]) if mt["config"].get(k) != mr["config"].get(k))
-    checks["configuration identical except output_subdir / store_names / source"] = (
-        set(diff) <= ALLOWED_CONFIG_DIFF, diff)
+    if atlas is None:
+        diff = sorted(k for k in set(mt["config"]) | set(mr["config"]) if mt["config"].get(k) != mr["config"].get(k))
+        checks["configuration identical except output_subdir / store_names / source"] = (
+            set(diff) <= ALLOWED_CONFIG_DIFF, diff)
+    else:
+        diff = _config_diff(mt["config"], mr["config"])
+        checks["configuration identical except store_names / source.atlas"] = (
+            set(diff) <= {"store_names", "source.atlas"} and mt["config"]["source"].get("atlas") == atlas, diff)
     checks["same mode"] = (mt.get("mode") == mr.get("mode"), [mt.get("mode"), mr.get("mode")])
-    checks["inverse methods wMNE (target) / LCMV (reference)"] = (
-        (mt["source_operator"]["method"], mr["source_operator"]["method"]) == ("wmne", "lcmv"),
-        [mt["source_operator"]["method"], mr["source_operator"]["method"]])
+    methods = (mt["source_operator"]["method"], mr["source_operator"]["method"])
+    if atlas is None:
+        checks["inverse methods wMNE (target) / LCMV (reference)"] = (methods == ("wmne", "lcmv"), list(methods))
+    else:
+        checks["same inverse method"] = (methods[0] == methods[1], list(methods))
     st, sr = (pd.read_csv(d / "subjects.csv") for d in (target, reference))
     cols = [c for c in SUBJECT_COLS if c in sr]
     missing = [c for c in SUBJECT_COLS if c not in st or c not in sr]
@@ -72,7 +98,12 @@ def match(target: str | Path, reference: str | Path, sensor_rtol: float = 1e-5) 
     report, mbad, sbad = {}, [], []
     with np.load(target / "graphs.npz") as zt, np.load(reference / "graphs.npz") as zr:
         for k in META_ARRAYS:
-            if not np.array_equal(zt[k], zr[k]):
+            if k == "roi_names" and atlas is not None:
+                from ..source.atlas import region_names
+
+                if [str(x) for x in zt[k]] != region_names(atlas):
+                    mbad.append(f"roi_names are not the {atlas} regions")
+            elif not np.array_equal(zt[k], zr[k]):
                 mbad.append(k)
         if same_len and not wbad:
             for k in SENSOR:
@@ -83,6 +114,12 @@ def match(target: str | Path, reference: str | Path, sensor_rtol: float = 1e-5) 
                     sbad.append(f"{k}: max rel diff {rel:.2e}")
             for k in SOURCE:
                 x, y = zt[k], zr[k]
+                if x.shape != y.shape:                         # another atlas: summaries only
+                    report[k] = {"shape": list(x.shape), "reference_shape": list(y.shape),
+                                 "mean_target": float(x.mean(dtype=np.float64)),
+                                 "mean_reference": float(y.mean(dtype=np.float64))}
+                    del x, y
+                    continue
                 step = 512                                     # chunked: no full-size temporary
                 dsum = sum(float(np.abs(x[i:i + step] - y[i:i + step]).sum(dtype=np.float64))
                            for i in range(0, len(x), step))
@@ -90,13 +127,19 @@ def match(target: str | Path, reference: str | Path, sensor_rtol: float = 1e-5) 
                              "mean_reference": float(y.mean(dtype=np.float64)),
                              "mean_abs_diff": dsum / max(x.size, 1)}
                 del x, y
-    checks["bands, band edges, ROI order and channels identical"] = (not mbad, mbad)
+    checks["bands, band edges, ROI order and channels identical" if atlas is None else
+           f"bands, band edges and channels identical; ROI names of {atlas}"] = (not mbad, mbad)
     checks["sensor-space features equal (Exp 0 consistency control)"] = (not sbad and bool(report), sbad)
     out = {"target": str(target), "reference": str(reference), "graph_run_id": mt.get("graph_run_id"),
            "reference_graph_run_id": mr.get("graph_run_id"), "n_windows": int(len(wt)),
            "checks": {k: {"passed": bool(v[0]), "detail": v[1]} for k, v in checks.items()}, "arrays": report}
     out["passed"] = all(c["passed"] for c in out["checks"].values())
     return out
+
+
+def match_atlas(target: str | Path, reference: str | Path, atlas: str, sensor_rtol: float = 1e-5) -> dict:
+    """Coarser-atlas store ``target`` vs the 68-ROI store ``reference`` of the same inverse and mode."""
+    return match(target, reference, sensor_rtol, atlas=atlas)
 
 
 def require_matched(target: str | Path, reference: str | Path) -> dict:

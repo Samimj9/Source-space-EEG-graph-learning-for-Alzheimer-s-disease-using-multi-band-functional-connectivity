@@ -217,17 +217,18 @@ def _grid(base=0.70, better=None, delta=0.0):
 def test_selection_keeps_dense_unless_clearly_better_on_development_cv():
     from adgraph.experiments.selection import select
 
-    assert select(_table(_grid()))["selected"] == "dense"                          # ties: the default
-    assert select(_table(_grid(better="knn_union_f20", delta=0.01)))["selected"] == "dense"   # below the margin
-    d = select(_table(_grid(better="knn_union_f20", delta=0.03)))
+    assert select(_table(_grid()), atlas="dk68")["selected"] == "dense"            # ties: the default
+    assert select(_table(_grid(better="knn_union_f20", delta=0.01)), atlas="dk68")["selected"] == "dense"
+    d = select(_table(_grid(better="knn_union_f20", delta=0.03)), atlas="dk68")
     assert d["selected"] == "knn_union_f20" and d["source"].startswith("development CV")
-    assert select(_table(_grid(better="feature_similarity_knn_union_f20", delta=0.2)))["selected"] == "dense"
+    assert select(_table(_grid(better="feature_similarity_knn_union_f20", delta=0.2)), atlas="dk68")["selected"] \
+        == "dense"
     g = _grid()                                                                    # holdout rows are never read
     hold = {k: (0.99 if k[0] == "knn_mutual_f10" else 0.5) for k in g}
-    assert select(_table(g, hold))["selected"] == "dense"
+    assert select(_table(g, hold), atlas="dk68")["selected"] == "dense"
     inc = _grid(better="knn_union_f20", delta=0.1)
     inc.pop(("knn_mutual_f30", "exp5_multibranch", "plv__separate__mean", "wmne"))
-    d = select(_table(inc))
+    d = select(_table(inc), atlas="dk68")
     assert d["selected"] == "dense" and d["reason"].startswith("comparison incomplete")
 
 
@@ -237,7 +238,7 @@ def test_selection_needs_consistency_across_cells():
     g = _grid()
     k = ("knn_union_f10", "exp4_band_mean", "plv__psd", "lcmv")
     g[k] = 0.95                                                                    # one cell much better, others equal
-    assert select(_table(g))["selected"] == "dense"
+    assert select(_table(g), atlas="dk68")["selected"] == "dense"
 
 
 # ------------------------------------------------------------------------------------------- plan, notebooks, pin
@@ -247,8 +248,9 @@ def test_run_plan_covers_the_final_architecture():
     exps = [s["experiment"] for s in steps if "experiment" in s]
     assert exps == [f"exp{i}" for i in range(9)] == sorted(experiment_configs())
     names = [s["notebook"] for s in steps]
-    assert names[:4] == ["00_setup_and_stores.ipynb", "01_participant_qc.ipynb", "02_parcellation.ipynb",
-                         "03_graph_construction.ipynb"] and names[-1] == "99_results_report.ipynb"
+    assert names[:5] == ["00_setup_and_stores.ipynb", "01_participant_qc.ipynb", "02_parcellation.ipynb",
+                         "04_roi_68_vs_18.ipynb", "03_graph_construction.ipynb"]       # atlas first, then graphs
+    assert names[-1] == "99_results_report.ipynb"
     assert all((REPO / "notebooks" / n).exists() for n in names)
     assert plan["contexts"]["source"] == [["lcmv", "B"], ["wmne", "B"], ["lcmv", "A"], ["wmne", "A"]]
     assert plan["contexts"]["sensor"] == [["sensor", "B"], ["sensor", "A"]]
@@ -302,3 +304,15 @@ def test_a_real_store_is_never_run_without_its_qc(release_root):
     with pytest.raises(ValueError, match="QC"):
         run_experiment(experiment_configs()["exp1"], release_root, "lcmv", "B", variants=["logreg__psd"],
                        store=store, store_record=rec)
+
+
+def test_notebooks_run_development_cv_until_the_frozen_final_analysis():
+    nbs = {nb.name: "".join("".join(c["source"]) for c in json.loads(nb.read_text())["cells"]
+                            if c["cell_type"] == "code")
+           for nb in (REPO / "notebooks").glob("*.ipynb")}
+    for name, src in nbs.items():
+        if name != "99_results_report.ipynb":
+            assert "xu_holdout" not in src and "final.py holdout" not in src and "final.py freeze" not in src, name
+    assert "final.py freeze" in nbs["99_results_report.ipynb"] and "final.py holdout" in nbs["99_results_report.ipynb"]
+    assert "--atlas selected" in nbs["03_graph_construction.ipynb"] and "ATLAS = 'selected'" in nbs["Exp5_multibranch.ipynb"]
+    assert "build_stores.py match-atlas" in nbs["02_parcellation.ipynb"] and "choose-atlas" in nbs["04_roi_68_vs_18.ipynb"]

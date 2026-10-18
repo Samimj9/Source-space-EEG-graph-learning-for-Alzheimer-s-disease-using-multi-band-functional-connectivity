@@ -84,7 +84,10 @@ connected ROIs (reported by the diagnostics; kept as the conventional alternativ
 
 ## 5. Development-only choice
 
-A construction other than `dense` is adopted only by the pre-specified rule of `configs/final/selection.yaml`:
+A construction other than `dense` is adopted only by the pre-specified rule of `configs/final/selection.yaml`, run
+ONCE, on the atlas the author recorded after the ROI comparison (notebook 04 before 03; `atlas: selected`; k scales
+with that atlas's ROI count). It is an exploratory, pre-specified decision rule, not a test of statistical
+superiority; the per-cell AUCs carry their DeLong / bootstrap CIs in the result tables.
 
 * reference models: Exp 4 `plv__psd` (band-averaged graph) and Exp 5 `plv__separate__mean` (one graph per band),
   both inverses, mode B, development CV only (`--settings xu_dev_cv`); 4 cells per construction;

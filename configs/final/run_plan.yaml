@@ -1,12 +1,15 @@
 # Execution order of the final framework (FINAL_RUN_GUIDE.md). One notebook at a time, in this order; each is resumable.
 # Tested (tests/test_final_framework.py): every final experiment config appears exactly once, every notebook exists,
-# and every experiment runs in every context of its kind. The GNN experiments read the graph-construction decision of
-# step 4 (--graph selected); the classical ones have no graph construction.
+# and every experiment runs in every context of its kind. 04 (ROI comparison) runs BEFORE 03 (graph construction):
+# the author records the analysis atlas in 04, and 03 compares graph constructions once, on that atlas. Experiments
+# read both decisions (--atlas selected, --graph selected) and run development CV only; notebook 99 freezes the final
+# analysis and evaluates the holdout once, descriptively (configs/final/holdout.yaml).
 steps:
   - {notebook: 00_setup_and_stores.ipynb, runtime: CPU, purpose: verify and lock the four validated stores}
   - {notebook: 01_participant_qc.ipynb, runtime: CPU, purpose: participant QC; category A decisions}
-  - {notebook: 02_parcellation.ipynb, runtime: CPU, purpose: source resolution per atlas and the atlas recommendation}
-  - {notebook: 03_graph_construction.ipynb, runtime: GPU, purpose: graph diagnostics; development-CV comparison; selection}
+  - {notebook: 02_parcellation.ipynb, runtime: CPU, purpose: source resolution; r18 stores from the recordings; their QC}
+  - {notebook: 04_roi_68_vs_18.ipynb, runtime: GPU, purpose: controlled dk68 vs r18 comparison; the atlas decision}
+  - {notebook: 03_graph_construction.ipynb, runtime: GPU, purpose: graph comparison on the recorded atlas; selection}
   - {notebook: Exp0_sensor_psd_de.ipynb, experiment: exp0, runtime: CPU}
   - {notebook: Exp1_source_psd_de.ipynb, experiment: exp1, runtime: CPU}
   - {notebook: Exp2_conn_minimal.ipynb, experiment: exp2, runtime: GPU}
@@ -16,7 +19,7 @@ steps:
   - {notebook: Exp6_psd_strength.ipynb, experiment: exp6, runtime: GPU}
   - {notebook: Exp7_earm_gnn.ipynb, experiment: exp7, runtime: GPU}
   - {notebook: Exp8_xu_dual_gcn.ipynb, experiment: exp8, runtime: GPU}
-  - {notebook: 99_results_report.ipynb, runtime: CPU, purpose: combined tables, comparisons, difficult participants}
+  - {notebook: 99_results_report.ipynb, runtime: GPU, purpose: freeze; descriptive holdout of the frozen units; tables}
 
 # contexts of every experiment step, in order (mode B is the primary analysis, mode A the sensitivity analysis)
 contexts:

@@ -31,10 +31,16 @@ tests were missing; the legacy builder was not importable (now `adgraph.legacy`)
 
 ROI resolution, graph construction and participant QC: evidence, defaults and approvals in `FINAL_RUN_GUIDE.md` §3.
 
+## Final preparation pass (2026-10-18; methodology log entry 59)
+
+r18 investigation approved: atlas checks, real-operator resolution, r18 stores from the recordings (validated, matched
+to LCMV and to dk68), r18 QC, the controlled dk68 vs r18 comparison (notebook 04), atlas decision by the author, graph
+comparison on that atlas, development CV only until the frozen final analysis (notebook 99).
+
 ## Pending (author)
 
 1. Category A QC decisions, if any (notebook 01).
-2. Approval to build r18 stores and make r18 primary (notebook 02 §4).
-3. The development-only graph-construction comparison (notebook 03).
+2. The analysis atlas after notebook 04 (r18 stores approved; built in notebook 02).
+3. Review of the graph-construction decision (notebook 03, on that atlas).
 4. Deletion proposals of `inventory.md`.
 5. Authorization to run the classification notebooks.

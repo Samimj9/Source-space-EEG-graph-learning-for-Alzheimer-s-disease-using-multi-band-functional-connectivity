@@ -1,0 +1,13 @@
+# The frozen final analysis: the ONLY runs evaluated on the 13-participant holdout (experiments.decisions).
+# Written before any final-framework result. The holdout was inspected in earlier work, so it is descriptive only
+# (release.HOLDOUT_POLICY); it is evaluated once per unit below, after every unit has completed development CV and
+# after the atlas (notebook 04) and graph construction (notebook 03) are recorded, and it never informs a selection.
+#
+# Included: every pre-specified variant of the confirmatory experiments, primary window mode B, both inverses, on
+# the recorded atlas and graph construction.
+# Not evaluated on the holdout (development CV only): Exp 7 (EARM-GNN, exploratory: designed after earlier
+# results), window mode A (sensitivity analysis), the atlas not recorded (ROI comparison, notebook 04), the
+# graph constructions not selected (notebook 03).
+mode: B
+inverses: [lcmv, wmne]
+experiments: [exp0, exp1, exp2, exp3, exp4, exp5, exp6, exp8]

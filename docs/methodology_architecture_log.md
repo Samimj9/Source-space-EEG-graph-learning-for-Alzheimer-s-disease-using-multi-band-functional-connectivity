@@ -3331,6 +3331,51 @@ validated store, result and pin. Branch `claude/unified-final-framework` (backup
 **Holdout.** It was inspected in entries 50-57 and is therefore reported descriptively in v2.0 and never used for any
 selection (architecture, graph construction, k, atlas, QC thresholds).
 
+## 59. The 18-region investigation, the decision order and the frozen final analysis (2026-10-18)
+
+**Request (author, 2026-10-18):** approve building r18 source-graph datasets for both inverses, conditional on real-data
+resolution diagnostics, correct anatomical parcellation and validation; keep dk68 unchanged and do not make r18 the
+analysis atlas automatically; a controlled dk68 vs r18 experiment (notebook 04) before the full classification; the
+graph-construction comparison only on the selected atlas; holdout only in a frozen, documented final analysis.
+
+**Implemented (no result of the final framework exists at this point):**
+
+- **Anatomy** (`source.atlas.verify_atlas`, `final.py atlas-check`): per hemisphere a partition of the 34 DK labels,
+  no cross-hemisphere region, identical left / right members, every region one contiguous piece of cortex (DK
+  contiguity on the fsaverage mesh), centroids on the correct side, non-empty source sets. r18 passes; `sensorimotor`
+  (precentral, postcentral, paracentral) spans the frontal and parietal lobes by design and is reported as such.
+  Region sizes range from 321 (insula) to 2259 (parietal) ico-5 sources.
+- **Real-data resolution** (`source.resolution.store_resolution`, `final.py store-resolution`): every development
+  participant's SAVED operator (LCMV from the participant's own data covariance; wMNE) against the region leadfield of
+  the store's OWN cached forward model (its BEM and electrode geometry). Verified to reproduce the analytic metrics
+  exactly when given the same operators. Remaining approximations: template anatomy, template electrode positions,
+  cross-talk under independent equal-variance region activity. A rank-18 sensor space does not make 18 regions
+  independently or accurately localized; the metrics quantify the remaining leakage (median r18 cross-talk ≈ 0.5).
+- **Stores** (`scripts/build_stores.py build | validate | match | match-atlas | size --atlas r18`, notebook 02):
+  built from the original recordings by the unchanged pipeline, never from 68-ROI signals or PLV. New
+  `atlas_match` check (`sourcegraphs.match.match_atlas`) against the dk68 store of the same inverse and mode:
+  configuration identical except `store_names` and `source.atlas`, identical participants, labels, five-minute
+  selections, windows, split, bands, channels, sampling and sensor features. `stores.verify_store` refuses a
+  coarser-atlas store without a passed `atlas_match.json`. The r18 LCMV covariance uses the corrected window
+  selection (the dk68 `_corr1` LCMV covariance of D3-23 and D3-58 included one extra clean window; entry 53).
+- **ROI comparison** (`configs/final/roi_comparison.yaml`, `experiments.roi_comparison`, `final.py roi-compare`,
+  notebook 04): the runs are ordinary experiment units (same folds, seeds, protocol, QC gate; seeds depend on the
+  fold only, tested); the report puts label-free resolution / reliability evidence and classification evidence
+  (pooled out-of-fold AUC with DeLong CI, balanced accuracy, F1, sensitivity, specificity; paired DeLong and
+  participant-bootstrap CIs of r18 - dk68 differences) side by side, with a descriptive summary that never declares
+  a winner. The author records the atlas once (`final.py choose-atlas`, `FINAL_v1/decisions/atlas.json`).
+- **Order and decisions** (`experiments.decisions`): `--atlas selected` and `--graph selected` read the recorded
+  decisions; the graph decision records its atlas and is refused for another atlas; `selection.yaml` uses
+  `atlas: selected`.
+- **Frozen final analysis** (`configs/final/holdout.yaml`, `final.py freeze | holdout`, notebook 99): every
+  pre-specified variant of Exp 0-6 and 8, mode B, both inverses, on the recorded atlas and graph (116 units);
+  frozen once, after both decisions and all development-CV units; `plan.run_experiment` refuses the holdout of a real
+  store for any other unit or another commit. `final.py run | status` cover development CV only.
+
+**Tests:** `tests/test_r18_roi_comparison.py` (anatomy, atlas match and its failure modes, store gate, r18 QC, folds
+and seeds identical to dk68, the comparison and its wording, decisions, freeze, holdout gate), updated run-plan,
+notebook and selection tests.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

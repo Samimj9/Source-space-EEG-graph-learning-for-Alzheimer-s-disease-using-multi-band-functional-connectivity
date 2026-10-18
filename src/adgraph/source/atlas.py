@@ -196,3 +196,73 @@ def centroids(roi_names: list[str]) -> np.ndarray:
     t = tables()[atlas_of(roi_names)]
     c = dict(zip(t["regions"], t["centroids_mm"]))
     return np.array([c[n] for n in roi_names], float)
+
+
+# ------------------------------------------------------------------------------------------- anatomical verification
+def verify_atlas(atlas: str) -> tuple[dict, list[dict]]:
+    """Anatomical checks of an atlas (no EEG, no labels; docs/final/parcellation.md §2). Returns ({check: {passed,
+    detail}}, one row per region).
+
+    * every Desikan-Killiany label of each hemisphere belongs to exactly one region of THAT hemisphere (partition,
+      no cross-hemisphere region), and the left and right regions have the same members (homologous definitions);
+    * the precomputed fsaverage tables (``atlas_tables.json``) were built from these same memberships;
+    * every region is one connected piece of cortex: its member labels form a connected graph under the cortical-
+      surface contiguity of the Desikan-Killiany labels (fsaverage mesh edges);
+    * hemispheric placement: every left region's centroid has x < 0 and every right region's x > 0 (fsaverage RAS);
+    * every region has source-space vertices (ico-5), i.e. a non-empty ``mean_flip`` extraction.
+
+    Regions whose members come from more than one conventional lobe (e.g. r18 ``sensorimotor``: precentral and
+    paracentral are frontal, postcentral parietal) are reported (``member_lobes``), not failed: the grouping is
+    functional, and the region's ``lobe`` is the documented assignment."""
+    t = tables()
+    dk = t["dk68"]
+    adj = {}
+    for x, y in dk["contiguous_pairs"]:
+        adj.setdefault(x, set()).add(y)
+        adj.setdefault(y, set()).add(x)
+    mem, lobe = members(atlas), lobe_of(atlas)
+    checks, rows = {}, []
+
+    def check(name, ok, detail=""):
+        checks[name] = {"passed": bool(ok), "detail": detail}
+
+    bad = []
+    for h in HEMIS:
+        labs = [m for r, ms in mem.items() if r.endswith(f"-{h}") for m in ms]
+        if sorted(labs) != sorted(f"{x}-{h}" for x in DK_REGIONS):
+            bad.append(f"{h}: not a partition of the 34 labels")
+    cross = [r for r, ms in mem.items() if any(m.rsplit("-", 1)[1] != r.rsplit("-", 1)[1] for m in ms)]
+    check("each hemisphere's 34 Desikan-Killiany labels partitioned, no cross-hemisphere region", not bad and not cross,
+          "; ".join(bad + cross))
+    asym = [r for r in regions(atlas) if [m[:-3] for m in mem[f"{r}-lh"]] != [m[:-3] for m in mem[f"{r}-rh"]]]
+    check("left and right regions have the same members", not asym, ", ".join(asym))
+    ta = t.get(atlas, {})
+    same = ta.get("regions") == region_names(atlas) and ({k: sorted(v) for k, v in ta.get("members", {}).items()}
+                                                         == {k: sorted(v) for k, v in mem.items()})
+    check("fsaverage tables built from these memberships", same,
+          "" if same else ("rerun scripts/make_atlas_tables.py" if ta else "no table"))
+    cent = dict(zip(ta.get("regions", []), ta.get("centroids_mm", [])))
+    disconnected, misplaced, empty = [], [], []
+    for r, ms in mem.items():
+        seen, todo = {ms[0]}, [ms[0]]
+        while todo:
+            for n in adj.get(todo.pop(), ()):
+                if n in ms and n not in seen:
+                    seen.add(n)
+                    todo.append(n)
+        connected = len(seen) == len(ms)
+        x = cent.get(r, [float("nan")])[0]
+        side_ok = (x < 0) if r.endswith("-lh") else (x > 0)
+        nsrc = int(sum(dk["n_source_vertices"][m] for m in ms))
+        disconnected += [] if connected else [r]
+        misplaced += [] if side_ok else [r]
+        empty += [] if nsrc > 0 else [r]
+        rows.append({"region": r, "hemisphere": r.rsplit("-", 1)[1], "lobe": lobe[r], "n_members": len(ms),
+                     "members": " + ".join(m[:-3] for m in ms),
+                     "member_lobes": "+".join(sorted({dk["lobes"][m] for m in ms})),
+                     "contiguous": connected, "centroid_x_mm": round(float(x), 1),
+                     "n_surface_vertices": int(sum(dk["n_vertices"][m] for m in ms)), "n_source_vertices": nsrc})
+    check("every region is one contiguous piece of cortex", not disconnected, ", ".join(disconnected))
+    check("left regions at x < 0, right regions at x > 0", not misplaced, ", ".join(misplaced))
+    check("every region has source-space vertices", not empty, ", ".join(empty))
+    return checks, rows

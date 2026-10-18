@@ -13,7 +13,9 @@ Every experiment call (`plan.open_context`) loads, or computes once, the QC repo
 (`FINAL_v1/qc/<inverse>_<mode>_<atlas>/`, completion marker tied to the store's graph_run_id and the QC code). The
 experiment refuses to start while a category A finding has no recorded decision, or when a decision asks for an
 exclusion. QC cannot be skipped: `plan.run_experiment` refuses a real (non-synthetic) store passed without its QC report
-(tested), and `01_participant_qc` computes the four reports before any experiment notebook.
+(tested), and `01_participant_qc` computes the four dk68 reports, `02_parcellation` §5 the four r18 reports, before
+any experiment notebook. Category A findings of an r18 store are shown there and block exactly like dk68 ones; the
+decisions file (keyed by participant) is shared.
 
 ## 2. Three categories, kept apart
 

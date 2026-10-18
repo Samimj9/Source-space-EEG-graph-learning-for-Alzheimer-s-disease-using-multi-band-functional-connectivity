@@ -99,7 +99,8 @@ def write_release_stores(processed: str | Path, inverses=("lcmv", "wmne"), modes
                          n_windows: int = 4, seed: int = 0, **effects) -> dict[tuple[str, str], Path]:
     """Synthetic stores at exactly the directories the release registry resolves (``stores.store_dir``), with the
     resolved configuration hash, ``validation.json`` and, for wMNE, a passed ``match.json`` against the LCMV store of
-    the same mode: so smoke runs and end-to-end tests go through the real verification, lock and QC gate. Mode A
+    the same mode (and, for a coarser atlas written after the 68-ROI stores, a passed ``atlas_match.json``): so smoke
+runs and end-to-end tests go through the real verification, lock and QC gate. Mode A
     keeps the first 10 windows. The wMNE store has the same windows and sensor features as the LCMV one and
     different source features, like the real matched stores."""
     from .config import config_hash
@@ -126,6 +127,12 @@ def write_release_stores(processed: str | Path, inverses=("lcmv", "wmne"), modes
                 (d / "match.json").write_text(json.dumps({"passed": True, "graph_run_id": st.manifest["graph_run_id"],
                                                           "reference_graph_run_id": rid["graph_run_id"],
                                                           "checks": {}}))
+            base = store_dir(processed, inv, mode, "dk68")
+            if atlas != "dk68" and (base / "manifest.json").exists():   # an r18 store matched to the 68-ROI store
+                rid = json.loads((base / "manifest.json").read_text())["graph_run_id"]
+                (d / "atlas_match.json").write_text(json.dumps({
+                    "passed": True, "graph_run_id": st.manifest["graph_run_id"], "reference_graph_run_id": rid,
+                    "checks": {}}))
             ref = st if inv == "lcmv" else ref
             out[(inv, mode)] = d
     return out

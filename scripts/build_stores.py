@@ -5,6 +5,8 @@
     python scripts/build_stores.py build    --inverse wmne --atlas r18 [--limit 1]   # NEW stores only (see below)
     python scripts/build_stores.py validate --inverse wmne --atlas r18
     python scripts/build_stores.py match    --atlas r18               # wMNE vs LCMV, window by window
+    python scripts/build_stores.py match-atlas --inverse lcmv --atlas r18   # r18 vs the 68-ROI store, window by window
+    python scripts/build_stores.py size     --inverse lcmv --atlas r18   # disk use of the two stores
 
 The 68-ROI stores of both inverses already exist, are validated and are only READ by the final framework:
 ``build`` refuses atlas dk68 (the stores would be recomputed at this commit) and ``correct`` is not offered (the
@@ -13,8 +15,15 @@ its own new store directories by the unchanged pipeline (merged Desikan-Killiany
 sources; never averages of 68-ROI signals). Building one needs the author's approval (docs/final/parcellation.md;
 CPU, about 40 min for LCMV and 30-45 min for wMNE per atlas).
 
-``validate`` / ``match`` write ``validation.json`` / ``match.json`` into a store only if the store has none yet; an
-existing record is never overwritten (a re-check is printed and saved under ``FINAL_v1/stores/``).
+``validate`` / ``match`` / ``match-atlas`` write ``validation.json`` / ``match.json`` / ``atlas_match.json`` into a
+store only if the store has none yet; an existing record is never overwritten (a re-check is printed and saved under
+``FINAL_v1/stores/``). ``match-atlas`` requires, against the validated 68-ROI store of the same inverse and mode,
+identical participants, labels, five-minute selections, windows, split, bands, channels, sampling and sensor
+features (``sourcegraphs.match.match_atlas``); experiments refuse a coarser-atlas store without it.
+
+Coarser-atlas stores are written next to the 68-ROI stores (``<processed>/D3_LCMV_XU/graphsLX-<atlas>_v1_<hash>``,
+``<processed>/D3_WMNE_XU/graphsWX-<atlas>_v1_<hash>``, and the ``10`` mode A variants), i.e. OUTSIDE ``FINAL_v1/``;
+each carries its own manifest (configuration, code commit, software versions, input hashes, timestamps).
 """
 
 import argparse
@@ -30,12 +39,12 @@ from adgraph import release
 from adgraph.config import load_paths
 from adgraph.sourcegraphs import build
 from adgraph.sourcegraphs.config import resolve
-from adgraph.sourcegraphs.match import match
+from adgraph.sourcegraphs.match import match, match_atlas
 from adgraph.sourcegraphs.validate import validate_run
 from adgraph.stores import store_dir
 
 parser = argparse.ArgumentParser()
-parser.add_argument("action", choices=["status", "inspect", "build", "validate", "match"])
+parser.add_argument("action", choices=["status", "inspect", "build", "validate", "match", "match-atlas", "size"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
 parser.add_argument("--atlas", default="dk68")
@@ -125,3 +134,24 @@ if args.action == "match":
         show(res)
         bad |= not res["passed"]
     sys.exit(1 if bad else 0)
+
+if args.action == "match-atlas":
+    if args.atlas == "dk68":
+        sys.exit("match-atlas compares a coarser-atlas store with the 68-ROI store: pass --atlas r18 (or another)")
+    bad = False
+    for m in ("B", "A"):
+        target, ref = dirs[m], store_dir(P, args.inverse, m, "dk68")
+        res = match_atlas(target, ref, args.atlas)
+        path = save_record(target, "atlas_match.json", res)
+        print(f"\nmode {m}: {target.name} vs {ref.name}: {res['n_windows']} windows -> {path}")
+        show(res)
+        bad |= not res["passed"]
+    sys.exit(1 if bad else 0)
+
+if args.action == "size":
+    for m, d in dirs.items():
+        files = [f for f in d.rglob("*") if f.is_file()] if d.exists() else []
+        top = sum(f.stat().st_size for f in files if f.parent == d)
+        tot = sum(f.stat().st_size for f in files)
+        print(f"mode {m}: {d} {tot / 1e9:.2f} GB (assembled arrays {top / 1e9:.2f} GB, participant checkpoints "
+              f"{(tot - top) / 1e9:.2f} GB)")

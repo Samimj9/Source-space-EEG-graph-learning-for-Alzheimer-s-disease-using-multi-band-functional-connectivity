@@ -5,7 +5,9 @@
 1. the store of (inverse, mode, atlas) is opened through ``stores.open_store`` (verified and locked);
 2. the participant QC of that store is loaded or computed once (``qc.report.require_qc``; the experiment stops
    while a category A finding has no decision);
-3. every variant x setting is run with ``runner.run_variant`` (completed results are reused; one failing unit is
+3. holdout units (``xu_holdout``) of a real store run only if they belong to the frozen final analysis
+   (``decisions.require_frozen``; release.HOLDOUT_POLICY);
+4. every variant x setting is run with ``runner.run_variant`` (completed results are reused; one failing unit is
    recorded and the others continue); the status table is written after every unit.
 Nothing else is started: one experiment per call.
 """
@@ -85,6 +87,12 @@ def run_experiment(config: str | Path, processed: str | Path, inverse: str, mode
         store, store_record, qc_report = open_context(processed, inverse, mode, atlas)
     elif qc_report is None and not store.manifest.get("synthetic"):
         raise ValueError("a real store needs its participant QC report (plan.open_context); QC is never skipped")
+    holdout = [v for v, s in todo if s == "xu_holdout"]
+    if holdout and not store.manifest.get("synthetic"):           # the holdout only in the frozen final analysis
+        from ..provenance import git_commit
+        from .decisions import require_frozen
+
+        require_frozen(processed, holdout, git_commit())
     results_root = Path(results_root or release.results_dir(processed))
     ctx = vs[0]["context"]
     status_path = Path(status_path) if status_path else (
@@ -140,7 +148,7 @@ def run_experiment(config: str | Path, processed: str | Path, inverse: str, mode
 
 def status_table(config: str | Path, processed: str | Path, inverse: str, mode: str, atlas: str = "dk68",
                  graph: str | None = None, results_root: str | Path | None = None,
-                 store: GraphStore | None = None) -> pd.DataFrame:
+                 store: GraphStore | None = None, settings=None) -> pd.DataFrame:
     """Progress of every unit, read from the checkpoints (nothing is computed or locked)."""
     from ..stores import store_dir
 
@@ -148,4 +156,5 @@ def status_table(config: str | Path, processed: str | Path, inverse: str, mode: 
     if store is None:
         store = GraphStore.load(store_dir(processed, inverse, mode, atlas), keys=())
     results_root = Path(results_root or release.results_dir(processed))
-    return pd.DataFrame([{**experiment_status(store, v, s, results_root), **v["context"]} for v, s in units(vs)])
+    return pd.DataFrame([{**experiment_status(store, v, s, results_root), **v["context"]}
+                         for v, s in units(vs, settings)])

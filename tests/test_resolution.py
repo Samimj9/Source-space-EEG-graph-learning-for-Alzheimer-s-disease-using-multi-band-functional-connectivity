@@ -98,3 +98,17 @@ def test_sensor_signals_are_exactly_recoverable_from_saved_roi_signals(tmp_path)
     assert t["rank"] == 18 and t["constant_response"] < 1e-10 and t["rel_residual"] < 1e-6
     inside = ((starts - 1000 >= 825) & (starts - 1000 + 2500 + 825 <= 6000)).sum()
     assert t["windows_reconstructable"] == inside < t["n_windows"]       # edge windows need the unsaved margins
+
+
+def test_store_operators_are_scored_like_the_analytic_operators():
+    from adgraph.source.resolution import operator_resolution, resolution_metrics
+
+    rng = np.random.default_rng(0)
+    g = rng.standard_normal((19, 18))
+    g -= g.mean(0)                                                        # average-referenced region leadfield
+    ops = {f"D3-{i}": rng.standard_normal((18, 19)) for i in range(3)}
+    t = operator_resolution(ops, g).set_index("key")
+    for k, W in ops.items():
+        m = resolution_metrics(W, g)
+        assert t.loc[k, "crosstalk_fraction_median"] == pytest.approx(m["crosstalk_fraction_median"])
+        assert t.loc[k, "operator_rank"] == m["operator_rank"]

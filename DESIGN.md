@@ -9,6 +9,18 @@ Status: **v2.0 (2026-10-18), the final framework** (`docs/final/framework.md`, m
 
 Changelog:
 
+- **v2.1 (2026-10-18, before any final-framework result; author approval of the 18-region investigation):**
+  - **Atlas:** r18 stores (LCMV, wMNE; modes B, A) built from the original recordings by the unchanged pipeline,
+    conditional on the anatomical checks and the exact-BEM resolution; validated, matched and QC'd. A controlled,
+    development-only dk68 vs r18 comparison (`configs/final/roi_comparison.yaml`: Exp 1, Exp 4 `plv__psd`, Exp 5
+    `plv__separate__mean`; both inverses; mode B; dense PLV; same participants, folds, seeds) reports resolution /
+    reliability and classification evidence separately; the author records the analysis atlas. dk68 stays the
+    reference.
+  - **Order:** graph-construction comparison after the atlas decision, on that atlas only.
+  - **Holdout:** evaluated only in the frozen final analysis (`configs/final/holdout.yaml`: every pre-specified variant
+    of Exp 0-6 and 8, mode B, both inverses, on the recorded atlas and graph), after development CV is complete;
+    refused by the code otherwise. Exp 7 (exploratory) and mode A (sensitivity) are development-CV only.
+
 - **v2.0 (2026-10-18, final framework; author request "one unified, final implementation"; methodology log entry 58, decisions row 61):**
   - **When / what was known:** after the LCMV-Xu and wMNE-Xu suites (Exp 0-8, fixed-60, ES200, R1) had been run and their
     development-CV and holdout results inspected (methodology log entries 50-57). The holdout is therefore **no longer

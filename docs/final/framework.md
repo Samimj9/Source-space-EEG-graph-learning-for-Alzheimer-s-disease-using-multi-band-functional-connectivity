@@ -10,15 +10,20 @@ One code path for the AD vs HC classification of OpenNeuro ds004504 (65 particip
 design) in source space:
 
 ```
-validated store (inverse x window mode x atlas) --verify + lock--> participant QC gate --> Exp 0-8 (one config each)
-   --> participant-level evaluation (development CV + holdout) --> combined tables / comparisons
+validated store (inverse x window mode x atlas) --verify + lock--> participant QC gate
+   --> [02] r18 stores from the recordings (validated, matched to LCMV and to dk68) + their QC
+   --> [04] dk68 vs r18 comparison (development CV) --> the author records the atlas
+   --> [03] graph-construction comparison on that atlas (development CV) --> recorded selection
+   --> Exp 0-8 (one config each; development CV) --> [99] freeze the final analysis --> holdout once (descriptive)
+   --> combined tables / comparisons
 ```
 
 * **Inverse** (`lcmv` | `wmne`) and **window mode** (`B` all accepted windows, primary; `A` 10 windows per
   participant, sensitivity) are run-time parameters; the experiment definitions, models, training and evaluation are
   identical for every context (tested: `tests/test_source_parity.py`). Exp 0 runs in sensor space once per mode.
-* **Atlas** (`dk68` default; `dk34_gyral`, `r18`, `lobes12` need their own stores) and **graph construction**
-  (`dense` default; `configs/final/graphs.yaml`) are run-time parameters too.
+* **Atlas** (`dk68`, or `r18` with its own stores; `dk34_gyral`, `lobes12` available) and **graph construction**
+  (`dense` default; `configs/final/graphs.yaml`) are run-time parameters too; the experiment notebooks read the
+  recorded decisions (`--atlas selected --graph selected`; `adgraph.experiments.decisions`).
 
 | Part | Where |
 |---|---|
@@ -31,6 +36,7 @@ validated store (inverse x window mode x atlas) --verify + lock--> participant Q
 | parcellation / source resolution | `adgraph.source.atlas`, `adgraph.source.resolution`, [parcellation.md](parcellation.md) |
 | experiment configs | `configs/final/{protocol,classical,gnn}.yaml`, `configs/final/experiments/exp0-8*.yaml` |
 | runner, planner, report, selection | `adgraph.experiments.{runner,plan,report,selection}` |
+| ROI comparison, recorded decisions, frozen final analysis | `adgraph.experiments.{roi_comparison,decisions}`, `configs/final/{roi_comparison,holdout}.yaml` |
 | participant-level evaluation | `adgraph.evaluation.{splits,metrics,reporting}` |
 | CLI / notebooks | `scripts/final.py`, `scripts/make_notebooks.py` -> `notebooks/` |
 | execution order | `configs/final/run_plan.yaml`, [`FINAL_RUN_GUIDE.md`](../../FINAL_RUN_GUIDE.md) |
@@ -104,8 +110,12 @@ Every final multiband variant is tested to be sensitive to the band order (`test
   sensitivity and specificity, window-level AUC (secondary), score distribution, participant predictions, fold
   training diagnostics, fold QC.
 * **Holdout policy:** the holdout was inspected in the earlier LX / WX experiments, so it is not an untouched test set.
-  It is evaluated once per final configuration and reported descriptively; it is never used to select an
-  architecture, a graph construction, k, the atlas, QC thresholds or anything else.
+  It is evaluated once per unit of the frozen final analysis (`configs/final/holdout.yaml`: every pre-specified
+  variant of Exp 0-6 and 8, mode B, both inverses, on the recorded atlas and graph), after the atlas and graph
+  decisions and after all of these units completed development CV (`decisions.freeze`), and reported descriptively.
+  The code refuses the holdout of a real store for any other unit (`decisions.require_frozen`, in
+  `plan.run_experiment`). It is never used to select an architecture, a graph construction, k, the atlas, QC
+  thresholds or anything else.
 * Mode B is the primary analysis, mode A the reduced-window sensitivity analysis; LCMV vs wMNE and mode B vs A are
   compared on the same participants with the paired DeLong test (descriptive, no multiplicity correction implied).
 
@@ -115,10 +125,14 @@ Every final multiband variant is tested to be sensitive to the band order (`test
   `plv__psd` and Exp 5 `plv__separate__mean`, both inverses, mode B, every construction; a construction replaces
   `dense` only if its mean development AUC is >= dense + 0.02 AND it beats dense in >= 75 % of the 4 cells; the
   feature-similarity graph is reported, never selected; an incomplete comparison keeps `dense`. Recorded once in
-  `FINAL_v1/decisions/graph_construction.json`, read by Exp 2-8 (`--graph selected`).
-* **Atlas:** not chosen by classification performance. The finest atlas whose ROI estimates (both inverses) have no
-  forced linear redundancy, median cross-talk <= 0.60 and own-region dominance >= 0.80
-  ([parcellation.md](parcellation.md)). Coarser stores need the author's approval; dk68 stays the reference.
+  `FINAL_v1/decisions/graph_construction.json` (with the atlas it was made on), read by Exp 2-8 (`--graph
+  selected`). It runs on the recorded atlas, after notebook 04. An exploratory pre-specified rule, not a superiority
+  test.
+* **Atlas:** never chosen by classification performance alone. Recommendation by source resolution: the finest
+  atlas whose ROI estimates (both inverses) have no forced linear redundancy, median cross-talk <= 0.60 and own-region
+  dominance >= 0.80 ([parcellation.md](parcellation.md)); r18 stores approved and built in notebook 02; the
+  development-only dk68 vs r18 comparison of notebook 04 reports resolution / reliability and classification
+  evidence separately; the AUTHOR records the atlas (`FINAL_v1/decisions/atlas.json`). dk68 stays the reference.
 
 ## 8. Leakage rules (enforced in code, tested)
 
@@ -134,11 +148,17 @@ participants; QC outlier thresholds are fitted on reference / training participa
   CODE_COMMIT.txt  stores.lock.json
   qc/<inverse>_<mode>_<atlas>/        participant QC (qc.md);  qc/decisions.yaml (author)
   graphs/<inverse>_<mode>_<atlas>/diagnostics_<time>/
-  parcellation/resolution_<time>/ , reliability_<inverse>_<mode>_<atlas>_<time>/
-  decisions/graph_construction.json
+  parcellation/atlas_<atlas>_<time>/, resolution_<time>/, store_resolution_<inverse>_<atlas>_<time>/,
+               reliability_<inverse>_<mode>_<atlas>_<time>/
+  roi_comparison/compare_<time>/
+  decisions/atlas.json (author), graph_construction.json, final_analysis.json
   results/<inverse|sensor>/mode_<B|A>/<atlas>/<graph|none>/<experiment>/<variant>/<xu_dev_cv|xu_holdout>/
       predictions_windows.csv predictions_participants.csv metrics.json fold_metrics.csv folds.csv training.csv
       fold_qc.csv manifest.json units/ status.csv _identity.json final.done.json
   results/.../<experiment>/_run_status.csv , _reports/report_<time>/
   reports/tables_<time>/  all_results.csv  lcmv_vs_wmne.csv  mode_B_vs_A.csv
 ```
+
+Coarser-atlas stores are not under `FINAL_v1/`: they are written next to the 68-ROI stores,
+`<processed>/D3_LCMV_XU/graphsLX{,10}-r18_v1_<hash>/` and `<processed>/D3_WMNE_XU/graphsWX{,10}-r18_v1_<hash>/`
+(`scripts/build_stores.py`), each with its own manifest, validation, match and atlas-match records.

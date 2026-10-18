@@ -90,12 +90,18 @@ dk34 and makes r18 the finest admissible atlas. Literature (checked 2026-10-18; 
 * Song et al. (2015), *J Neurosci Methods* 256:9-21: source localization accuracy improves with sensor density and
   inferior head coverage, both limited with the 10-20 montage.
 
-**What this needs (author approval):** r18 stores for LCMV and wMNE, built with the unchanged pipeline
-(`scripts/build_stores.py build --inverse lcmv --atlas r18`, then wMNE, `validate`, `match`; CPU, about 40 min for
-LCMV and 30-45 min for wMNE, measured on the earlier 68-ROI builds), followed by setting `release.PRIMARY["atlas"]`
-to `r18` with a logged decision. The validated 68-ROI stores are never overwritten (r18 stores have their own names);
-**dk68 remains the reference / sensitivity analysis** and the comparison with all earlier results. If the rebuild is
-not approved, dk68 stays primary and the paper states the leakage limitation quantified in §4.
+**Approved (author, 2026-10-18), conditional:** r18 stores for LCMV and wMNE, modes B and A, built from the original
+recordings with the unchanged pipeline in notebook 02, only if the anatomical checks pass and r18 meets the rule with
+the stores' exact BEM (`scripts/build_stores.py build | validate | match | match-atlas | size --atlas r18`; CPU,
+about 40 min for LCMV and 30-45 min for wMNE, measured on the earlier 68-ROI builds). The validated 68-ROI stores are
+never overwritten (r18 stores have their own names); **dk68 remains the reference / sensitivity analysis** and the
+comparison with all earlier results. r18 is NOT made the analysis atlas by code: after the development-only
+comparison of notebook 04 the author records the atlas (`final.py choose-atlas`). If dk68 is kept, the paper states
+the leakage limitation quantified in §4.
+
+**Caveat.** A rank-18 sensor space does not prove that 18 anatomical regions are independently or accurately
+localized: a median r18 estimate still receives about half of its (independent, equal-variance) variance from other
+regions, and real cortical activity is neither independent nor equal in variance.
 
 ## 6. Can coarser regions be obtained from the saved 68-ROI data?
 
@@ -125,7 +131,28 @@ recordings, which reproduces every window exactly and is validated end to end by
 steps. The shortcut saves about 1 h of CPU and is not worth a second code path; it is documented here because it
 shows that the coarse stores need no new data, only recomputation.
 
-## 7. Infrastructure
+## 7. The r18 workflow (notebooks 02 and 04)
+
+1. **Anatomy** (`atlas.verify_atlas`, `final.py atlas-check --atlas r18`): per hemisphere a partition of the 34 DK
+   labels, no cross-hemisphere region, identical left / right members, every region one contiguous piece of cortex,
+   centroids on the correct side, non-empty source sets. Mixed-lobe regions are reported (`sensorimotor`: frontal +
+   parietal by design). Sizes: 321 (insula) to 2259 (parietal) ico-5 sources per region.
+2. **Analytic resolution with the stores' BEM** (`final.py parcellation`; §3-4) and **the stores' own operators**
+   (`final.py store-resolution`): every development participant's saved operator against the region leadfield of the
+   store's cached forward model (verified to reproduce the analytic metrics for identical operators). Remaining
+   approximations: fsaverage anatomy, template (Colin27 lookup) electrode positions, cross-talk under independent
+   equal-variance region activity.
+3. **Stores** from the recordings (`build_stores.py build`), `validate`, `match` (wMNE vs LCMV r18), `match-atlas`
+   (each r18 store vs its dk68 store: configuration identical except `store_names` / `source.atlas`; identical
+   participants, labels, selections, windows, split, bands, channels, sampling, sensor features; experiments refuse
+   an r18 store without it), `size`. The r18 LCMV covariance uses the corrected window selection; the dk68 `_corr1`
+   LCMV covariance of D3-23 and D3-58 included one extra clean window (methodology log entry 53).
+4. **QC** of the four r18 stores (`final.py qc --atlas r18`), then the resolution and reliability of the r18
+   operators actually built.
+5. **Controlled comparison** (notebook 04, `configs/final/roi_comparison.yaml`), development CV only; the author
+   records the atlas.
+
+## 8. Infrastructure
 
 `configs/source_graphs.yaml` + `resolve(inverse, atlas)` (atlas-specific store names, e.g.
 `D3_LCMV_XU/graphsLX-r18_v1_<hash>`), merged labels in the store builder, atlas-aware ROI names, contiguity tables

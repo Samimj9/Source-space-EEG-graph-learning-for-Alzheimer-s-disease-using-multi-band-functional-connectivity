@@ -1,13 +1,15 @@
 """Pre-specified, development-only selection of the graph construction (configs/final/selection.yaml).
 
 ``select(table)`` takes the combined result table (``experiments.report.collect``) and applies the rule of
-``selection.yaml`` (the atlas is not chosen here: it follows the source-resolution rule of
-``source.resolution.recommend_atlas``, independent of classification results):
+``selection.yaml`` on the recorded analysis atlas (``decisions.selected_atlas``; the atlas is not chosen here: the
+author records it after the source-resolution evidence and the development-only ROI comparison of notebook 04):
 
 * only development-CV rows (``report.development_only``); a holdout row can never enter;
 * one cell = (reference experiment, variant, inverse) in the pre-specified mode / atlas / graph;
 * a candidate must have completed every cell (an incomplete comparison selects nothing: the default is kept and
   the decision says which cells are missing);
+* the result is an exploratory, pre-specified decision rule, not a test of statistical superiority: the per-cell
+  AUCs of the decision carry their own uncertainty (DeLong / bootstrap CIs in the result tables);
 * the candidate with the highest mean participant AUC replaces the default only if that mean is at least the
   default's mean + ``margin`` AND it beats the default in at least ``min_fraction_of_cells_better`` of the cells.
 
@@ -33,15 +35,16 @@ def rules(root: str | Path | None = None) -> dict:
     return yaml.safe_load((Path(root or CONFIG_ROOT) / "selection.yaml").read_text())
 
 
-def cells(table: pd.DataFrame, factor: str, rule: dict) -> pd.DataFrame:
-    """Development-CV rows of the reference cells: columns cell, option, auc."""
-    from .. import release
-
+def cells(table: pd.DataFrame, factor: str, rule: dict, atlas: str | None = None) -> pd.DataFrame:
+    """Development-CV rows of the reference cells: columns cell, option, auc. ``atlas``: the recorded analysis atlas
+    (``decisions.selected_atlas``), required when the rule says ``atlas: selected``."""
     col = FACTOR_COLUMN[factor]
     t = development_only(table)
     fixed = {k: rule[k] for k in ("mode", "atlas", "graph") if k in rule and k != col}
-    if fixed.get("atlas") == "primary":
-        fixed["atlas"] = release.PRIMARY["atlas"]
+    if fixed.get("atlas") == "selected":
+        if atlas is None:
+            raise ValueError("the selection runs on the recorded atlas: pass atlas=")
+        fixed["atlas"] = atlas
     rows = []
     for exp, variants in rule["reference"].items():
         for var in variants:
@@ -56,9 +59,10 @@ def cells(table: pd.DataFrame, factor: str, rule: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["cell", "option", "auc"])
 
 
-def select(table: pd.DataFrame, factor: str = "graph_construction", rule: dict | None = None) -> dict:
+def select(table: pd.DataFrame, factor: str = "graph_construction", rule: dict | None = None,
+           atlas: str | None = None) -> dict:
     rule = rule or rules()[factor]
-    c = cells(table, factor, rule)
+    c = cells(table, factor, rule, atlas)
     expected = [f"{e}/{v}/{i}" for e, vs in rule["reference"].items() for v in vs for i in rule["inverses"]]
     default = rule["default"]
     options = [default] + list(rule["candidates"]) + list(rule.get("reported_only") or [])
@@ -75,6 +79,7 @@ def select(table: pd.DataFrame, factor: str = "graph_construction", rule: dict |
     s = pd.DataFrame(summary)
     need = math.ceil(rule["min_fraction_of_cells_better"] * len(expected))
     decision = {"factor": factor, "default": default, "selected": default, "rule": rule, "cells": expected,
+                "atlas": atlas if rule.get("atlas") == "selected" else rule.get("atlas"),
                 "n_cells": len(expected), "cells_better_required": need, "summary": s.to_dict("records"),
                 "per_cell": wide.reset_index().to_dict("records"), "missing": {k: v for k, v in missing.items() if v},
                 "source": "development CV only (xu_dev_cv); holdout never read"}

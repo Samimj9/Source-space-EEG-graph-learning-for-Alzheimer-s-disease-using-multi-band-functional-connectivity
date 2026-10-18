@@ -10,6 +10,8 @@
 * ``validation.json`` passed for the store's current graph_run_id (``sourcegraphs.build_stores validate``);
 * wMNE: ``match.json`` passed against the LCMV store of the same mode and atlas (identical windows, participants,
   split and sensor features);
+* a coarser atlas (e.g. r18): ``atlas_match.json`` passed against the 68-ROI store of the same inverse and mode
+  (identical participants, labels, windows, split, sampling and sensor features; ``sourcegraphs.match.match_atlas``);
 * the frozen participant split: 65 participants (36 AD / 29 HC), the saved 52 / 13 partition equals
   ``xu_partition``, and it is identical to the reference LCMV dk68 store of the same mode;
 * the lock: ``FINAL_v1/stores.lock.json`` records the graph_run_id the first time a store is verified; a store whose
@@ -102,6 +104,13 @@ def verify_store(processed: str | Path, inverse: str, mode: str, atlas: str = "d
         check("match.json passed against the LCMV store of the same mode and atlas",
               mt.get("passed") and mt.get("graph_run_id") == man.get("graph_run_id")
               and mt.get("reference_graph_run_id") == rid, "missing" if not mt else f"reference {ref.name}")
+    if atlas != "dk68":
+        ref = store_dir(processed, inv, mode, "dk68")
+        am = _json(d / "atlas_match.json") or {}
+        rid = (_json(ref / "manifest.json") or {}).get("graph_run_id")
+        check("atlas_match.json passed against the 68-ROI store of the same inverse and mode",
+              am.get("passed") and am.get("graph_run_id") == man.get("graph_run_id")
+              and am.get("reference_graph_run_id") == rid, "missing" if not am else f"reference {ref.name}")
     subj = store.subjects
     ok = subj.loc[subj["status"] == "ok", ["key", "dataset", "y"]] if "status" in subj else subj[["key", "dataset", "y"]]
     check("65 participants, 36 AD / 29 HC", (len(ok), int(ok["y"].sum()), int((ok["y"] == 0).sum()))

@@ -4,8 +4,9 @@
 #   mean participant AUC over the reference cells >= default + margin, AND
 #   better than the default in at least min_fraction_of_cells_better of the cells,
 # where a cell is one (reference experiment variant, inverse). Otherwise the default is kept. Every candidate must
-# have completed every cell; an incomplete comparison selects nothing. The comparison runs on the primary atlas
-# (release.PRIMARY["atlas"]; `atlas: primary`).
+# have completed every cell; an incomplete comparison selects nothing. The comparison runs on the atlas the author
+# recorded after notebook 04 (`atlas: selected`; FINAL_v1/decisions/atlas.json); k scales with its ROI count.
+# This is a pre-specified exploratory decision rule, not a test of statistical superiority.
 
 graph_construction:
   default: dense
@@ -17,18 +18,20 @@ graph_construction:
     exp5_multibranch: [plv__separate__mean]
   inverses: [lcmv, wmne]
   mode: B
-  atlas: primary
+  atlas: selected
   margin: 0.02
   min_fraction_of_cells_better: 0.75
 
-# The atlas is NOT chosen by classification performance (that would select the measurement on the outcome). It is
-# chosen before any result of the final framework, on source-resolution criteria computed without EEG or labels
-# (source.resolution; docs/final/parcellation.md): the FINEST atlas whose ROI estimates, for BOTH inverses,
+# The atlas is never chosen by classification performance alone (that would select the measurement on the outcome).
+# The source-resolution rule below (no EEG, no labels; source.resolution, docs/final/parcellation.md) gives the
+# recommendation: the FINEST atlas whose ROI estimates, for BOTH inverses,
 #   * are not forced to be linearly redundant (number of regions <= rank of the ROI operator), and
 #   * have a median cross-talk fraction <= max_median_crosstalk, and
 #   * are dominated by their own region for at least min_own_region_dominance of the ROIs.
-# Computed with the stores' fsaverage BEM (Colab); a sphere-model result is provisional. Coarser atlases need their
-# own stores, built only after the author's approval; dk68 stays the reference / sensitivity analysis either way.
+# Computed with the stores' fsaverage BEM (Colab); an approximate-BEM or sphere result is provisional. The
+# controlled, development-only dk68 vs r18 comparison (configs/final/roi_comparison.yaml, notebook 04) adds
+# classification and feature-reliability evidence, reported separately; the AUTHOR then records the analysis atlas
+# (FINAL_v1/decisions/atlas.json). dk68 stays the reference / sensitivity analysis either way.
 atlas_resolution:
   candidates: [dk68, dk34_gyral, r18, lobes12]      # finest first
   max_median_crosstalk: 0.60

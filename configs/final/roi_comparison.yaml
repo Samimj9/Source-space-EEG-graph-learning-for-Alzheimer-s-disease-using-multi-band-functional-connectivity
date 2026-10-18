@@ -1,0 +1,29 @@
+# Controlled dk68 vs r18 comparison (notebook 04; experiments.roi_comparison). Pre-specified before any result.
+#
+# Same 52 development participants, the same five participant-disjoint folds (xu_dev_cv), window mode B, the same
+# training procedures and seeds (the seeds depend on the fold only, never on the atlas), dense weighted PLV for the
+# GNNs, GNNs at the fixed 60 epochs. The holdout is NOT evaluated here.
+#
+# Two kinds of evidence are reported side by side and never merged into one score:
+#   source localization / spatial resolution  (no labels): ROI-operator rank and forced redundancy, cross-talk and
+#                                             own-region dominance of each participant's saved operators against
+#                                             the stores' forward model; split-half feature reliability
+#   classification (development CV)          participant-level pooled out-of-fold ROC-AUC (DeLong CI), balanced
+#                                             accuracy, F1, sensitivity, specificity; paired r18 - dk68 differences
+#                                             (paired DeLong; participant bootstrap CIs of the differences)
+# The classification summary is descriptive (`descriptive_rule`); it never declares an atlas superior on AUC alone,
+# and the comparisons are not corrected for multiplicity. The author records the atlas (scripts/final.py choose-atlas).
+atlases: [dk68, r18]            # reference first; differences are r18 - dk68
+inverses: [lcmv, wmne]
+mode: B
+graph: dense
+setting: xu_dev_cv
+models:                         # experiment config stem: variants
+  exp1_source_psd_de: [logreg__psd, svm__psd, logreg__de, svm__de]
+  exp4_band_mean: [plv__psd]
+  exp5_multibranch: [plv__separate__mean]
+n_bootstrap: 2000
+seed: 0
+descriptive_rule:               # wording of the classification summary only (no decision is made by code)
+  margin: 0.02                  # |mean AUC difference| below this: "no material difference"
+  min_fraction_of_cells_same_sign: 0.75

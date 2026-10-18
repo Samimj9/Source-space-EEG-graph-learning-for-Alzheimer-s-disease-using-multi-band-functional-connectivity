@@ -400,3 +400,52 @@ def operator_ranks(store_root: str | Path, keys: list[str] | None = None) -> pd.
         rows.append({"key": k, "n_rois": W.shape[0], "rank": int((s > s.max() * 1e-8).sum()),
                      "sv_ratio_10": float(s[min(9, len(s) - 1)] / s[0])})
     return pd.DataFrame(rows)
+
+
+# ------------------------------------------------------------------------- the stores' own operators (real data)
+def operator_resolution(operators: dict[str, np.ndarray], g_regions: np.ndarray) -> pd.DataFrame:
+    """``resolution_metrics`` of each participant's saved ROI operator ({key: W}) against one region leadfield."""
+    return pd.DataFrame([{"key": k, **resolution_metrics(W.astype(np.float64), g_regions)}
+                         for k, W in sorted(operators.items())])
+
+
+def store_resolution(store_root: str | Path, subjects_dir: str | Path, atlas: str,
+                     keys: list[str] | None = None) -> tuple[pd.DataFrame, dict]:
+    """Resolution of the ROI operators a store ACTUALLY used (read-only): each participant's saved W
+    (``subjects/<key>/operator.npz``; LCMV from that participant's own data covariance, wMNE the data-independent
+    operator of the electrode geometry) against the region leadfield of the store's OWN cached forward model
+    (``<store parent>/cache/lx_forward_<montage_hash>_<spacing>-fwd.fif``: the stores' fsaverage BEM and electrode
+    geometry). Returns (one row per participant, description). Remaining approximations: fsaverage template anatomy,
+    template (Colin27 lookup) electrode positions, independent equal-variance region activity for the cross-talk."""
+    import mne
+
+    root = Path(store_root)
+    subj = pd.read_csv(root / "subjects.csv")
+    if keys is not None:
+        subj = subj[subj["key"].isin(set(keys))]
+    labs = labels(subjects_dir, atlas)
+    by_geom, used = {}, {}
+    for geom, g in subj.groupby(subj["montage_hash"].astype(str) if "montage_hash" in subj else
+                                pd.Series("", index=subj.index)):
+        files = sorted((root.parent / "cache").glob(f"lx_forward_{geom}_*-fwd.fif" if geom else "lx_forward_*-fwd.fif"))
+        if len(files) != 1:
+            raise FileNotFoundError(f"forward model of geometry {geom!r} not found uniquely in {root.parent / 'cache'}")
+        fwd = mne.read_forward_solution(files[0], verbose="error")
+        gl = normal_leadfield(fwd)
+        gr = region_leadfield(gl, labs, fwd["src"])
+        ops = {}
+        for k in g["key"]:
+            f = root / "subjects" / k / "operator.npz"
+            if f.exists():
+                with np.load(f) as z:
+                    ops[k] = z["W"]
+        if ops and next(iter(ops.values())).shape != (len(labs), gl.shape[0]):
+            raise ValueError(f"saved operators {next(iter(ops.values())).shape} do not fit atlas {atlas} "
+                             f"({len(labs)} regions x {gl.shape[0]} channels)")
+        by_geom[geom] = operator_resolution(ops, gr).assign(montage_hash=geom)
+        used[geom] = files[0].name
+    t = pd.concat(by_geom.values(), ignore_index=True) if by_geom else pd.DataFrame()
+    return t, {"store": root.name, "atlas": atlas, "forward_models": used, "n_participants": int(len(t)),
+               "head_model": "the store's cached fsaverage BEM forward (as used to build the store)",
+               "approximations": ["fsaverage template anatomy", "template (Colin27 lookup) electrode positions",
+                                  "cross-talk under independent equal-variance region activity"]}
