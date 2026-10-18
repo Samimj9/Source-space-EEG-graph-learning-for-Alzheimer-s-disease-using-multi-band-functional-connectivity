@@ -3307,6 +3307,16 @@ validated store, result and pin. Branch `claude/unified-final-framework` (backup
   redundancy, cross-talk <= 0.6 and dominance >= 0.8 for both inverses. The atlas is chosen on these criteria, not on
   classification results; the two numeric thresholds were set after these provisional numbers were seen, the
   threshold-free redundancy criterion alone gives the same choice. r18 stores need the author's approval.
+- **Addendum (2026-10-18, three decisions before training; FINAL_RUN_GUIDE.md §3).** Parcellation rerun with an
+  approximate 3-layer BEM from MNE's realistic fsaverage scalp and inner-skull surfaces (`resolution.approximate_bem`):
+  within 0.02 of the sphere model (dk68 cross-talk 0.85 / 0.86, dominance 0.53 / 0.57; r18 0.49 / 0.53, 0.89); r18
+  still recommended. The saved operators let the average-referenced sensor signals be recovered exactly from the saved
+  ROI signals, but the analytic margins were not saved, so coarse stores are rebuilt from the recordings
+  (`final.py reconstruct-check` quantifies the shortcut, read-only). Graph construction: GCN self-weight 0.05 for
+  dense PLV vs 0.10-0.20 for kNN (`diagnostics.propagation`), a mechanism for PSD / DE over-smoothing, not evidence of
+  better classification; dense stays default, the development-only rule decides. QC: operator verification error
+  (> 1e-6) added to category A; operator rank, recording structure and ROI power spread added to the summaries; a
+  real store is never run without its QC report.
 - **Legacy builder (D1 / D2, graphsD3_v4)** kept importable and tested as `adgraph.legacy`. Root cause of its 36 test
   failures: entry 50 added differential entropy to the store schema's PSD kinds, but the builder asked the Welch
   band-power function for it. Fix: DE computed with the definition of entry 50, 0.5 ln(2 pi e var(Re analytic)), from

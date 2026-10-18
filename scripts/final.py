@@ -12,6 +12,8 @@
     python scripts/final.py difficult                               # category C participants (development CV)
     python scripts/final.py parcellation [--bem <bem-sol.fif>]      # source-resolution analysis per atlas
     python scripts/final.py reliability --inverse lcmv --mode B     # split-half reliability of features (development)
+    python scripts/final.py reconstruct-check --inverse lcmv --mode B   # can coarse ROI signals be rebuilt from the
+                                                                    # store's saved operators + ROI signals? (read-only)
     python scripts/final.py smoke [--quick]                         # CPU smoke run of Exp 0-8 on synthetic stores
 
 ``--exp`` takes exp0 ... exp8. Exp 0 always runs in sensor space (its results are stored under inverse ``sensor``).
@@ -35,7 +37,7 @@ from adgraph.config import load_paths
 
 parser = argparse.ArgumentParser()
 parser.add_argument("action", choices=["stores", "qc", "graphs", "status", "run", "report", "select", "difficult",
-                                       "parcellation", "reliability", "smoke"])
+                                       "parcellation", "reliability", "reconstruct-check", "smoke"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--exp", help="exp0 ... exp8")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
@@ -238,9 +240,11 @@ if args.action == "parcellation":
     paths = load_paths(args.paths)
     subjects = Path(paths["cache_dir"]) / "subjects"
     fs = fetch_fsaverage(subjects)
+    from adgraph.source.resolution import approximate_bem
+
     bem = args.bem or str(fs / "bem" / resolve("lcmv")["source"]["bem"])
-    if not Path(bem).exists():
-        bem = None
+    if not Path(bem).exists():                          # the stores' BEM missing: realistic-surface approximation
+        bem = str(approximate_bem(Path(paths["cache_dir"]) / "fsaverage_approx3-bem-sol.fif"))
     table, rank = analyse(fs.parent, {"lcmv": resolve("lcmv"), "wmne": resolve("wmne")}, bem=bem)
     rule = yaml.safe_load(Path("configs/final/selection.yaml").read_text())["atlas_resolution"]
     rec = recommend_atlas(table, rule)
@@ -271,4 +275,28 @@ if args.action == "reliability":
         ops.to_csv(out / "operator_ranks.csv", index=False)
         print(f"ROI operator rank: {ops['rank'].value_counts().to_dict()} (participants)")
     print(rel.round(3).to_string(index=False))
+    print(f"-> {out}")
+
+if args.action == "reconstruct-check":
+    from adgraph.qc.report import development_keys
+    from adgraph.source.resolution import reconstruction_check
+    from adgraph.sourcegraphs import recording
+    from adgraph.sourcegraphs.config import resolve
+    from adgraph.stores import open_store
+
+    store, rec = open_store(P, args.inverse, args.mode, args.atlas)
+    cfg = resolve(args.inverse, args.atlas)
+    win = int(round(cfg["windowing"]["window_s"] * cfg["preprocessing"]["sfreq"]))
+    t = reconstruction_check(store.root, development_keys(store), recording.margin_samples(cfg), win)
+    out = release.root(P) / "parcellation" / f"reconstruction_{args.inverse}_{args.mode}_{args.atlas}_" \
+                                             f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    t.to_csv(out, index=False)
+    a = t[t["available"]]
+    print(t.round(6).to_string(index=False))
+    if len(a):
+        print(f"\n{len(a)} participants: operator rank {sorted(set(a['rank']))}, max constant response "
+              f"{a['constant_response'].max():.1e}, max relative residual {a['rel_residual'].max():.1e}; windows "
+              f"reconstructable exactly from the saved pieces: {a['windows_reconstructable'].sum()} / "
+              f"{a['n_windows'].sum()} ({a['windows_reconstructable'].sum() / max(a['n_windows'].sum(), 1):.1%})")
     print(f"-> {out}")

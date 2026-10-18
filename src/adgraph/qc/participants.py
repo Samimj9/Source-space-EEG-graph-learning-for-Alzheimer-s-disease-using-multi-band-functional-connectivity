@@ -5,7 +5,8 @@ Three categories are kept strictly apart and NOTHING is excluded automatically:
 A. **Technical data corruption** (``technical_problems``): non-finite values, negative or zero power, connectivity
    outside [0, 1], a non-zero adjacency diagonal or asymmetry, constant (flat) features over all windows of a
    participant, degenerate connectivity (mean off-diagonal PLV ~ 1: identical ROI signals), duplicate windows, or
-   window counts that disagree with ``subjects.csv``. An experiment refuses to start while any category A finding
+   window counts that disagree with ``subjects.csv``, a source operator that does not reproduce MNE's inverse. An
+   experiment refuses to start while any category A finding
    has no recorded decision (``decisions``).
 B. **Statistically unusual but valid EEG** (``robust_flags``): a participant whose summary feature lies more than
    3.5 robust standard deviations from the reference participants' median (modified z-score of Iglewicz & Hoaglin,
@@ -29,6 +30,7 @@ from ..graphs.store import GraphStore
 Z_THRESHOLD = 3.5                 # modified z-score (Iglewicz & Hoaglin 1993)
 MCD_QUANTILE = 0.999              # chi-square quantile of the robust Mahalanobis distance
 PLV_DEGENERATE = 0.99             # mean off-diagonal PLV of a window above this: ROI signals are (nearly) identical
+VERIFICATION_TOL = 1e-6           # the store builder's own tolerance for the operator vs MNE
 BLOCK = 512
 
 
@@ -48,6 +50,10 @@ def window_summaries(store: GraphStore) -> pd.DataFrame:
             med = np.median(arr, axis=-1)
             for b, name in enumerate(store.bands):
                 rows[f"psd_{kind}_{name}"] = med[:, b]
+    if "psd_log" in store.arrays:                       # source estimate: spread of log power over ROIs (a
+        spread = np.std(store.arrays["psd_log"], axis=-1)   # degenerate operator makes every ROI alike)
+        for b, name in enumerate(store.bands):
+            rows[f"source_log_power_roi_sd_{name}"] = spread[:, b]
     s = store.arrays.get("sensor_psd_log")
     if s is not None:
         med = np.median(s, axis=-1)
@@ -86,7 +92,7 @@ def participant_summaries(store: GraphStore, win: pd.DataFrame | None = None) ->
     out["n_windows"] = win.groupby("key").size()
     subj = store.subjects.set_index("key") if not store.subjects.empty else pd.DataFrame(index=out.index)
     for col in ("n_windows_candidate", "n_windows_rejected", "rejection_threshold_uv", "median_std_uv",
-                "selected_duration_s"):
+                "selected_duration_s", "n_boundary_events", "n_segments", "n_pieces", "lcmv_rank"):
         if col in subj:
             out[col] = pd.to_numeric(subj[col], errors="coerce").reindex(out.index)
     if {"n_windows_candidate", "n_windows_rejected"} <= set(out.columns):
@@ -131,6 +137,13 @@ def technical_problems(store: GraphStore) -> pd.DataFrame:
                 if len(idx) > 1 and (np.ptp(arr[idx], axis=0) == 0).any():
                     rows.append({"key": k, "check": f"{name}: a feature is constant over all windows (flat)",
                                  "detail": ""})
+    sub = store.subjects
+    for col in ("lcmv_verification_rel_error", "wmne_verification_rel_error"):
+        if not sub.empty and col in sub:                # the store's operator vs MNE's own inverse on real data
+            err = pd.to_numeric(sub[col], errors="coerce")
+            for k in sub.loc[err > VERIFICATION_TOL, "key"]:
+                rows.append({"key": k, "check": f"source operator differs from MNE ({col} > {VERIFICATION_TOL})",
+                             "detail": str(float(err[sub["key"] == k].iloc[0]))})
     if not store.subjects.empty and "n_windows_kept" in store.subjects:
         col = "n_tenfold" if (store.manifest.get("mode") == "A_xu_tenfold") else "n_windows_kept"
         n = w.groupby("key").size()

@@ -126,3 +126,14 @@ def test_difficult_participants_are_reported_not_excluded():
     d = difficult_participants([("m1", a, 0.5), ("m2", b, 0.5)]).set_index("key")
     assert d.loc["D3-5", "difficult"] and d.loc["D3-10", "difficult"] and not d.loc["D3-1", "difficult"]
     assert len(d) == 10
+
+
+def test_source_operator_and_signal_quality_metadata_are_checked():
+    st = make_store(4, seed=5)
+    st.subjects["lcmv_rank"] = 18
+    st.subjects["lcmv_verification_rel_error"] = 1e-15
+    st.subjects.loc[st.subjects["key"] == "D3-9", "lcmv_verification_rel_error"] = 1e-3
+    t = technical_problems(st)
+    assert set(t["key"]) == {"D3-9"} and t["check"].str.contains("source operator").all()
+    summ = participant_summaries(st)
+    assert {"lcmv_rank", "rejected_fraction", "median_std_uv", "source_log_power_roi_sd_alpha"} <= set(summ.columns)

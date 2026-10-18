@@ -173,6 +173,7 @@ def parcellation_notebook() -> dict:
 2. **Atlas recommendation** by the pre-specified rule of `configs/final/selection.yaml` (`atlas_resolution`).
 3. **Feature reliability** of the existing 68-ROI stores (development participants only, label-blind): split-half
    reliability of PSD / DE, node strength and edges; the rank of each participant's saved LCMV ROI operator.
+   3b: whether coarser-atlas ROI signals could be recomputed from the stores' saved operators and ROI signals.
 
 Building stores of a coarser atlas needs the author's approval (section 4 does nothing unless enabled). CPU runtime.
 """ + HOWTO),
@@ -190,6 +191,14 @@ for v in rec['verdicts']:
         md("## 3. Feature reliability of the 68-ROI stores (development participants)"),
         code('''for inverse in ('lcmv', 'wmne'):
     sh(f"python scripts/final.py reliability --inverse {inverse} --mode B")'''),
+        md("""## 3b. Can coarser-atlas ROI signals be rebuilt from the saved intermediates? (read-only)
+
+Per development participant: rank of the saved ROI operator W, its response to a constant (average reference), the
+relative residual of recovering the average-referenced sensor signals from the saved ROI signals (pinv(W)), and the
+fraction of windows whose analytic-filter margins lie inside the saved pieces (only those could be recomputed
+exactly without the recordings). Nothing is built; this only quantifies the shortcut (docs/final/parcellation.md §6)."""),
+        code('''for inverse in ('lcmv', 'wmne'):
+    sh(f"python scripts/final.py reconstruct-check --inverse {inverse} --mode B")'''),
         md("""## 4. Stores of a coarser atlas (ONLY after the author's approval)
 
 Builds the recommended atlas's stores for both inverses with the unchanged pipeline (merged Desikan-Killiany labels,

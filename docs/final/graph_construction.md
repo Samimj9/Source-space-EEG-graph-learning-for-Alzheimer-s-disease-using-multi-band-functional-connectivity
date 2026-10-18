@@ -22,7 +22,7 @@ window and per band graph, keeps the store's band order and ROI order, and retur
 | `feature_similarity_knn_union_f20` | a DIFFERENT graph: per window, Gaussian similarity of the ROIs' z-scored [log PSD, relative PSD, DE] vectors of all bands, then union kNN; the same graph for every band; never a substitute for connectivity |
 
 **k is relative to the number of ROIs:** k = max(1, round(f (R - 1))), f in {0.10, 0.20, 0.30}: k = 7 / 13 / 20 for
-68 ROIs, 3 / 7 / 10 for 34, 2 / 3 / 5 for 18. Small, sparse-to-moderate densities (about 10-45 % of the possible
+68 ROIs, 3 / 7 / 10 for 34, 2 / 3 / 5 for 18 (tested). Small, sparse-to-moderate densities (about 10-45 % of the possible
 edges for union kNN) on either side of the commonly used 10-30 % proportional thresholds, fixed before any result.
 
 **Guarantees (tested, `tests/test_construction.py`):** symmetric (except the analysis-only `symmetrize: none`), zero
@@ -43,11 +43,44 @@ gates, Xu dual GCN layer 1); PSD / DE node features are unchanged; LCMV and wMNE
 `python scripts/final.py graphs --inverse <lcmv|wmne> --mode B` writes, per construction, measure and band, on up to
 10 windows of each of the 52 development participants: density, mean / SD / min / max degree, isolated nodes, graphs
 with an isolated node, connected components (mean, max) and fraction connected, retained fraction of the dense
-graph's total weight, symmetry / diagonal / minimum weight, edges per graph relative to dense, and the edge-set
+graph's total weight, symmetry / diagonal / minimum weight, edges per graph relative to dense, the node-feature
+preservation below, and the edge-set
 stability (mean Jaccard of retained edges within a participant vs between participants). The holdout is never read;
 the diagnosis is never read (tested). **Computational requirements:** the GNNs use dense batched matrix products, so
 their cost does not fall with sparsity (it is the same R x R product); sparsity changes the information propagated,
 not the run time. The diagnostics table reports the edge counts for completeness.
+
+**Node-feature preservation** (`diagnostics.propagation`, columns `gcn_self_weight`,
+`feature_variance_retained_1/2`): the question for PSD / DE node features. A GCN layer replaces each ROI's feature by
+A_hat x with A_hat = D^-1/2 (A + I) D^-1/2, whose diagonal is 1 / (1 + d_i). With dense PLV weights (store means
+0.27 / 0.31 over 67 neighbours, d_i ≈ 18-21) an ROI keeps about 5 % of its own feature per layer and the rest is a
+connectivity-weighted average of all other ROIs: the ROI-specific spectrum, which is where PSD / DE differ between
+ROIs, is largely averaged away (over-smoothing). Measured on PLV-like synthetic weights with the store means:
+
+| construction | GCN self-weight | across-ROI variance kept after 1 step (independent features; lower bound) |
+|---|---|---|
+| dense | 0.046-0.052 | ≈ 0.003 |
+| union kNN f10 (k = 7) | 0.19-0.21 | ≈ 0.10 |
+| union kNN f20 (k = 13) | 0.13-0.14 | |
+| union kNN f30 (k = 20) | 0.09-0.10 | |
+| mutual kNN f20 (k = 13) | 0.16-0.17 | |
+
+Real PSD / DE are spatially smooth (neighbouring ROIs share leakage), so the real retained variance is higher than
+this lower bound; notebook 03 reports it on the stores. **This is a mechanism, not evidence that kNN classifies
+better:** a model that uses the graph mainly as a smoother may do well with dense graphs, and the Exp 6 / 8 models
+also carry node features through non-propagated paths. Hence the empirical development-only comparison of §5.
+
+**Normalization verified** (`tests/test_construction.py`): the GCN operator is exactly D^-1/2 (A + I) D^-1/2,
+symmetric, finite, with exactly one unit self-loop added; an isolated node keeps only itself (A_hat_ii = 1, no NaN).
+EARM-GNN normalizes its gated graph D^-1/2 (A ⊙ G) D^-1/2 without self-loops (its residual blocks carry the node's
+own state). Constructions never rescale retained weights; normalization belongs to the model.
+
+**Directed top-k vs symmetric kNN:** a per-node top-k graph is not symmetric (i may keep j while j does not keep
+i), which breaks the symmetric normalization and the undirected interpretation of PLV / |ciPLV|; it exists only for
+analysis (`symmetrize: none`, reported `symmetric: false`) and is not a candidate. Union kNN (degree >= k, every node
+keeps its own k strongest edges) and mutual kNN (degree <= k, only reciprocal edges, isolated nodes repaired) are the
+two symmetric versions; weighted proportional thresholding keeps the strongest edges globally and may isolate weakly
+connected ROIs (reported by the diagnostics; kept as the conventional alternative).
 
 ## 5. Development-only choice
 

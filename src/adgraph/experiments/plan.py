@@ -83,6 +83,8 @@ def run_experiment(config: str | Path, processed: str | Path, inverse: str, mode
     todo = units(vs, settings)
     if store is None:
         store, store_record, qc_report = open_context(processed, inverse, mode, atlas)
+    elif qc_report is None and not store.manifest.get("synthetic"):
+        raise ValueError("a real store needs its participant QC report (plan.open_context); QC is never skipped")
     results_root = Path(results_root or release.results_dir(processed))
     ctx = vs[0]["context"]
     status_path = Path(status_path) if status_path else (

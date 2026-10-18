@@ -37,23 +37,31 @@ The data-dependent parts (development participants only, label-blind; `scripts/f
 existing 68-ROI stores: the rank of every participant's saved LCMV ROI operator and the split-half (odd vs even
 windows) reliability, across participants, of PSD / DE, node strength and edge-wise PLV / |ciPLV|.
 
-## 4. Result (provisional: sphere head model)
+## 4. Result (approximate 3-layer BEM; sphere model as a check)
 
-The fsaverage BEM of the stores cannot be downloaded in the environment where this release was prepared, so the
-analysis was run with a three-shell sphere centred on the electrodes (an approximation; `02_parcellation` reruns it with
-the stores' BEM and writes the table that counts). Leadfield: numerical rank **18**, entropy-effective rank **13.1**,
-10 singular values hold 95 % and 15 hold 99 % of the energy, and only **5** lie above the wMNE regularization level.
+The stores' fsaverage 5120 BEM could not be downloaded where this release was prepared. The analysis was therefore
+run with a 3-layer BEM built from the two realistic fsaverage surfaces shipped with MNE (scalp and inner skull,
+ico-4; outer skull a 3.3-5 mm radial expansion of the inner skull; `resolution.approximate_bem`), and repeated with a
+three-shell sphere centred on the electrodes. The two agree within about 0.02 on every quantity below, so the
+conclusion does not hinge on the head model; `02_parcellation` reruns it with the stores' exact BEM (in the Colab
+cache) and writes the table that counts. Leadfield: numerical rank **18**, entropy-effective rank **13.3**, 10
+singular values hold 95 % and 15 hold 99 % of the energy, and only **5** lie above the wMNE regularization level.
 
 | atlas | inverse | ROI-operator rank | redundant ROI signals | median cross-talk | ROIs dominated by own region | median \|leakage corr\| | participation ratio |
 |---|---|---|---|---|---|---|---|
-| dk68 | wMNE | 18 | 50 | 0.84 | 0.54 | 0.19 | 8.7 |
-| dk68 | LCMV | 18 | 50 | 0.86 | 0.59 | 0.22 | 7.6 |
-| dk34_gyral | wMNE | 18 | 16 | 0.71 | 0.71 | 0.21 | 6.8 |
-| dk34_gyral | LCMV | 18 | 16 | 0.74 | 0.68 | 0.24 | 6.1 |
-| r18 | wMNE | 18 | 0 | 0.48 | 0.89 | 0.24 | 5.7 |
-| r18 | LCMV | 18 | 0 | 0.52 | 0.89 | 0.26 | 5.1 |
-| lobes12 | wMNE | 12 | 0 | 0.38 | 1.00 | 0.29 | 5.1 |
-| lobes12 | LCMV | 12 | 0 | 0.43 | 1.00 | 0.30 | 4.5 |
+| dk68 | wMNE | 18 | 50 | 0.85 | 0.53 | 0.19 | 8.6 |
+| dk68 | LCMV | 18 | 50 | 0.86 | 0.57 | 0.23 | 7.4 |
+| dk34_gyral | wMNE | 18 | 16 | 0.71 | 0.74 | 0.22 | 6.6 |
+| dk34_gyral | LCMV | 18 | 16 | 0.72 | 0.74 | 0.26 | 5.8 |
+| r18 | wMNE | 18 | 0 | 0.49 | 0.89 | 0.24 | 5.4 |
+| r18 | LCMV | 18 | 0 | 0.53 | 0.89 | 0.27 | 4.8 |
+| lobes12 | wMNE | 12 | 0 | 0.39 | 1.00 | 0.29 | 4.8 |
+| lobes12 | LCMV | 12 | 0 | 0.46 | 1.00 | 0.30 | 4.3 |
+
+Limitations: fsaverage template anatomy and template (Colin27 lookup) electrode positions, as in the stores; the
+LCMV operator uses a model covariance (independent unit-variance sources), whereas each store uses the participant's
+data covariance (the saved per-participant operators all have rank 18, `reliability`); resolution under independent
+equal-variance region activity, not under real correlated cortical activity.
 
 Reading: with 68 ROIs, 50 of the 68 signals are exact linear combinations of the others, the median ROI receives
 about 85 % of its variance from other regions, and only about half of the ROIs are dominated by their own region:
@@ -89,18 +97,33 @@ to `r18` with a logged decision. The validated 68-ROI stores are never overwritt
 **dk68 remains the reference / sensitivity analysis** and the comparison with all earlier results. If the rebuild is
 not approved, dk68 stays primary and the paper states the leakage limitation quantified in §4.
 
-## 6. Why the saved 68-ROI data cannot be averaged into coarser regions
+## 6. Can coarser regions be obtained from the saved 68-ROI data?
 
-The stores save, per participant, the continuous 68 ROI time series (`roi_timeseries.npz`) and, for LCMV, the 68 x 19
-ROI operator. A coarse region's signal is the `mean_flip` average over ALL sources of the merged label, with sign
-flips derived from the merged label's own cortical normals. Each saved DK signal already carries its own sign flip,
-whose sign relative to its neighbours is arbitrary, and its own source-count weighting; averaging DK signals (or their
-operator rows) is therefore not the merged-label signal and can cancel activity, and averaging 68 x 68 PLV matrices is
-not the connectivity of the merged regions (phase synchrony does not average). The legitimate route recomputes the ROI
-operator for the merged labels from the forward model and the inverse (for LCMV from each participant's own data
-covariance, i.e. from the recordings) and then the features and connectivity: exactly what the store pipeline does
-with `source.atlas` set (`atlas.merged_labels`). Nothing in the final framework aggregates 68-ROI signals or
-connectivity.
+**Not by averaging.** A coarse region's signal is the `mean_flip` average over ALL sources of the merged label, with
+sign flips derived from the merged label's own cortical normals. Each saved DK signal carries its own sign flip, whose
+sign relative to its neighbours is arbitrary, and its own source-count weighting; averaging DK signals (or their
+operator rows) is not the merged-label signal and can cancel activity, and averaging 68 x 68 PLV matrices is not the
+connectivity of the merged regions (phase synchrony does not average). Nothing in the final framework aggregates
+68-ROI signals or connectivity.
+
+**What the saved intermediates do allow** (`resolution.sensor_signals`, `resolution.reconstruction_check`,
+`scripts/final.py reconstruct-check`, tested). Each store saves, per participant, the 68 x 19 ROI operator W
+(`operator.npz`, both inverses) and the continuous ROI signals of every analysed piece (`roi_timeseries.npz`, float32,
+without the analytic-filter margins). W rejects the constant vector and has rank 18, so its row space is exactly the
+average-referenced sensor space: the sensor signals of each saved piece are recovered exactly as pinv(W) * roi (up to
+float32). From them, a merged-label operator (forward model + inverse; for LCMV the data covariance of the accepted
+samples, which lie inside the pieces) and coarse ROI signals could be computed without the recordings. Two limits:
+
+* windows whose filter support reaches into the unsaved margins (within 825 samples = 3.3 s of a piece end, i.e. the
+  first and last few windows of every piece) cannot be recomputed exactly; the real fraction per
+  participant is measured by `reconstruct-check` in notebook 02 (3b);
+* the result would be a second, differently built store family (a new code path, its own validation), not the
+  unchanged store pipeline.
+
+**Recommendation:** use the unchanged store pipeline with `source.atlas` set (`atlas.merged_labels`) on the
+recordings, which reproduces every window exactly and is validated end to end by the existing `validate` / `match`
+steps. The shortcut saves about 1 h of CPU and is not worth a second code path; it is documented here because it
+shows that the coarse stores need no new data, only recomputation.
 
 ## 7. Infrastructure
 

@@ -10,7 +10,12 @@ sample of windows of the DEVELOPMENT participants only (the holdout is never rea
   windows of DIFFERENT participants (a construction whose edges change from window to window as much as from
   participant to participant carries little participant-specific structure);
 * cost: retained edges per graph relative to the dense graph (dense GCN cost is unchanged, but sparse message
-  passing, memory of sparse formats and EARM-GNN gate penalties scale with it).
+  passing, memory of sparse formats and EARM-GNN gate penalties scale with it);
+* node-feature preservation under GCN propagation (the question for PSD / DE node features): the mean self-weight
+  of the normalized operator A_hat = D^-1/2 (A + I) D^-1/2 (A_hat_ii = 1 / (1 + d_i)), and the fraction of the
+  across-ROI variance of the band's log-PSD node feature (z-scored across ROIs per window) that remains after one and
+  two propagation steps. Near 0: propagation replaces each ROI's spectrum by a connectivity-weighted cohort-of-ROIs
+  average (over-smoothing); near 1: ROI-specific spectral information is kept.
 
 Nothing here selects a construction; selection uses development-CV results only (``experiments.selection``).
 """
@@ -67,6 +72,22 @@ def stability(edges: np.ndarray, keys: np.ndarray, n_pairs: int = 400, seed: int
             "jaccard_ratio_within_between": jw / jb if jb else float("nan")}
 
 
+def propagation(adj: np.ndarray, feature: np.ndarray) -> dict:
+    """GCN self-weight and retained across-ROI variance of ``feature`` (n, R) after 1 and 2 steps of
+    A_hat = D^-1/2 (A + I) D^-1/2 for adjacencies ``adj`` (n, R, R)."""
+    r = adj.shape[-1]
+    a = adj.astype(np.float64) + np.eye(r)
+    d = a.sum(-1)
+    ah = a / np.sqrt(d[..., :, None] * d[..., None, :])
+    x = feature.astype(np.float64)
+    x = (x - x.mean(-1, keepdims=True)) / np.where(x.std(-1, keepdims=True) < 1e-12, 1.0, x.std(-1, keepdims=True))
+    h1 = np.einsum("nij,nj->ni", ah, x)
+    h2 = np.einsum("nij,nj->ni", ah, h1)
+    return {"gcn_self_weight": float(np.diagonal(ah, axis1=-2, axis2=-1).mean()),
+            "feature_variance_retained_1": float(h1.var(-1).mean()),
+            "feature_variance_retained_2": float(h2.var(-1).mean())}
+
+
 def construction_diagnostics(store: GraphStore, constructions: dict[str, dict], development_keys: list[str],
                              connectivity=("plv", "ciplv"), per_participant: int = 10, seed: int = 0) -> pd.DataFrame:
     """One row per (construction, connectivity, band): the diagnostics of the module docstring."""
@@ -118,7 +139,8 @@ def construction_diagnostics(store: GraphStore, constructions: dict[str, dict], 
                              "edges_per_graph": float(e.sum((-1, -2)).mean() / 2),
                              "relative_edges": float(e.sum((-1, -2)).mean() / (r * (r - 1))),
                              "symmetric": st["symmetric"], "zero_diagonal": st["zero_diagonal"],
-                             "min_weight": st["min_weight"], **stability(e, keys, seed=seed)})
+                             "min_weight": st["min_weight"], **stability(e, keys, seed=seed),
+                             **propagation(a, np.asarray(store.arrays["psd_log"][idx, b]))})
     return pd.DataFrame(rows)
 
 
@@ -126,6 +148,7 @@ def summarize(diag: pd.DataFrame) -> pd.DataFrame:
     """Construction x adjacency means over bands (the table of the graph-construction notebook)."""
     cols = ["density", "mean_degree", "sd_degree", "min_degree", "isolated_nodes_per_graph", "fraction_connected",
             "components_max", "retained_weight_fraction", "relative_edges", "jaccard_within_participant",
-            "jaccard_between_participants", "jaccard_ratio_within_between"]
+            "jaccard_between_participants", "jaccard_ratio_within_between", "gcn_self_weight",
+            "feature_variance_retained_1", "feature_variance_retained_2"]
     agg = {c: ("min" if c == "min_degree" else "max" if c == "components_max" else "mean") for c in cols}
     return diag.groupby(["construction", "adjacency"], sort=False).agg(agg).reset_index()

@@ -175,3 +175,40 @@ def test_diagnostics_are_label_blind_and_development_only(d3_store):
     s = summarize(d).set_index("construction")
     assert s.loc["dense", "density"] == pytest.approx(1.0) and s.loc["knn_union_f20", "density"] < 0.5
     assert s.loc["knn_mutual_f20", "relative_edges"] <= s.loc["knn_union_f20", "relative_edges"]
+
+
+def test_gcn_normalization_is_symmetric_with_one_self_loop_and_no_nan_for_isolated_nodes():
+    torch = pytest.importorskip("torch")
+    from adgraph.models.gcn import DenseGCNConv
+    from adgraph.models.xu_dual import normalize
+
+    a = adj(n=2, k=1)[:, 0]
+    a[0, 5, :] = a[0, :, 5] = 0                                              # node 5 isolated in graph 0
+    t = torch.from_numpy(a)
+    n = normalize(t).numpy()
+    m = a + np.eye(68)
+    d = m.sum(-1)
+    assert np.allclose(n, m / np.sqrt(d[:, :, None] * d[:, None, :]), atol=1e-6)   # D^-1/2 (A + I) D^-1/2
+    assert np.allclose(n, np.swapaxes(n, -1, -2)) and np.isfinite(n).all()
+    assert n[0, 5, 5] == pytest.approx(1.0) and np.allclose(np.delete(n[0, 5], 5), 0)  # isolated: keeps itself
+    conv = DenseGCNConv(2, 3)
+    x = torch.randn(2, 68, 2)
+    with torch.no_grad():
+        out = conv(x, t)
+        want = torch.from_numpy(n.astype(np.float32)) @ conv.lin(x) if hasattr(conv, "lin") else None
+    assert torch.isfinite(out).all() and out.shape == (2, 68, 3)
+    if want is not None:
+        assert torch.allclose(out, want, atol=1e-5)
+
+
+def test_sparser_graphs_keep_more_of_each_rois_own_spectral_feature():
+    from adgraph.graphs.diagnostics import propagation
+
+    a = adj(n=20, k=1)[:, 0] * 0.6
+    f = np.random.default_rng(0).standard_normal((20, 68))
+    dense = propagation(a, f)
+    knn = propagation(GraphConstruction("knn", k=7).transform(a[:, None])[:, 0], f)
+    assert dense["gcn_self_weight"] == pytest.approx(np.mean(1 / (1 + a.sum(-1))), rel=1e-6)
+    assert knn["gcn_self_weight"] > 2 * dense["gcn_self_weight"]
+    assert knn["feature_variance_retained_1"] > dense["feature_variance_retained_1"]
+    assert propagation(np.zeros((1, 68, 68)), f[:1])["feature_variance_retained_1"] == pytest.approx(1.0)

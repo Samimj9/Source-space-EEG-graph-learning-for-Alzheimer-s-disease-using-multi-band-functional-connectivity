@@ -83,12 +83,47 @@ def forward_model(info, subjects_dir: str | Path, bem: str | None = None, spacin
                 "cortex; an approximation, the stores use the fsaverage BEM)")
     else:
         model = str(bem)
-        desc = f"fsaverage BEM {Path(bem).name} (as the stores)"
+        desc = (f"approximate 3-layer fsaverage BEM {Path(bem).name} (realistic scalp and inner skull, derived outer "
+                "skull; the stores use the fsaverage 5120 BEM)" if "approx" in Path(bem).name
+                else f"fsaverage BEM {Path(bem).name} (as the stores)")
     if isinstance(trans, Path):
         trans = str(trans) if trans.exists() else "fsaverage"
     fwd = mne.make_forward_solution(info, trans=trans, src=src, bem=model,
                                     eeg=True, meg=False, mindist=mindist_mm, verbose="error")
     return fwd, desc
+
+
+def approximate_bem(path: str | Path, skull_mm: float = 5.0) -> Path:
+    """A 3-layer fsaverage BEM solution from the two realistic surfaces shipped with MNE (``mne/data/fsaverage``:
+    scalp ``fsaverage-head.fif``, inner skull ``fsaverage-inner_skull-bem.fif``, ico-4), with the outer skull derived
+    by a radial expansion of the inner skull of ``skull_mm`` (at most half the local inner-skull-to-scalp gap, so the
+    layers nest); conductivities 0.3 / 0.006 / 0.3 S/m. For environments without the stores' fsaverage BEM; the
+    result is labelled as an approximation."""
+    import os
+
+    import mne
+    from mne.bem import _ico_downsample, _surfaces_to_bem
+    from mne.io.constants import FIFF
+    from scipy.spatial import cKDTree
+
+    path = Path(path)
+    if path.exists():
+        return path
+    d = Path(os.path.dirname(mne.__file__)) / "data" / "fsaverage"
+    inner = _ico_downsample(mne.read_bem_surfaces(d / "fsaverage-inner_skull-bem.fif", verbose="error")[0], 4)
+    head = mne.read_bem_surfaces(d / "fsaverage-head.fif", verbose="error")[0]
+    c = inner["rr"].mean(0)
+    v = inner["rr"] - c
+    gap = cKDTree(head["rr"]).query(inner["rr"])[0]
+    disp = np.minimum(skull_mm / 1000, 0.5 * gap)[:, None]
+    outer = c + v * (1 + disp / np.linalg.norm(v, axis=1, keepdims=True))
+    surfs = [{"rr": inner["rr"].copy(), "tris": inner["tris"]}, {"rr": outer, "tris": inner["tris"]},
+             {"rr": head["rr"].copy(), "tris": head["tris"]}]
+    bem = _surfaces_to_bem(surfs, [FIFF.FIFFV_BEM_SURF_ID_BRAIN, FIFF.FIFFV_BEM_SURF_ID_SKULL,
+                                   FIFF.FIFFV_BEM_SURF_ID_HEAD], (0.3, 0.006, 0.3), ico=None, rescale=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mne.write_bem_solution(path, mne.make_bem_solution(bem, verbose="error"), overwrite=True, verbose="error")
+    return path
 
 
 def _avg_ref(n: int) -> np.ndarray:
@@ -299,6 +334,56 @@ def store_reliability(store, development_keys: list[str]) -> pd.DataFrame:
             rel = split_half_reliability(pd.DataFrame(a[:, iu[0], iu[1]].astype(float)), key)
             rows.append({"feature": f"{conn}_edge", "band": band, "unit": "edge", "median": float(rel.median()),
                          "q10": float(rel.quantile(0.1)), "n": int(rel.size)})
+    return pd.DataFrame(rows)
+
+
+def sensor_signals(W: np.ndarray, roi: np.ndarray) -> np.ndarray:
+    """Average-referenced sensor signals x recovered from the saved ROI signals roi = W x.
+
+    W (R x C) annihilates the constant vector (average reference) and has rank C - 1, so its row space IS the
+    average-referenced sensor space and x = pinv(W) roi exactly (up to the float32 storage of roi)."""
+    return np.linalg.pinv(W.astype(np.float64)) @ roi.astype(np.float64)
+
+
+def reconstruction_check(store_root: str | Path, keys: list[str] | None = None, margin: int = 825,
+                         window: int = 2500) -> pd.DataFrame:
+    """Can coarser-atlas ROI signals be rebuilt from a store's saved intermediates (no recordings)? Read-only.
+
+    Per participant (``subjects/<key>/operator.npz`` W, ``roi_timeseries.npz`` pieces, ``windows.csv``):
+    ``rank`` of W and its constant-vector response (average reference); ``rel_residual`` = |W pinv(W) roi - roi| /
+    |roi| (0 up to float32: the sensor signals are exactly recoverable); and the fraction of the participant's windows
+    whose filter support [start - margin, stop + margin) lies inside the saved piece (the store saved each piece
+    without the analytic-filter margins, so windows within one margin of a piece end cannot be recomputed exactly).
+    ``margin`` = ``sourcegraphs.recording.margin_samples`` (825 at 250 Hz), ``window`` = 10 s."""
+    rows = []
+    for unit in sorted(Path(store_root).glob("subjects/*")):
+        k = unit.name
+        if keys is not None and k not in set(keys):
+            continue
+        if not (unit / "operator.npz").exists() or not (unit / "roi_timeseries.npz").exists():
+            rows.append({"key": k, "available": False})
+            continue
+        with np.load(unit / "operator.npz") as z:
+            W = z["W"]
+        s = np.linalg.svd(W, compute_uv=False)
+        res, tot, ok, n = 0.0, 0.0, 0, 0
+        win = pd.read_csv(unit / "windows.csv") if (unit / "windows.csv").exists() else pd.DataFrame()
+        with np.load(unit / "roi_timeseries.npz") as z:
+            for name in [f for f in z.files if not f.endswith("_start_sample")]:
+                roi = z[name]
+                x = sensor_signals(W, roi)
+                res += float(np.linalg.norm(W @ x - roi) ** 2)
+                tot += float(np.linalg.norm(roi) ** 2)
+                if len(win) and "piece" in win:
+                    start = int(z[f"{name}_start_sample"])
+                    w = win[win["piece"] == int(name.replace("piece", ""))]
+                    off = w["start_sample"].to_numpy() - start
+                    ok += int(((off >= margin) & (off + window + margin <= roi.shape[1])).sum())
+                    n += len(w)
+        rows.append({"key": k, "available": True, "n_rois": W.shape[0], "rank": int((s > s[0] * 1e-8).sum()),
+                     "constant_response": float(np.abs(W.sum(1)).max() / np.abs(W).max()),
+                     "rel_residual": float(np.sqrt(res / tot)) if tot else float("nan"), "n_windows": n,
+                     "windows_reconstructable": ok, "fraction_reconstructable": ok / n if n else float("nan")})
     return pd.DataFrame(rows)
 
 

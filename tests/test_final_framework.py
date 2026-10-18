@@ -292,3 +292,13 @@ def test_one_release_pin_and_historical_pins_untouched(tmp_path):
     assert old.read_text() == "299aed72\n"
     setup = (REPO / "scripts" / "colab_setup.py").read_text()
     assert "--family" not in setup and "HISTORICAL_PINS" in setup
+
+
+def test_a_real_store_is_never_run_without_its_qc(release_root):
+    from adgraph.stores import open_store
+
+    store, rec = open_store(release_root, "lcmv", "B")
+    store.manifest = {**store.manifest, "synthetic": False}
+    with pytest.raises(ValueError, match="QC"):
+        run_experiment(experiment_configs()["exp1"], release_root, "lcmv", "B", variants=["logreg__psd"],
+                       store=store, store_record=rec)
