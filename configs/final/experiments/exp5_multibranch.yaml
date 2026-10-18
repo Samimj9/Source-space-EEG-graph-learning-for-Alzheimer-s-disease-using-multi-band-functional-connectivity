@@ -1,0 +1,22 @@
+# Exp 5: frequency-aware multibranch GNN. One graph per band (five), matched-band [log, relative] PSD node features
+# (F = 2), band embeddings fused by mean or attention. Two ways to make the encoder band-aware:
+#   shared_bandid  one GCN shared across bands + an explicit one-hot band identity appended to the node features
+#                  (methodology log entry 57: without it a shared encoder with symmetric fusion is invariant to the
+#                  band order; that invariant variant is not part of the final experiments)
+#   separate       one GCN per band (band-specific parameters)
+# {PLV, |ciPLV|} x 4 = 8 variants.
+extends: ../gnn.yaml
+experiment: exp5_multibranch
+graph:
+  band_mode: multi
+node_features:
+  components: [psd]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  shared_bandid__mean: {model.shared_encoder: true, model.fusion: mean, model.band_identity: onehot}
+  shared_bandid__attention: {model.shared_encoder: true, model.fusion: attention, model.band_identity: onehot}
+  separate__mean: {model.shared_encoder: false, model.fusion: mean}
+  separate__attention: {model.shared_encoder: false, model.fusion: attention}

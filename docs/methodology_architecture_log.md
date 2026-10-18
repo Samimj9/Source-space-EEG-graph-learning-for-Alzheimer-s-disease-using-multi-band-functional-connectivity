@@ -3272,6 +3272,55 @@ node features. Configs `*_exp5_bandid` and `*_exp6_bandid` cover LX/WX, modes A/
 are in `corrected/`, with own pins `R1_CODE_COMMIT.txt`. The originals stay as baselines, and no original result is
 invalidated. The holdout was not used to choose the correction.
 
+## 58. The final framework (release final-1.0): one implementation for LCMV and wMNE, QC, graph construction, atlas
+
+**Request (2026-10-17 / 18).** Consolidate the LX and WX suites into one maintainable framework with one version
+system; investigate the parcellation for 19-channel EEG; add graph sparsification, mandatory participant QC, fixed
+60-epoch training, unified Exp 0-8 and reporting; fix the legacy builder's differential-entropy failure; keep every
+validated store, result and pin. Branch `claude/unified-final-framework` (backup tag `backup/pre-unification-607b5ea`).
+
+**What changed** (`docs/final/framework.md`, DESIGN.md v2.0):
+- **One code path.** `adgraph.lcmvxu` became `adgraph.sourcegraphs` (signal-processing modules byte-identical); one
+  store configuration `configs/source_graphs.yaml` whose `resolve(inverse, atlas)` reproduces the two validated stores'
+  configurations dict for dict (hashes 811690218bfa / c32bc6c67f0e, tested); one experiment config per Exp 0-8
+  (`configs/final/`); inverse, window mode, atlas and graph construction are run-time context; one runner, report and
+  CLI (`scripts/final.py`), one store tool (`scripts/build_stores.py`), one setup notebook and one notebook per
+  experiment. LCMV and wMNE variants are identical apart from the inverse (tested for every variant).
+- **One version system.** `adgraph.release` (`FINAL_v1/CODE_COMMIT.txt`, `stores.lock.json`) replaces the D1D2 / D3 /
+  LX / WX / ES200 / R1 / Exp 8 pins, which stay on Drive untouched and are only reported.
+- **Unchanged numerics.** The frozen split and the five development folds (pinned in `tests/test_splits.py`), the
+  fixed-60 training loop (bit-identical predictions to 607b5eac on four architectures), node scaling, participant
+  aggregation, thresholds and label orientation are unchanged.
+- **Graph construction** (`graphs.construction`, docs/final/graph_construction.md): dense reference; union / mutual
+  kNN with k relative to the ROI count (10 / 20 / 30 %); proportional; cortical contiguity; feature similarity as an
+  explicitly different graph; label-blind development-only diagnostics; a pre-specified development-CV selection
+  rule (dense kept unless a construction is better by >= 0.02 AUC in >= 3 of 4 cells). Defect found and fixed during
+  review: with the feature-similarity graph, node strength had been computed from the similarity matrix; it is now
+  always the functional connectivity strength.
+- **QC** (`adgraph.qc`, docs/final/qc.md): category A blocks the experiments until a decision is recorded; B flagged
+  (robust z against development participants, MCD), C from out-of-fold predictions; fold-level thresholds fitted on
+  training participants; no automatic exclusion.
+- **Parcellation** (docs/final/parcellation.md): atlases dk68 / dk34_gyral / r18 / lobes12 as unions of whole DK labels
+  per hemisphere, built by the unchanged pipeline with merged labels (never by averaging 68-ROI signals or PLV);
+  source-resolution analysis with the stores' inverse settings. Provisional (sphere model): 68 ROIs carry 50 forced
+  linear redundancies, median cross-talk 0.84-0.86, own-region dominance 0.54-0.59; r18 is the finest atlas with no
+  redundancy, cross-talk <= 0.6 and dominance >= 0.8 for both inverses. The atlas is chosen on these criteria, not on
+  classification results; the two numeric thresholds were set after these provisional numbers were seen, the
+  threshold-free redundancy criterion alone gives the same choice. r18 stores need the author's approval.
+- **Legacy builder (D1 / D2, graphsD3_v4)** kept importable and tested as `adgraph.legacy`. Root cause of its 36 test
+  failures: entry 50 added differential entropy to the store schema's PSD kinds, but the builder asked the Welch
+  band-power function for it. Fix: DE computed with the definition of entry 50, 0.5 ln(2 pi e var(Re analytic)), from
+  the same band analytic signal as PLV (ROIs) and the same band filter on the sensors; every pre-existing array is
+  bit-identical to the commit before DE existed, peak memory unchanged (a view that kept each band's analytic signal
+  alive was found by the memory test and released); stores built before DE still load and serve every other feature.
+- **Retired with the D1 / D2 experiment framework** (archived in `legacy/`, docs/final/inventory.md): settings S1-S5,
+  EdgeWeightedGAT / WeightedGraphSAGE, age covariates, dataset-identity probe, D1 / D2 figures, early stopping, the
+  per-suite runners and notebooks; their tests moved to `legacy/tests/`, the properties that still matter re-tested
+  on the final framework.
+
+**Holdout.** It was inspected in entries 50-57 and is therefore reported descriptively in v2.0 and never used for any
+selection (architecture, graph construction, k, atlas, QC thresholds).
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

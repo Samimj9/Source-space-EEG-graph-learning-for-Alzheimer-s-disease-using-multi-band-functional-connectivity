@@ -11,11 +11,11 @@ import pytest
 from adgraph.checkpoint import write_marker
 from adgraph.config import load_yaml
 from adgraph.evaluation.splits import xu_partition
-from adgraph.lcmvxu import correct as corr
-from adgraph.lcmvxu import recording
-from adgraph.lcmvxu.validate import boundary_violations, require_validated, validate_run
+from adgraph.sourcegraphs import correct as corr
+from adgraph.sourcegraphs import recording
+from adgraph.sourcegraphs.validate import boundary_violations, require_validated, validate_run
 
-CFG = load_yaml("configs/lcmv_xu/pipeline.yaml")
+CFG = load_yaml("legacy/configs/lcmv_xu/pipeline.yaml")
 SF_IN, SF = 500.0, 250.0
 M = recording.margin_samples(CFG)
 WIN, STEP = recording.window_len(CFG)

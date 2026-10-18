@@ -37,29 +37,29 @@ from . import provenance
 from .provenance import git_commit
 
 CODE_VERSIONS = {
-    "operator": "operator-1",          # sensor -> ROI operator (forward, inverse, mean_flip)
-    "graph_subject": "graph-subject-3",  # per-subject preprocessing/source/PSD/connectivity (3: boundary-aware, entry 41)
+    "operator": "operator-1",          # legacy builder: sensor -> ROI operator (forward, inverse, mean_flip)
+    "graph_subject": "graph-subject-3",  # legacy builder: per-subject graphs (3: boundary-aware, entry 41)
     "graph_assembly": "graph-assembly-1",
-    "experiment": "experiment-1",      # outer-fold training/prediction, evaluation
-    "inner_trial": "inner-trial-1",    # one hyperparameter combination on one inner fold
+    "experiment": "experiment-2",      # outer-fold training/prediction, evaluation (2: unified final framework)
+    "inner_trial": "inner-trial-1",    # one hyperparameter combination on one inner fold (classical models)
     "permutation": "permutation-1",
 }
 
 # Package parts (relative to src/adgraph) whose source determines each kind of computation.
 CODE_SCOPES = {
-    "operator": ("config.py", "pipeline.py", "io", "source"),
-    "graph": ("config.py", "pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
+    "operator": ("config.py", "legacy/pipeline.py", "io", "source"),            # legacy builder (adgraph.legacy)
+    "graph": ("config.py", "legacy/pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
               "graphs/store.py"),
-    "experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features"),
-    "lx_graph": ("config.py", "pipeline.py", "io", "preprocessing", "source", "features", "connectivity",
-                 "graphs/store.py", "evaluation/splits.py", "lcmvxu"),
+    "source_graph": ("config.py", "io", "preprocessing", "source", "features", "connectivity", "graphs/store.py",
+                     "evaluation/splits.py", "sourcegraphs"),
+    "experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features", "qc"),
 }
 # Numerical libraries whose version can change results of each kind of computation.
 SCOPE_LIBRARIES = {
     "operator": ("numpy", "scipy", "mne"),
     "graph": ("numpy", "scipy", "pandas", "mne"),
+    "source_graph": ("numpy", "scipy", "pandas", "mne"),
     "experiment": ("numpy", "scipy", "pandas", "sklearn", "torch"),
-    "lx_graph": ("numpy", "scipy", "pandas", "mne"),
 }
 
 STATES = ("pending", "running", "completed", "failed")

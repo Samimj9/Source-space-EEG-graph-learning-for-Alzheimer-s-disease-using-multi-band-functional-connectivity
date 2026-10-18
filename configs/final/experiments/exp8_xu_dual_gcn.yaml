@@ -1,0 +1,55 @@
+# Exp 8: Xu-inspired dual-adjacency source-space GCN (src/adgraph/models/xu_dual.py; methodology log entry 52).
+# An adaptation of the two-layer design of Xu et al. (2025) to our representation, not a reproduction:
+#   one graph per band; layer 1 = the window's weighted PLV / |ciPLV| (normalized D^-1/2 (A+I) D^-1/2), band-specific
+#   weights; layer 2 = FIXED atlas adjacency (same lobe and hemisphere; atlas-derived group membership, not measured
+#   white-matter connectivity); flatten (ROIs x 2 x 5) -> FC 32 -> FC 32 -> logit. Widths are the fixed protocol
+#   widths (Xu chose theirs on their test set). Band identity: band-specific weights and the flatten order.
+# Node-feature variants: de [DE] (F = 1), psd [log, rel] (F = 2), psd_de_strength [log, rel, DE, strength] (F = 4,
+# primary); ablations (PLV, psd_de_strength): both layers functional; both anatomical; bilateral lobes; weights
+# shared across bands. 10 variants. Training block identical to gnn.yaml (tested).
+extends: ../protocol.yaml
+experiment: exp8_xu_dual_gcn
+input: graph
+protocol:
+  name: gnn_fixed60_v1
+  hyperparameter_search: none
+hparams: null
+graph:
+  connectivity: plv
+  bands: [delta, theta, alpha, beta, gamma]
+  band_mode: multi
+  adjacency: connectivity
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel, de]
+  psd_bands: matched
+  scaling: node
+model:
+  architecture: xu_dual_gcn
+  hidden: 32
+  node_out: 2
+  fc1: 32
+  fc2: 32
+  dropout: 0.3
+  band_specific: true
+  layer1: functional
+  layer2: anatomical
+  anatomical_grouping: lobe_hemisphere
+training:
+  lr: 0.001
+  weight_decay: 0.0001
+  epochs: 60
+  batch_size: 32
+evaluation:
+  save_model_state: true
+variants:
+  plv__psd_de_strength: {graph.connectivity: plv}
+  ciplv__psd_de_strength: {graph.connectivity: ciplv}
+  plv__psd: {graph.connectivity: plv, node_features.components: [psd], node_features.psd_kinds: [log, rel]}
+  ciplv__psd: {graph.connectivity: ciplv, node_features.components: [psd], node_features.psd_kinds: [log, rel]}
+  plv__de: {graph.connectivity: plv, node_features.components: [psd], node_features.psd_kinds: [de]}
+  ciplv__de: {graph.connectivity: ciplv, node_features.components: [psd], node_features.psd_kinds: [de]}
+  plv__psd_de_strength__abl_functional_both: {graph.connectivity: plv, model.layer2: functional}
+  plv__psd_de_strength__abl_anatomical_both: {graph.connectivity: plv, model.layer1: anatomical}
+  plv__psd_de_strength__abl_bilateral_lobes: {graph.connectivity: plv, model.anatomical_grouping: lobe_bilateral}
+  plv__psd_de_strength__abl_shared_weights: {graph.connectivity: plv, model.band_specific: false}

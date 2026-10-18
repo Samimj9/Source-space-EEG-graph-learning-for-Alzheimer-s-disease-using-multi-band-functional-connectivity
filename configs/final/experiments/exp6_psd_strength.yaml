@@ -1,0 +1,27 @@
+# Exp 6: node-feature and band ablations of the full multiband GCN. One graph per band, one shared GCN with the
+# explicit one-hot band identity, attention fusion; node features per ROI and band [log PSD, relative PSD, node
+# strength] (F = 3; strength = mean connectivity of the node in the dense band graph). Full model for PLV and
+# |ciPLV|; ablations for PLV: no PSD, no strength, mean instead of learned fusion, and each band dropped. 10 variants.
+extends: ../gnn.yaml
+experiment: exp6_psd_strength
+graph:
+  band_mode: multi
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel]
+  psd_bands: matched
+model:
+  shared_encoder: true
+  fusion: attention
+  band_identity: onehot
+variants:
+  plv__full: {graph.connectivity: plv}
+  ciplv__full: {graph.connectivity: ciplv}
+  plv__no_psd: {graph.connectivity: plv, node_features.components: [strength]}
+  plv__no_strength: {graph.connectivity: plv, node_features.components: [psd]}
+  plv__no_learned_fusion: {graph.connectivity: plv, model.fusion: mean}
+  plv__drop_delta: {graph.connectivity: plv, graph.bands: [theta, alpha, beta, gamma]}
+  plv__drop_theta: {graph.connectivity: plv, graph.bands: [delta, alpha, beta, gamma]}
+  plv__drop_alpha: {graph.connectivity: plv, graph.bands: [delta, theta, beta, gamma]}
+  plv__drop_beta: {graph.connectivity: plv, graph.bands: [delta, theta, alpha, gamma]}
+  plv__drop_gamma: {graph.connectivity: plv, graph.bands: [delta, theta, alpha, beta]}

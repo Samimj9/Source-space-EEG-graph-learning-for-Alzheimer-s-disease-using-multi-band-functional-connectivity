@@ -1,0 +1,12 @@
+# Exp 0: sensor-space spectral baseline. 19 electrodes x 5 Xu bands; logistic regression and linear SVM, each with
+# PSD features [log, relative] and, as a separate configuration, differential entropy [DE]. 4 variants.
+# Sensor features do not involve the inverse (identical in the LCMV and wMNE stores): run once per window mode.
+extends: ../classical.yaml
+experiment: exp0_sensor_psd_de
+features:
+  source: sensor
+sweep:
+  model.name: [logreg, svm]
+variants:
+  psd: {features.psd_kinds: [log, rel]}
+  de: {features.psd_kinds: [de]}

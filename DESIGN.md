@@ -5,10 +5,33 @@ trained**. Any change after classification starts must be logged here (with
 date and reason) and in `docs/methods_decisions.md`. Results produced under an
 earlier version of this design are reported against that version.
 
-Status: **frozen v1.7 (2026-10-14)** (v1.6 adds the exploratory Experiment 7; v1.7 adds Dataset 3 with its own within-dataset setting). v1.5 amends the GNN training protocol (fixed hyperparameters, no inner hyperparameter search) and the GNN experiment schedule (Tier 1 / Tier 2) for computational feasibility, **after** Exp 0, Exp 1 and the first nested-CV Exp 2 result had been observed; the amendment is described in the changelog and in methodology log entry 42. Classical models, splits, metrics and the graph dataset are unchanged.
+Status: **v2.0 (2026-10-18), the final framework** (`docs/final/framework.md`, methodology log entry 58, decisions row 61). v2.0 governs every result of release final-1.0 (ds004504, LCMV and wMNE source space); v1.0-v1.7 below remain the design of the earlier D1 / D2 / D3 results, which are reported against those versions. v1.7 (2026-10-14) added Dataset 3; v1.6 the exploratory Experiment 7; v1.5 amended the GNN training protocol (fixed hyperparameters) after Exp 0, Exp 1 and the first nested-CV Exp 2 result had been observed.
 
 Changelog:
 
+- **v2.0 (2026-10-18, final framework; author request "one unified, final implementation"; methodology log entry 58, decisions row 61):**
+  - **When / what was known:** after the LCMV-Xu and wMNE-Xu suites (Exp 0-8, fixed-60, ES200, R1) had been run and their
+    development-CV and holdout results inspected (methodology log entries 50-57). The holdout is therefore **no longer
+    untouched**: in v2.0 it is evaluated once per final configuration and reported descriptively, never used for any
+    selection.
+  - **Data:** ds004504 only (65 participants: 36 AD / 29 HC; FTD excluded by design), the four validated stores (LCMV /
+    wMNE x window modes B / A, 68 Desikan-Killiany ROIs, 5 Xu bands), read only and locked. Mode B is primary, mode A
+    the sensitivity analysis.
+  - **Settings:** the frozen participant split of the Xu suites only: `xu_dev_cv` (5-fold participant CV inside the 52
+    development participants; folds identical to the earlier suites) and `xu_holdout` (fit on the 52, test once on the
+    13). The D1 / D2 settings S1-S5 are not part of v2.0.
+  - **Experiments:** Exp 0-8 as in the Xu suites, unchanged definitions, except that shared-encoder multiband models
+    always carry the explicit one-hot band identity (entry 57); the band-permutation-invariant variants are not final
+    experiments. No architecture added.
+  - **Training:** GNNs exactly 60 epochs (protocol `gnn_fixed60_v1`, the v1.5 fixed configuration; no early stopping,
+    no search); classical models keep their participant-level inner CV for C.
+  - **Reporting:** participant-level pooled out-of-fold AUC primary, with mean / range of fold AUCs, balanced accuracy,
+    sensitivity, specificity, confusion matrix, DeLong / bootstrap / Wilson CIs; LCMV vs wMNE and mode B vs A paired
+    DeLong (descriptive).
+  - **New, pre-specified before any v2.0 result:** participant QC gate (category A blocks until decided; nobody excluded
+    automatically); graph-construction comparison with a development-only selection rule (dense kept unless a
+    construction is better by >= 0.02 AUC in >= 3 of 4 cells); atlas choice on source-resolution criteria, not on
+    classification results (`docs/final/parcellation.md`).
 - **v1.7 (2026-10-14):** **Dataset 3** (OpenNeuro ds004504; 36 AD, 29 HC; FTD excluded by design; `docs/dataset_d3.md`, methodology log entry 44) is added as a third cohort with its own within-dataset setting **S5 `within_D3`** (same subject-level repeated stratified 5-fold CV, metrics and evidence criteria as S1/S2). D3 uses the provider's preprocessed derivatives with minimal added processing, so its pipeline is not identical to D1/D2. Cross-dataset tests involving D3 are not part of this version: they need a combined source-space store and a revision of the §7 gate. S1–S4 and every D1/D2 result are unchanged.
 - **v1.6 (2026-10-14):** Experiment 7 (EARM-GNN, `docs/earm_gnn.md`, methodology log entry 43) is added as an **exploratory extension** designed after the Tier 1 GCN results had been observed. It uses the v1.5 protocol unchanged (fixed hyperparameters, no inner CV, 10 repeats with the shared splits, all settings, PLV and |ciPLV| separate) with two pre-specified ablations (fixed adjacency, mean fusion). The primary analyses, comparators and evidence criteria (§2, §5, §8) are unchanged; Exp 7 comparisons are descriptive.
 - **v1.5 (2026-10-14, protocol amendment for computational feasibility; author decision; methodology log entry 42, decisions row 50):**

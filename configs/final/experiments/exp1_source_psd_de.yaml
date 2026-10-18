@@ -1,0 +1,11 @@
+# Exp 1: source-space spectral baseline without graph learning. Atlas ROIs (68 Desikan-Killiany) x 5 Xu bands;
+# logistic regression and linear SVM; PSD [log, relative] and, separately, DE. 4 variants per inverse.
+extends: ../classical.yaml
+experiment: exp1_source_psd_de
+features:
+  source: source
+sweep:
+  model.name: [logreg, svm]
+variants:
+  psd: {features.psd_kinds: [log, rel]}
+  de: {features.psd_kinds: [de]}

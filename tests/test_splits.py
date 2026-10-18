@@ -1,107 +1,116 @@
+"""Participant-level splits of the final protocol: the frozen 52 / 13 partition of ds004504 and its five
+development folds, participant disjointness, stratification, reproducibility and inner folds (synthetic tables)."""
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from adgraph.evaluation.splits import (SETTINGS, Split, fold_indices, inner_folds, make_splits, setting_subset,
-                                       subject_holdout, subject_table)
+from adgraph.evaluation.splits import (SETTINGS, XU_SETTINGS, Split, fold_indices, inner_folds, make_splits,
+                                       setting_subset, subject_table, xu_partition)
+
+LABELS = {f"D3-{n}": int(n <= 36) for n in range(1, 66)}          # ds004504: AD = participants 1-36
+# The frozen partition and folds of the LCMV / wMNE stores (computed by commit 607b5eac, whose folds equal the fold
+# columns saved with the earlier results on Drive). Any change of the split code that alters them fails here.
+HOLDOUT = ["D3-3", "D3-12", "D3-15", "D3-16", "D3-22", "D3-30", "D3-33", "D3-38", "D3-42", "D3-45", "D3-51",
+           "D3-57", "D3-64"]
+FOLDS = [["D3-1", "D3-2", "D3-5", "D3-6", "D3-26", "D3-31", "D3-43", "D3-49", "D3-54", "D3-59", "D3-61"],
+         ["D3-14", "D3-21", "D3-27", "D3-29", "D3-35", "D3-36", "D3-44", "D3-46", "D3-53", "D3-56", "D3-65"],
+         ["D3-8", "D3-9", "D3-13", "D3-20", "D3-23", "D3-25", "D3-37", "D3-39", "D3-40", "D3-52"],
+         ["D3-7", "D3-10", "D3-11", "D3-24", "D3-32", "D3-34", "D3-47", "D3-50", "D3-58", "D3-63"],
+         ["D3-4", "D3-17", "D3-18", "D3-19", "D3-28", "D3-41", "D3-48", "D3-55", "D3-60", "D3-62"]]
 
 
-def meta_for(store, setting):
-    return store.windows.iloc[setting_subset(store.windows, setting)].reset_index(drop=True)
+def meta(n_windows=3) -> pd.DataFrame:
+    return pd.DataFrame([{"key": k, "dataset": "D3", "y": y, "window_id": f"{k}_w{i}"}
+                         for k, y in LABELS.items() for i in range(n_windows)])
 
 
-@pytest.mark.parametrize("setting", ["within_D1", "within_D2", "pooled"])
-def test_each_subject_tested_once_per_repeat(store, setting):
-    meta = meta_for(store, setting)
-    splits = make_splits(meta, setting, k=5, n_repeats=3, seed=0)
-    assert len(splits) == 15
-    subjects = set(meta["key"])
-    for r in range(3):
-        tested = [k for s in splits if s.repeat == r for k in s.test_keys]
-        assert sorted(tested) == sorted(subjects)
-    for s in splits:
-        tr, te = fold_indices(meta, s)
-        assert not set(meta.iloc[tr]["key"]) & set(meta.iloc[te]["key"])
-        assert not set(meta.iloc[tr]["window_id"]) & set(meta.iloc[te]["window_id"])
-        assert len(tr) + len(te) == len(meta)                       # every window used, none twice
-
-
-def test_within_settings_use_one_dataset(store):
-    for setting, ds in (("within_D1", "D1"), ("within_D2", "D2")):
-        meta = meta_for(store, setting)
-        assert set(meta["dataset"]) == {ds}
-
-
-def test_stratification(store):
-    meta = meta_for(store, "within_D1")                                # 10 AD / 10 HC
-    for s in make_splits(meta, "within_D1", 5, 2, 0):
-        y = subject_table(meta).set_index("key").loc[list(s.test_keys), "y"]
-        assert (y == 1).sum() == 2 and (y == 0).sum() == 2
-    pooled = meta_for(store, "pooled")
-    st = subject_table(pooled).set_index("key")
-    for s in make_splits(pooled, "pooled", 5, 1, 0):
-        t = st.loc[list(s.test_keys)]
-        assert set(t["dataset"]) == {"D1", "D2"} and set(t["y"]) == {0, 1}
-
-
-def test_repeats_differ_and_are_reproducible(store):
-    meta = meta_for(store, "within_D2")
-    a = make_splits(meta, "within_D2", 5, 2, 0)
-    b = make_splits(meta, "within_D2", 5, 2, 0)
-    assert a == b
-    assert {s.test_keys for s in a if s.repeat == 0} != {s.test_keys for s in a if s.repeat == 1}
-
-
-@pytest.mark.parametrize("setting,src,tgt", [("cross_D1_to_D2", "D1", "D2"), ("cross_D2_to_D1", "D2", "D1")])
-def test_cross_dataset(store, setting, src, tgt):
-    meta = meta_for(store, setting)
-    splits = make_splits(meta, setting, 5, 3, 0)
-    assert len(splits) == 3 and len({(s.train_keys, s.test_keys) for s in splits}) == 1
-    tr, te = fold_indices(meta, splits[0])
-    assert set(meta.iloc[tr]["dataset"]) == {src} and set(meta.iloc[te]["dataset"]) == {tgt}
-
-
-def test_loso(store):
-    meta = meta_for(store, "within_D1")
-    splits = make_splits(meta, "within_D1", scheme="loso")
-    assert len(splits) == 20 and all(len(s.test_keys) == 1 for s in splits)
-
-
-def test_overlap_is_detected(store):
-    meta = meta_for(store, "within_D1")
-    keys = sorted(set(meta["key"]))
-    with pytest.raises(RuntimeError):
-        fold_indices(meta, Split("within_D1", 0, 0, tuple(keys[:12]), tuple(keys[10:])))
-
-
-def test_overlapping_windows_never_cross_folds(store):
-    """Consecutive 20 s / 50 % windows share 10 s of signal: all windows of a subject stay on one side."""
-    meta = meta_for(store, "within_D1")
-    for s in make_splits(meta, "within_D1", 5, 2, 0):
-        tr, te = fold_indices(meta, s)
-        side = pd.Series("train", index=meta.index)
-        side.iloc[te] = "test"
-        assert (meta.assign(side=side).groupby("key")["side"].nunique() == 1).all()
-
-
-def test_inner_folds_stay_inside_training(store):
-    meta = meta_for(store, "pooled")
-    s = make_splits(meta, "pooled", 5, 1, 0)[0]
-    tr, _ = fold_indices(meta, s)
-    train_meta = meta.iloc[tr].reset_index(drop=True)
-    for itr, iva in inner_folds(train_meta, 4, 0, ("dataset", "y")):
-        assert set(train_meta.iloc[itr]["key"]).isdisjoint(train_meta.iloc[iva]["key"])
-        assert set(train_meta.iloc[iva]["key"]) <= set(s.train_keys)
-    a, b = subject_holdout(train_meta, 0.2, 0)
-    assert set(train_meta.iloc[a]["key"]).isdisjoint(train_meta.iloc[b]["key"])
-
-
-def test_subject_table_rejects_inconsistent_labels(store):
-    meta = store.windows.copy()
-    meta.loc[meta.index[0], "y"] = 1 - meta.loc[meta.index[0], "y"]
-    with pytest.raises(ValueError):
-        subject_table(meta)
+def num(keys):
+    return sorted(keys, key=lambda k: int(k[3:]))
 
 
 def test_settings_registry():
-    assert set(SETTINGS) == {"within_D1", "within_D2", "pooled", "cross_D1_to_D2", "cross_D2_to_D1"}
+    assert set(SETTINGS) == set(XU_SETTINGS) == {"xu_dev_cv", "xu_holdout"}
+    with pytest.raises(ValueError):
+        make_splits(meta(), "within_D1")
+    with pytest.raises(ValueError):
+        make_splits(meta(), "xu_dev_cv", scheme="loso")
+
+
+def test_frozen_partition_and_folds():
+    dev, test = xu_partition(subject_table(meta()))
+    assert num(test) == HOLDOUT and len(dev) == 52 and not set(dev) & set(test)
+    assert sum(LABELS[k] for k in test) == 7                            # 7 AD / 6 HC
+    sp = make_splits(meta(), "xu_dev_cv", 5, 1, 0)
+    assert [num(s.test_keys) for s in sp] == FOLDS
+    (h,) = make_splits(meta(), "xu_holdout", 5, 1, 0)
+    assert num(h.test_keys) == HOLDOUT and sorted(h.train_keys) == sorted(dev)
+
+
+def test_each_development_participant_tested_once_and_holdout_never_in_cv():
+    for r_splits in (make_splits(meta(), "xu_dev_cv", 5, 2, 0),):
+        for rep in (0, 1):
+            tested = [k for s in r_splits if s.repeat == rep for k in s.test_keys]
+            assert sorted(tested) == sorted(set(LABELS) - set(HOLDOUT))
+            for s in r_splits:
+                if s.repeat == rep:
+                    assert not set(s.train_keys) & set(s.test_keys)
+                    assert not (set(s.train_keys) | set(s.test_keys)) & set(HOLDOUT)
+
+
+def test_stratification():
+    for s in make_splits(meta(), "xu_dev_cv", 5, 1, 0):
+        ad = sum(LABELS[k] for k in s.test_keys)
+        assert 5 <= ad <= 6 and 4 <= len(s.test_keys) - ad <= 5         # 29 AD / 23 HC over 5 folds
+
+
+def test_repeats_differ_and_are_reproducible():
+    a = make_splits(meta(), "xu_dev_cv", 5, 2, 0)
+    b = make_splits(meta(), "xu_dev_cv", 5, 2, 0)
+    assert [s.test_keys for s in a] == [s.test_keys for s in b]
+    assert [s.test_keys for s in a if s.repeat == 0] != [s.test_keys for s in a if s.repeat == 1]
+
+
+def test_overlap_is_detected():
+    m = meta()
+    keys = sorted(set(LABELS) - set(HOLDOUT))
+    with pytest.raises(RuntimeError):
+        fold_indices(m, Split("xu_dev_cv", 0, 0, tuple(keys[:30]), tuple(keys[25:])))
+
+
+def test_overlapping_windows_never_cross_folds():
+    m = meta(5)
+    for s in make_splits(m, "xu_dev_cv", 5, 1, 0):
+        tr, te = fold_indices(m, s)
+        assert not set(m.iloc[tr]["key"]) & set(m.iloc[te]["key"])
+        assert not set(m.iloc[tr]["window_id"]) & set(m.iloc[te]["window_id"])
+
+
+def test_inner_folds_stay_inside_training():
+    m = meta()
+    s = make_splits(m, "xu_dev_cv", 5, 1, 0)[0]
+    tr, _ = fold_indices(m, s)
+    train_meta = m.iloc[tr].reset_index(drop=True)
+    for itr, iva in inner_folds(train_meta, 5, 0, ("y",), "y"):
+        assert set(train_meta.iloc[iva]["key"]) <= set(s.train_keys)
+        assert not set(train_meta.iloc[itr]["key"]) & set(train_meta.iloc[iva]["key"])
+
+
+def test_setting_subset_is_the_whole_d3_cohort():
+    m = meta()
+    assert len(setting_subset(m, "xu_dev_cv")) == len(m) == len(setting_subset(m, "xu_holdout"))
+
+
+def test_subject_table_rejects_inconsistent_labels():
+    m = meta()
+    m.loc[0, "y"] = 1 - m.loc[0, "y"]
+    with pytest.raises(ValueError):
+        subject_table(m)
+
+
+def test_partition_does_not_depend_on_window_counts():
+    rng = np.random.default_rng(0)
+    m = pd.DataFrame([{"key": k, "dataset": "D3", "y": y, "window_id": f"{k}_w{i}"} for k, y in LABELS.items()
+                      for i in range(int(rng.integers(1, 9)))])
+    assert num(xu_partition(subject_table(m))[1]) == HOLDOUT
+    assert [num(s.test_keys) for s in make_splits(m, "xu_dev_cv", 5, 1, 0)] == FOLDS

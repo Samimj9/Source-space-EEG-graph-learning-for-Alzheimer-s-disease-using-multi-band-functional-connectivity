@@ -1,88 +1,147 @@
-"""Synthetic graph runs with the real schema, for tests and smoke runs (no EEG involved).
+"""Synthetic stores with the schema of the real ds004504 source-graph stores, for tests and CPU smoke runs only
+(no EEG involved; results on them are never results).
 
-Group effects can be planted so that pipelines can be checked end to end:
-* ``psd_effect``: AD subjects get higher relative theta and lower relative alpha power;
-* ``conn_effect``: AD subjects get weaker alpha1 PLV/ciPLV within a block of ROIs;
-* ``dataset_shift``: additive offset of D2 log power (a site effect).
+``make_store``: 65 participants D3-1 ... D3-65 (36 AD, 29 HC, AD = keys 1-36 as in ds004504), the five Xu bands,
+the ROIs of an atlas (default the 68 Desikan-Killiany labels in store order), 19 sensors, ``n_windows`` windows per
+participant, every array of the real stores (PLV, |ciPLV|, PSD abs / log / rel / DE, sensor PSD and DE) and the
+participants table. Planted, label-dependent effects (all optional):
+* ``psd_effect``: AD participants get higher relative theta and lower relative alpha power;
+* ``conn_effect``: AD participants get weaker alpha PLV / |ciPLV| inside a block of ROIs;
+* ``band_direction``: AD log power up in theta and down in alpha by the same amount (invisible to a band-invariant
+  model, the band-identity check).
+``save_store`` writes it like an assembled store (graphs.npz, windows.csv, subjects.csv, manifest.json,
+xu_split.json, validation.json, assembly marker) under the directory the store registry expects.
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from .graphs.store import GraphStore, window_id
 
-BANDS = {"theta": [4.0, 8.0], "alpha1": [8.0, 10.0], "alpha2": [10.0, 13.0], "beta": [13.0, 30.0]}
-DEFAULT_COHORT = {"D1": (10, 10), "D2": (10, 13)}       # (n_AD, n_HC), as in the real cohort
+BANDS = {"delta": [0.5, 4.0], "theta": [4.0, 8.0], "alpha": [8.0, 13.0], "beta": [13.0, 25.0],
+         "gamma": [25.0, 45.0]}
+CHANNELS = ["Fp1", "Fp2", "F3", "F4", "C3", "C4", "P3", "P4", "O1", "O2", "F7", "F8", "T3", "T4", "T5", "T6", "Fz",
+            "Cz", "Pz"]
 
 
-def make_synthetic_store(cohort: dict | None = None, windows_per_subject: tuple[int, int] = (5, 9), n_rois: int = 68,
-                         n_channels: int = 30, psd_effect: float = 0.0, conn_effect: float = 0.0,
-                         dataset_shift: float = 0.0, sfreq: float = 250.0, window_s: float = 20.0,
-                         step_s: float = 10.0, seed: int = 0) -> GraphStore:
+def make_store(n_windows: int = 6, atlas: str = "dk68", psd_effect: float = 0.0, conn_effect: float = 0.0,
+               band_direction: float = 0.0, seed: int = 0, n_ad: int = 36, n_hc: int = 29, mode: str = "B",
+               inverse: str = "lcmv", noise: float = 1.0) -> GraphStore:
+    from .source.atlas import region_names
+
     rng = np.random.default_rng(seed)
-    cohort = cohort or DEFAULT_COHORT
-    k = len(BANDS)
-    plv, ciplv, ci_signed, psd_abs, s_abs, rows, subj_rows = [], [], [], [], [], [], []
-    block = np.arange(min(10, n_rois))
-    for ds, (n_ad, n_hc) in cohort.items():
-        for sid, y in enumerate([1] * n_ad + [0] * n_hc, start=1):
-            key = f"{ds}-{sid}"
-            nw = int(rng.integers(windows_per_subject[0], windows_per_subject[1] + 1))
-            subj_level = rng.normal(0, 0.3)
-            for w in range(nw):
-                base = rng.beta(2, 5, size=(k, n_rois, n_rois))
-                base = (base + base.transpose(0, 2, 1)) / 2
-                if y == 1 and conn_effect:
-                    base[1][np.ix_(block, block)] *= max(0.0, 1 - conn_effect)
-                for b in range(k):
-                    np.fill_diagonal(base[b], 0.0)
-                plv.append(base)
-                mag = base * rng.uniform(0.2, 0.6, size=(k, 1, 1))
-                sign = np.sign(rng.standard_normal((k, n_rois, n_rois)))
-                sign = np.triu(sign, 1) - np.triu(sign, 1).transpose(0, 2, 1)       # antisymmetric signs
-                ciplv.append(mag)
-                ci_signed.append(mag * sign)
-                spec = np.array([1.0, 1.4, 1.0, 0.6])[:, None] * np.exp(rng.normal(subj_level, 0.2, (k, n_rois)))
-                if y == 1 and psd_effect:
-                    spec[0] *= 1 + psd_effect
-                    spec[1:3] *= max(0.05, 1 - psd_effect)
-                if ds == "D2" and dataset_shift:
-                    spec *= 10 ** dataset_shift
-                psd_abs.append(spec * 1e-18)
-                s_abs.append(spec[:, :n_channels] if n_channels <= n_rois else
-                             np.resize(spec, (k, n_channels)))
-                start = int((10 + w * step_s) * sfreq)
-                stop = start + int(window_s * sfreq)
-                rows.append({"window_id": window_id(key, w), "key": key, "dataset": ds, "subject_id": sid,
-                             "label": "AD" if y else "HC", "y": y, "window_index": w, "start_sample": start,
-                             "stop_sample": stop, "tmin": start / sfreq, "tmax": stop / sfreq,
-                             "sample_weight": 1.0 / nw, "qc_frac_channels_over_threshold": 0.0,
-                             "qc_max_ptp_uv": 50.0})
-            subj_rows.append({"key": key, "dataset": ds, "subject_id": sid, "label": "AD" if y else "HC", "y": y,
-                              "age": float(rng.normal(80 if y else 65, 6)), "status": "ok",
-                              "median_std_uv": float(rng.uniform(8, 20)), "n_windows_kept": nw})
-    psd_abs = np.array(psd_abs, np.float64)
-    s_abs = np.array(s_abs, np.float64) * 1e12
-    total = lambda a: a.sum(1, keepdims=True) * 1.3                       # noqa: E731 (power outside 4-30 Hz)
-    arrays = {
-        "plv": np.array(plv, np.float32), "ciplv": np.array(ciplv, np.float32),
-        "ciplv_signed": np.array(ci_signed, np.float32),
-        "psd_abs": psd_abs.astype(np.float32), "psd_log": np.log10(psd_abs).astype(np.float32),
-        "psd_rel": (psd_abs / total(psd_abs)).astype(np.float32),
-        "sensor_psd_abs": s_abs.astype(np.float32), "sensor_psd_log": np.log10(s_abs).astype(np.float32),
-        "sensor_psd_rel": (s_abs / total(s_abs)).astype(np.float32),
-    }
-    manifest = {"synthetic": True, "config_hash": "synthetic", "registry": {"subset_limit": None},
-                "source_operator": {"shared_across_datasets": True, "verification_rel_error": 0.0,
-                                    "channels": [f"C{i}" for i in range(n_channels)]}}
-    # Placeholder coordinates on a sphere (synthetic; not anatomical): lh on x < 0, rh on x > 0.
-    ang = np.linspace(0, np.pi, n_rois // 2, endpoint=False)
-    half = np.c_[-40 - 20 * np.sin(ang), 70 * np.cos(ang), 20 * np.sin(2 * ang)]
-    coords = np.vstack([half, half * [-1, 1, 1]])[:n_rois]
-    if len(coords) < n_rois:
-        coords = np.vstack([coords, np.zeros((n_rois - len(coords), 3))])
-    return GraphStore(arrays, pd.DataFrame(rows), list(BANDS), np.array(list(BANDS.values())),
-                      [f"roi{i:02d}" for i in range(n_rois)], [f"C{i}" for i in range(n_channels)],
-                      pd.DataFrame(subj_rows), manifest, roi_coords=coords)
+    rois = region_names(atlas)
+    r, k, c = len(rois), len(BANDS), len(CHANNELS)
+    keys = [f"D3-{i}" for i in range(1, n_ad + n_hc + 1)]
+    labels = {kk: int(i < n_ad) for i, kk in enumerate(keys)}
+    block = np.arange(min(10, r))
+    rows, subj = [], []
+    arr = {name: [] for name in ("plv", "ciplv", "psd_abs", "psd_de", "sensor_psd_abs", "sensor_psd_de")}
+    for sid, key in enumerate(keys, start=1):
+        y = labels[key]
+        base_p = rng.normal(0, 0.3, (k, r))                         # participant-specific spectral fingerprint
+        base_c = rng.uniform(0.2, 0.5, (k, r, r))
+        for w in range(n_windows):
+            p = np.exp(base_p + rng.normal(0, 0.2 * noise, (k, r))) * np.array([4, 3, 5, 2, 1.0])[:, None]
+            if y:
+                p[1] *= np.exp(psd_effect)                          # theta up
+                p[2] *= np.exp(-psd_effect)                         # alpha down
+                p[1] *= np.exp(band_direction)
+                p[2] *= np.exp(-band_direction)
+            a = np.clip(base_c + rng.normal(0, 0.05 * noise, (k, r, r)), 0, 1)
+            if y and conn_effect:
+                a[2][np.ix_(block, block)] *= max(0.0, 1 - 0.3 * conn_effect)
+            a = (a + np.swapaxes(a, -1, -2)) / 2
+            a[:, np.arange(r), np.arange(r)] = 0
+            ci = np.clip(a * rng.uniform(0.3, 0.7, (k, r, r)), 0, 1)
+            ci = (ci + np.swapaxes(ci, -1, -2)) / 2
+            ci[:, np.arange(r), np.arange(r)] = 0
+            sp = np.exp(rng.normal(0, 0.3, (k, c))) * np.array([4, 3, 5, 2, 1.0])[:, None]
+            arr["plv"].append(a)
+            arr["ciplv"].append(ci)
+            arr["psd_abs"].append(p * 1e-12)
+            arr["psd_de"].append(0.5 * np.log(2 * np.pi * np.e * p * 1e-12))
+            arr["sensor_psd_abs"].append(sp * 1e-11)
+            arr["sensor_psd_de"].append(0.5 * np.log(2 * np.pi * np.e * sp * 1e-11))
+            start = w * 250
+            rows.append({"window_id": window_id(key, w), "key": key, "dataset": "D3", "subject_id": sid,
+                         "label": "AD" if y else "HC", "y": y, "window_index": w, "start_sample": start,
+                         "stop_sample": start + 2500, "tmin": start / 250, "tmax": (start + 2500) / 250,
+                         "sample_weight": 1.0 / n_windows, "segment_index": 0, "piece": 0,
+                         "xu_tenfold": w < 10})
+        subj.append({"key": key, "dataset": "D3", "subject_id": sid, "label": "AD" if y else "HC", "y": y,
+                     "status": "ok", "reason": "", "n_windows_candidate": n_windows + 2,
+                     "n_windows_accepted": n_windows, "n_windows_rejected": 2, "n_windows_kept": n_windows,
+                     "n_tenfold": min(10, n_windows), "rejection_threshold_uv": float(rng.uniform(60, 120)),
+                     "median_std_uv": float(rng.uniform(8, 20)), "selected_duration_s": 300.0})
+    out = {k_: np.asarray(v, np.float32) for k_, v in arr.items()}
+    tot = out["psd_abs"].sum(1, keepdims=True)
+    out["psd_log"] = np.log10(out["psd_abs"])
+    out["psd_rel"] = out["psd_abs"] / tot
+    stot = out["sensor_psd_abs"].sum(1, keepdims=True)
+    out["sensor_psd_log"] = np.log10(out["sensor_psd_abs"])
+    out["sensor_psd_rel"] = out["sensor_psd_abs"] / stot
+    out = {k_: v.astype(np.float32) for k_, v in out.items()}
+    windows = pd.DataFrame(rows)
+    manifest = {"synthetic": True, "mode": {"B": "B_all_windows", "A": "A_xu_tenfold"}[mode],
+                "graph_run_id": f"synthetic-{inverse}-{mode}-{atlas}-{seed}",
+                "source_operator": {"method": inverse, "roi_names": rois, "channels": CHANNELS}}
+    return GraphStore(out, windows, list(BANDS), np.array(list(BANDS.values()), float), rois, CHANNELS,
+                      pd.DataFrame(subj), manifest)
+
+
+def write_release_stores(processed: str | Path, inverses=("lcmv", "wmne"), modes=("B", "A"), atlas: str = "dk68",
+                         n_windows: int = 4, seed: int = 0, **effects) -> dict[tuple[str, str], Path]:
+    """Synthetic stores at exactly the directories the release registry resolves (``stores.store_dir``), with the
+    resolved configuration hash, ``validation.json`` and, for wMNE, a passed ``match.json`` against the LCMV store of
+    the same mode: so smoke runs and end-to-end tests go through the real verification, lock and QC gate. Mode A
+    keeps the first 10 windows. The wMNE store has the same windows and sensor features as the LCMV one and
+    different source features, like the real matched stores."""
+    from .config import config_hash
+    from .sourcegraphs.config import resolve
+    from .stores import store_dir
+
+    out = {}
+    for mode in modes:
+        nw = min(n_windows, 10) if mode == "A" else n_windows
+        ref = None
+        for inv in ("lcmv", "wmne"):
+            if inv not in inverses and not (inv == "lcmv" and "wmne" in inverses):
+                continue
+            st = make_store(nw, atlas=atlas, seed=seed + (17 if inv == "wmne" else 0), mode=mode, inverse=inv,
+                            **effects)
+            if ref is not None:                          # matched windows / participants / sensor features
+                st.windows = ref.windows.copy()
+                for k in [k for k in st.arrays if k.startswith("sensor_")]:
+                    st.arrays[k] = ref.arrays[k].copy()
+            d = store_dir(processed, inv, mode, atlas)
+            save_store(st, d, config_hash(resolve(inv, atlas)))
+            if inv == "wmne":
+                rid = json.loads((store_dir(processed, "lcmv", mode, atlas) / "manifest.json").read_text())
+                (d / "match.json").write_text(json.dumps({"passed": True, "graph_run_id": st.manifest["graph_run_id"],
+                                                          "reference_graph_run_id": rid["graph_run_id"],
+                                                          "checks": {}}))
+            ref = st if inv == "lcmv" else ref
+            out[(inv, mode)] = d
+    return out
+
+
+def save_store(store: GraphStore, directory: str | Path, config_hash: str | None = None) -> Path:
+    """Write ``store`` as an assembled, validated store (for registry and end-to-end tests)."""
+    from .checkpoint import write_marker
+    from .evaluation.splits import subject_table, xu_partition
+
+    d = Path(directory)
+    store.manifest = {**store.manifest, **({"config_hash": config_hash} if config_hash else {})}
+    store.save(d)
+    dev, test = xu_partition(subject_table(store.windows))
+    (d / "xu_split.json").write_text(json.dumps({"development": dev, "test": test}))
+    (d / "validation.json").write_text(json.dumps({"passed": True, "graph_run_id": store.manifest["graph_run_id"],
+                                                   "checks": {}}))
+    write_marker(d, "assembly", {"kind": "synthetic"}, ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"])
+    return d

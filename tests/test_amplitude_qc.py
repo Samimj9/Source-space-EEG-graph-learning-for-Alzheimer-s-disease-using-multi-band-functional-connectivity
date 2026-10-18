@@ -146,7 +146,7 @@ def test_detect_bad_channels_rules_unchanged():
 
 
 def test_window_rejection_is_active_and_reported():
-    from adgraph.pipeline import edge_window_ptp_ratio, process_recording
+    from adgraph.legacy.pipeline import edge_window_ptp_ratio, process_recording
 
     x = _signal()
     t = np.arange(x.shape[1]) / SF
@@ -175,7 +175,7 @@ def test_edge_transients_do_not_contaminate_retained_windows():
     decaying with distance from the edges: the analytic signal is computed over the whole
     continuous band-passed ROI signal and the Hilbert kernel decays as 1/t (existing connectivity
     design, methodology log entry 39; not changed here)."""
-    from adgraph.pipeline import edge_window_ptp_ratio, process_recording
+    from adgraph.legacy.pipeline import edge_window_ptp_ratio, process_recording
 
     x = _signal()
     out = []
@@ -204,7 +204,7 @@ def test_edge_transients_do_not_contaminate_retained_windows():
 
 def test_qc_tables_are_saved_with_the_subject(tmp_path, monkeypatch):
     pytest.importorskip("edfio")
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
     from test_end_to_end import _write_edf
 
     import pandas as pd
@@ -239,7 +239,7 @@ def test_qc_tables_are_saved_with_the_subject(tmp_path, monkeypatch):
     import subprocess
     import sys
 
-    r = subprocess.run([sys.executable, "scripts/inspect_graph_subjects.py", "--run-dir", str(run_dir)],
+    r = subprocess.run([sys.executable, "scripts/legacy/inspect_graph_subjects.py", "--run-dir", str(run_dir)],
                        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "D1-1" in r.stdout and "D2-2" in r.stdout and "windows (all candidates)" in r.stdout

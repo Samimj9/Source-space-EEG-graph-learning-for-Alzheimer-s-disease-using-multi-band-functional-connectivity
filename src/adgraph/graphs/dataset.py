@@ -99,28 +99,34 @@ class Dataset:
                         role, self.target)
 
 
+def feature_array(store: GraphStore, name: str) -> np.ndarray:
+    """A per-window feature array of the store; a clear error when the store predates it (e.g. differential
+    entropy, ``psd_de``, is absent from stores built before it was added; such stores stay usable for every other
+    feature)."""
+    if name not in store.arrays:
+        raise ValueError(f"the store {store.root or ''} has no {name!r} (it was built before this feature existed); "
+                         f"available: {sorted(store.arrays)}")
+    return store.arrays[name]
+
+
 # ---------------------------------------------------------------- metadata
-def _meta(store: GraphStore, target: str) -> pd.DataFrame:
-    meta = store.windows.copy()
-    if target == "dataset":           # dataset-identity probe (DESIGN.md §6)
-        meta["y_dataset"] = (meta["dataset"] == "D2").astype(int)
-    if not store.subjects.empty and "age" in store.subjects:
-        meta = meta.merge(store.subjects[["key", "age"]], on="key", how="left", validate="many_to_one")
-    return meta
+def _meta(store: GraphStore, target: str = "label") -> pd.DataFrame:
+    if target not in ("label", "y"):
+        raise ValueError(f"the only target is the diagnosis (AD = 1, HC = 0), got {target!r}")
+    return store.windows.copy()
 
 
-def target_column(target: str) -> str:
-    return {"label": "y", "y": "y", "dataset": "y_dataset"}[target]
+def target_column(target: str = "label") -> str:
+    return {"label": "y", "y": "y"}[target]
 
 
 # ---------------------------------------------------------------- classical
 def build_classical(store: GraphStore, features: dict, target: str = "label") -> Dataset:
     """Flat feature matrix for LR / SVM.
 
-    features.source: ``sensor`` (electrode PSD, Experiment 0), ``source`` (ROI PSD,
-    Experiment 1), ``plv`` / ``ciplv`` (vectorized upper-triangle connectivity,
-    DESIGN.md §5 comparator) or ``age`` (age-only baseline). ``psd_kinds`` from
-    {abs, log, rel}; ``bands`` subset. Feature order: kind -> band -> channel/ROI (or edge).
+    features.source: ``sensor`` (electrode PSD / DE, Experiment 0), ``source`` (ROI PSD / DE,
+    Experiment 1) or ``plv`` / ``ciplv`` (vectorized upper-triangle connectivity). ``psd_kinds`` from
+    {abs, log, rel, de}; ``bands`` subset. Feature order: kind -> band -> channel/ROI (or edge).
     """
     meta = _meta(store, target)
     src = features["source"]
@@ -130,11 +136,6 @@ def build_classical(store: GraphStore, features: dict, target: str = "label") ->
         iu = np.triu_indices(A.shape[-1], 1)
         X = A[..., iu[0], iu[1]].reshape(len(A), -1).astype(np.float64)
         names = [f"{src}:{b}:{store.roi_names[i]}-{store.roi_names[j]}" for b in bands for i, j in zip(*iu)]
-    elif src == "age":
-        if "age" not in meta or meta["age"].isna().any():
-            raise ValueError("age-only baseline needs an age for every subject")
-        X = meta[["age"]].to_numpy(float)
-        names = ["age"]
     else:
         prefix = {"sensor": "sensor_psd", "source": "psd"}[src]
         nodes = store.channels if src == "sensor" else store.roi_names
@@ -144,7 +145,7 @@ def build_classical(store: GraphStore, features: dict, target: str = "label") ->
         for kind in features["psd_kinds"]:
             if kind not in PSD_KINDS:
                 raise ValueError(f"psd kind {kind!r} not in {PSD_KINDS}")
-            arr = store.arrays[f"{prefix}_{kind}"][:, b_idx, :]           # (N, n_bands, n_nodes)
+            arr = feature_array(store, f"{prefix}_{kind}")[:, b_idx, :]   # (N, n_bands, n_nodes)
             blocks.append(arr.reshape(len(arr), -1))
             names += [f"{kind}:{b}:{n}" for b in bands for n in nodes]
         X = np.concatenate(blocks, axis=1).astype(np.float64)
@@ -158,8 +159,10 @@ def build_classical(store: GraphStore, features: dict, target: str = "label") ->
 def node_strength(adj: np.ndarray) -> np.ndarray:
     """Weighted node strength: mean connectivity of each node to all others. adj (..., R, R) -> (..., R).
 
-    Computed from the adjacency actually used by the model, i.e. PLV or the magnitude
-    |ciPLV| (never the signed ciPLV), so strength is in [0, 1] for both measures.
+    Computed from the dense band adjacency (PLV or the magnitude |ciPLV|, never the signed ciPLV), so strength is in
+    [0, 1] for both measures. It is a node feature describing the full connectivity of the node and is the same for
+    every graph construction (``graphs.construction`` sparsifies only the graph the GNN propagates on), so a
+    graph-construction comparison changes message passing only.
     """
     r = adj.shape[-1]
     off = adj.sum(-1) - np.diagonal(adj, axis1=-2, axis2=-1)
@@ -171,6 +174,8 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
 
     graph:
       connectivity: plv | ciplv            (never mixed)
+      adjacency: connectivity | feature_similarity   (default connectivity; feature_similarity is the explicitly
+                                            different graph of ``graphs.construction.feature_similarity_adjacency``)
       bands: [...]                          subset, in this order
       band_mode: single | mean | multi      single: exactly one band, K = 1
                                             mean:   A_mean = mean over bands, K = 1
@@ -192,15 +197,26 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
     bands = list(graph["bands"])
     mode = graph["band_mode"]
     b_idx = store.band_index(bands)
-    A = store.arrays[conn][:, b_idx]                                   # (N, B, R, R)
+    source = graph.get("adjacency", "connectivity")
+    if source not in ("connectivity", "feature_similarity"):
+        raise ValueError(f"graph.adjacency must be 'connectivity' or 'feature_similarity', got {source!r}")
     if mode == "single":
         if len(bands) != 1:
             raise ValueError("band_mode 'single' needs exactly one band")
-    elif mode == "mean":
-        A = A.mean(axis=1, keepdims=True)
-    elif mode != "multi":
+    elif mode not in ("mean", "multi"):
         raise ValueError(f"unknown band_mode {mode!r}")
-    check_adjacency(A, conn)                        # symmetric, zero diagonal, in [0, 1]
+    C = store.arrays[conn][:, b_idx]                                   # (N, B, R, R) functional connectivity
+    if mode == "mean":
+        C = C.mean(axis=1, keepdims=True)
+    check_adjacency(C, conn)                        # symmetric, zero diagonal, in [0, 1]
+    if source == "connectivity":
+        A = C
+    else:                                           # explicitly NOT functional connectivity (graphs.construction)
+        from .construction import FS_KINDS, feature_similarity_adjacency
+
+        f = np.concatenate([np.moveaxis(feature_array(store, f"psd_{k}"), 1, -1) for k in FS_KINDS], axis=-1)
+        A = feature_similarity_adjacency(f, C.shape[1])
+        check_adjacency(A, "feature_similarity")
     n, k, r, _ = A.shape
     graph_bands = bands if mode == "multi" else ["+".join(bands)]
 
@@ -219,15 +235,15 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
         psd_bands = bands if node_features.get("psd_bands", "matched") == "matched" else list(store.bands)
         p_idx = store.band_index(psd_bands)
         for kind in kinds:
-            p = store.arrays[f"psd_{kind}"][:, p_idx, :]               # (N, B, R)
+            p = feature_array(store, f"psd_{kind}")[:, p_idx, :]       # (N, B, R)
             if matched:
                 blocks.append(p[..., None])                            # (N, K=B, R, 1)
                 names.append(f"psd_{kind}:band")
             else:
                 blocks.append(np.broadcast_to(np.moveaxis(p, 1, -1)[:, None], (n, k, r, len(psd_bands))))
                 names += [f"psd_{kind}:{b}" for b in psd_bands]
-    if "strength" in comps:
-        blocks.append(node_strength(A)[..., None])
+    if "strength" in comps:                         # always the functional connectivity strength (node_strength)
+        blocks.append(node_strength(C)[..., None])
         names.append("strength")
     if "identity" in comps:
         blocks.append(np.broadcast_to(np.eye(r), (n, k, r, r)))
@@ -235,42 +251,18 @@ def build_graph(store: GraphStore, graph: dict, node_features: dict, target: str
     X = np.concatenate([np.asarray(b, dtype=np.float32) for b in blocks], axis=-1)
     if not np.isfinite(X).all() or not np.isfinite(A).all():
         raise ValueError("non-finite graph inputs")
-    info = {"connectivity": conn, "graph_bands": graph_bands, "band_mode": mode, "feature_names": names,
-            "shape_x": X.shape, "shape_adj": A.shape}
+    del C
+    info = {"connectivity": conn, "adjacency": source, "graph_bands": graph_bands, "band_mode": mode,
+            "feature_names": names, "roi_names": list(store.roi_names), "shape_x": X.shape, "shape_adj": A.shape}
     return Dataset(meta, {"x": X, "adj": np.ascontiguousarray(A, dtype=np.float32)}, "graph", info,
                    target_column(target))
 
 
-COVARIATES = ("age",)
-
-
-def add_covariates(data: Dataset, covariates: list[str]) -> Dataset:
-    """Attach raw subject-level covariates as payload ``cov`` (N, n_cov).
-
-    They are *not* standardized here: models standardize them with training-subject
-    statistics (``models.covariates.CovariateScaler``).
-    """
-    if not covariates:
-        return data
-    unknown = set(covariates) - set(COVARIATES)
-    if unknown:
-        raise ValueError(f"unsupported covariates {sorted(unknown)}; available {COVARIATES}")
-    missing = [c for c in covariates if c not in data.meta or data.meta[c].isna().any()]
-    if missing:
-        raise ValueError(f"covariates {missing} missing for some subjects")
-    if "X" in data.payload and data.info.get("source") == "age":
-        raise ValueError("age is already the feature of the age-only baseline")
-    payload = dict(data.payload, cov=data.meta[list(covariates)].to_numpy(np.float32))
-    return Dataset(data.meta, payload, data.kind, {**data.info, "covariates": list(covariates)}, data.target)
-
-
 def build_dataset(store: GraphStore, cfg: dict) -> Dataset:
-    """Dispatch on ``cfg['input']``: ``classical`` or ``graph``; then attach ``cfg['covariates']``."""
+    """Dispatch on ``cfg['input']``: ``classical`` (Exp 0, 1) or ``graph`` (Exp 2-8)."""
     target = cfg.get("target", "label")
     if cfg["input"] == "classical":
-        data = build_classical(store, cfg["features"], target)
-    elif cfg["input"] == "graph":
-        data = build_graph(store, cfg["graph"], cfg["node_features"], target)
-    else:
-        raise ValueError(f"unknown input {cfg['input']!r}")
-    return add_covariates(data, cfg.get("covariates") or [])
+        return build_classical(store, cfg["features"], target)
+    if cfg["input"] == "graph":
+        return build_graph(store, cfg["graph"], cfg["node_features"], target)
+    raise ValueError(f"unknown input {cfg['input']!r}")

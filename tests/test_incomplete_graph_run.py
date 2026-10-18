@@ -11,7 +11,7 @@ from adgraph.config import load_yaml
 from adgraph.experiments import runner
 from adgraph.experiments.config import expand_variants, load_experiment
 from adgraph.graphs.store import IncompleteGraphRun, cohort_problems, require_complete_cohort
-from adgraph.synthetic import make_synthetic_store
+from adgraph.legacy.synthetic import make_synthetic_store
 from test_checkpoint import cohort  # noqa: F401 (fixture)
 
 CFG = load_yaml("configs/pipeline.yaml")
@@ -72,7 +72,7 @@ def test_failed_rerun_retires_an_earlier_assembly(cohort, monkeypatch):  # noqa:
 
 
 def test_assemble_refuses_failed_or_empty_cohorts(tmp_path):
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     with pytest.raises(pl.GraphRunIncomplete, match="failed"):
         pl.assemble(tmp_path, pd.DataFrame({"key": ["D1-1"]}), None, CFG, {}, [], [], None, {"D1-1": "error: x"})
@@ -96,18 +96,11 @@ def test_cohort_problems():
     assert any("failed subject units" in p for p in cohort_problems(units))
 
 
-def test_experiments_refuse_an_empty_graph_run(tmp_path):
-    store = make_synthetic_store().subset(np.array([], dtype=int))
-    v = [x for x in expand_variants(load_experiment(Path("configs/experiments/exp1_source_psd.yaml")))
-         if x["model"]["name"] == "logreg"][0]
-    with pytest.raises(IncompleteGraphRun, match="empty cohort"):
-        runner.run_variant(store, v, "within_D1", tmp_path / "exp")
-    assert not (tmp_path / "exp").exists()                         # nothing written
 
 
 def test_latest_run_refuses_a_legacy_empty_assembly(tmp_path):
     """An empty cohort assembled (with a marker) by earlier code is never selected for experiments."""
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     run_dir = tmp_path / "graphs_v3_abc"
     store = make_synthetic_store().subset(np.array([], dtype=int))

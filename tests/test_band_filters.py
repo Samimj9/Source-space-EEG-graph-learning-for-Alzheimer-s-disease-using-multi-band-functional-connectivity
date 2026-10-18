@@ -95,7 +95,7 @@ def test_band_specific_coupling_stays_in_its_band():
 
 
 def test_pipeline_applies_the_configured_transition_width(monkeypatch):
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     seen = []
     name = "band_analytic_fir" if CFG.get("boundary") else "band_analytic"      # v4: finite analytic FIR (entry 41)
@@ -115,4 +115,6 @@ def test_pipeline_applies_the_configured_transition_width(monkeypatch):
 
     pl.process_recording(Raw(), np.random.default_rng(1).standard_normal((68, 30)), CFG,
                          offset=int(CFG["windowing"]["edge_trim_s"] * SF))
-    assert seen == [1.0] * len(BANDS)
+    # every band is filtered with the configured transitions: the ROI signals (PLV, |ciPLV|, DE) and the sensor
+    # signals (sensor DE, the same band filter)
+    assert seen == [1.0] * (2 * len(BANDS))

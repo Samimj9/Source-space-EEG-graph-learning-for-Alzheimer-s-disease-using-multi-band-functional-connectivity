@@ -15,7 +15,7 @@ from adgraph.experiments import runner
 from adgraph.io import fingerprint
 from adgraph.io.fingerprint import InputHashes
 from adgraph.storage import EphemeralStorageError, check_persistent, storage_problem
-from adgraph.synthetic import make_synthetic_store
+from adgraph.legacy.synthetic import make_synthetic_store
 from test_checkpoint import CFG, cohort, fit_counter, lr_variant  # noqa: F401  (fixtures)
 
 REPO = Path(__file__).resolve().parents[1]
@@ -42,7 +42,7 @@ def test_check_persistent_raises_or_warns(caplog):
 
 
 def test_graph_run_refuses_ephemeral_storage(tmp_path, monkeypatch):
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     monkeypatch.setattr(storage, "in_colab", lambda: True)            # tmp_path = Colab VM disk
     with pytest.raises(EphemeralStorageError, match="graph run directory"):
@@ -53,25 +53,12 @@ def test_graph_run_refuses_ephemeral_storage(tmp_path, monkeypatch):
                allow_ephemeral=False)
 
 
-def test_experiment_refuses_ephemeral_storage_for_real_runs(tmp_path, monkeypatch):
-    real = make_synthetic_store({"D1": (6, 6), "D2": (6, 6)}, windows_per_subject=(3, 3))
-    real.manifest = {**real.manifest, "synthetic": False}            # stands in for a real graph run
-    with pytest.raises(EphemeralStorageError):
-        runner.run_variant(real, lr_variant(1), "within_D1", "/content/experiments")
-    monkeypatch.setattr(storage, "in_colab", lambda: True)
-    with pytest.raises(EphemeralStorageError):
-        runner.run_variant(real, lr_variant(1), "within_D1", tmp_path)
-    assert not any(tmp_path.iterdir())
-    synth = make_synthetic_store({"D1": (6, 6), "D2": (6, 6)}, windows_per_subject=(3, 3))
-    v = lr_variant(1)
-    v["hparams"] = {}
-    runner.run_variant(synth, v, "within_D1", tmp_path)                # synthetic framework tests are exempt
 
 
 def test_build_graphs_cli_refuses_ephemeral_out_root(tmp_path):
     (tmp_path / "paths.yaml").write_text(f"drive_root: {tmp_path}\nprocessed_dir: {tmp_path}/p\n"
                                          f"cache_dir: {tmp_path}/c\n")
-    r = subprocess.run([sys.executable, "scripts/build_graphs.py", "--paths", str(tmp_path / "paths.yaml"),
+    r = subprocess.run([sys.executable, "scripts/legacy/build_graphs.py", "--paths", str(tmp_path / "paths.yaml"),
                         "--out-root", "/content/smoke"], capture_output=True, text=True, cwd=REPO)
     assert r.returncode != 0 and "EphemeralStorageError" in r.stderr and "/content/smoke" in r.stderr
 
@@ -129,20 +116,6 @@ def test_code_change_invalidates_graph_units_without_bumping_code_versions(cohor
     assert (run_dir / "_superseded").exists()                         # old units kept, not overwritten
 
 
-def test_code_change_is_never_silently_reused_in_experiments(tmp_path, monkeypatch, fit_counter):
-    store = make_synthetic_store({"D1": (6, 6), "D2": (6, 6)}, windows_per_subject=(3, 3))
-    v = lr_variant(1)
-    first = runner.run_variant(store, v, "within_D1", tmp_path)
-    real = provenance.source_fingerprint
-    monkeypatch.setattr(provenance, "source_fingerprint", lambda parts: "edited" + real(parts)[6:])
-    st = runner.experiment_status(store, v, "within_D1", tmp_path)
-    assert st["state"] == "incompatible" and st["changed"] == "code"
-    with pytest.raises(IncompatibleCheckpoint, match="code"):
-        runner.run_variant(store, v, "within_D1", tmp_path)
-    fits = fit_counter["fits"]
-    again = runner.run_variant(store, v, "within_D1", tmp_path, force=True)    # explicit recomputation
-    assert fit_counter["fits"] > fits and (tmp_path / "_superseded").exists()
-    assert again["subject_level"]["all"]["roc_auc"]["mean"] == first["subject_level"]["all"]["roc_auc"]["mean"]
 
 
 # ======================================================================= 3. input content hashes

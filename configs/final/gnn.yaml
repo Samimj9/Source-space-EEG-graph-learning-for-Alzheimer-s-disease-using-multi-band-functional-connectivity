@@ -1,0 +1,38 @@
+# Fixed-hyperparameter GNN protocol gnn_fixed60_v1 (Exp 2-8). One fixed configuration per architecture, no search,
+# no inner CV, no early stopping: each outer training set is fitted exactly once for 60 epochs and the model after
+# the last epoch is evaluated. Adam (default betas / eps), lr 1e-3, L2 weight decay 1e-4, batch 32, participant- and
+# class-balanced BCE, seed = 1000 * repeat + fold (holdout: 0). Identical for LCMV and wMNE, modes A and B.
+extends: protocol.yaml
+input: graph
+protocol:
+  name: gnn_fixed60_v1
+  hyperparameter_search: none
+hparams: null
+graph:
+  connectivity: plv              # plv (primary) | ciplv (robustness analysis); never mixed
+  bands: [delta, theta, alpha, beta, gamma]
+  band_mode: multi               # single | mean | multi
+  adjacency: connectivity        # connectivity | feature_similarity (set by the graph construction)
+node_features:
+  components: [psd]              # subset of constant | psd | strength | identity
+  psd_kinds: [log, rel]
+  psd_bands: matched             # matched: band graph k gets the PSD of band k | all: every graph gets all bands
+  scaling: node                  # z-score per (band graph, ROI, feature), fitted on training windows only
+model:
+  architecture: multiband_gnn
+  encoder: gcn
+  hidden: 32
+  n_layers: 2
+  dropout: 0.3
+  readout: mean_max
+  mlp_hidden: 32
+  shared_encoder: true
+  fusion: mean
+  band_identity: none
+training:
+  lr: 0.001
+  weight_decay: 0.0001
+  epochs: 60
+  batch_size: 32
+evaluation:
+  save_model_state: true         # fitted parameters, edge gates and training history per outer fold

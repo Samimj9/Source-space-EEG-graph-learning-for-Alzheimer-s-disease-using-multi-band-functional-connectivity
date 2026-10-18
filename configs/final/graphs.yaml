@@ -1,0 +1,17 @@
+# Graph constructions of the GNN experiments (src/adgraph/graphs/construction.py; docs/final/graph_construction.md).
+# `dense` is the reference and the default. The others form the PRE-SPECIFIED comparison: k relative to the number
+# of ROIs R, k = max(1, round(f (R - 1))) with f in {0.10, 0.20, 0.30} (R = 68: k = 7, 13, 20; R = 34: 3, 7, 10;
+# R = 18: 2, 3, 5). A construction other than `dense` becomes the final choice only by the development-CV rule of
+# docs/final/graph_construction.md §5 (never by holdout results).
+constructions:
+  dense: {method: dense}
+  knn_union_f10: {method: knn, k_fraction: 0.10, symmetrize: union}
+  knn_union_f20: {method: knn, k_fraction: 0.20, symmetrize: union}
+  knn_union_f30: {method: knn, k_fraction: 0.30, symmetrize: union}
+  knn_mutual_f10: {method: knn, k_fraction: 0.10, symmetrize: mutual, min_degree: 1}
+  knn_mutual_f20: {method: knn, k_fraction: 0.20, symmetrize: mutual, min_degree: 1}
+  knn_mutual_f30: {method: knn, k_fraction: 0.30, symmetrize: mutual, min_degree: 1}
+  proportional_f20: {method: proportional, k_fraction: 0.20}       # global top edges, density = k / (R - 1)
+  contiguity: {method: dense, anatomical: contiguity}              # functional weights on cortical neighbours only
+  contiguity_knn_union_f20: {method: knn, k_fraction: 0.20, symmetrize: union, anatomical: contiguity}
+  feature_similarity_knn_union_f20: {method: knn, k_fraction: 0.20, symmetrize: union, adjacency: feature_similarity}

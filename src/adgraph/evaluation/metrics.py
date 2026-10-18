@@ -118,3 +118,54 @@ def corrected_resampled_ttest(diffs: np.ndarray, n_train: int, n_test: int) -> d
 def permutation_p_value(observed: float, null: np.ndarray) -> float:
     null = np.asarray(null, float)
     return float((1 + np.sum(null >= observed)) / (1 + len(null)))
+
+
+# ------------------------------------------------------------------------------------------- AUC uncertainty
+def _delong_components(y: np.ndarray, score: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """DeLong placement values: V10 (one per positive), V01 (one per negative); AUC = mean(V10) = mean(V01)."""
+    pos, neg = score[y == 1], score[y == 0]
+    cmp = (pos[:, None] > neg[None, :]).astype(float) + 0.5 * (pos[:, None] == neg[None, :])
+    return cmp.mean(1), cmp.mean(0)
+
+
+def auc_delong(y, score, level: float = 0.95) -> dict[str, float]:
+    """ROC-AUC with its DeLong (1988) standard error and a normal-approximation CI clipped to [0, 1]; participant
+    level (one score per participant). NaN when a class is missing."""
+    y, score = np.asarray(y).astype(int), np.asarray(score, float)
+    if len(np.unique(y)) < 2:
+        return {"auc": float("nan"), "se": float("nan"), "ci_low": float("nan"), "ci_high": float("nan")}
+    v10, v01 = _delong_components(y, score)
+    auc = float(v10.mean())
+    var = (v10.var(ddof=1) / len(v10) if len(v10) > 1 else 0.0) + (v01.var(ddof=1) / len(v01) if len(v01) > 1 else 0.0)
+    se = float(np.sqrt(var))
+    z = stats.norm.ppf(0.5 + level / 2)
+    return {"auc": auc, "se": se, "ci_low": float(max(0.0, auc - z * se)), "ci_high": float(min(1.0, auc + z * se))}
+
+
+def delong_paired(y, score_a, score_b) -> dict[str, float]:
+    """Paired DeLong test of two AUCs on the same participants (e.g. LCMV vs wMNE, mode A vs B). Descriptive in this
+    study (no multiplicity correction is implied)."""
+    y = np.asarray(y).astype(int)
+    a10, a01 = _delong_components(y, np.asarray(score_a, float))
+    b10, b01 = _delong_components(y, np.asarray(score_b, float))
+    s10, s01 = np.cov(np.vstack([a10, b10])), np.cov(np.vstack([a01, b01]))
+    var = (s10[0, 0] + s10[1, 1] - 2 * s10[0, 1]) / len(a10) + (s01[0, 0] + s01[1, 1] - 2 * s01[0, 1]) / len(a01)
+    diff = float(a10.mean() - b10.mean())
+    se = float(np.sqrt(max(var, 0.0)))
+    if se > 0:
+        z = diff / se
+        p = float(2 * stats.norm.sf(abs(z)))
+    else:                                             # no variance: identical AUCs give p = 1, otherwise undefined
+        z, p = (0.0, 1.0) if diff == 0 else (float("nan"), float("nan"))
+    return {"auc_a": float(a10.mean()), "auc_b": float(b10.mean()), "diff": diff, "se": se, "z": float(z), "p": p}
+
+
+def wilson_ci(k: int, n: int, level: float = 0.95) -> tuple[float, float]:
+    """Wilson score interval of a proportion k / n (sensitivity, specificity)."""
+    if n == 0:
+        return float("nan"), float("nan")
+    z = stats.norm.ppf(0.5 + level / 2)
+    p = k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return float(max(0.0, centre - half)), float(min(1.0, centre + half))

@@ -1,0 +1,12 @@
+# Exp 2: minimal connectivity-only GCN baseline. One band's source connectivity, a constant node feature (no
+# spectral information), GCN. 5 bands x {PLV, |ciPLV|} = 10 variants. A deliberately minimal baseline: with
+# constant node features and the normalized adjacency little participant-specific signal remains (known property).
+extends: ../gnn.yaml
+experiment: exp2_conn_minimal
+graph:
+  band_mode: single
+node_features:
+  components: [constant]
+sweep:
+  graph.connectivity: [plv, ciplv]
+  graph.bands: [[delta], [theta], [alpha], [beta], [gamma]]

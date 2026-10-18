@@ -1,0 +1,36 @@
+# Pre-specified selection rules of the final framework (docs/final/framework.md §7). Written before any result of the
+# final framework exists. Selection reads DEVELOPMENT-CV results only (setting xu_dev_cv); the holdout is never read
+# (release.HOLDOUT_POLICY). A candidate replaces the default only if it is clearly and consistently better:
+#   mean participant AUC over the reference cells >= default + margin, AND
+#   better than the default in at least min_fraction_of_cells_better of the cells,
+# where a cell is one (reference experiment variant, inverse). Otherwise the default is kept. Every candidate must
+# have completed every cell; an incomplete comparison selects nothing. The comparison runs on the primary atlas
+# (release.PRIMARY["atlas"]; `atlas: primary`).
+
+graph_construction:
+  default: dense
+  candidates: [knn_union_f10, knn_union_f20, knn_union_f30, knn_mutual_f10, knn_mutual_f20, knn_mutual_f30,
+               proportional_f20, contiguity, contiguity_knn_union_f20]
+  reported_only: [feature_similarity_knn_union_f20]   # a different graph definition: compared, never selected
+  reference:                                           # experiment config stem: variants (PLV, the primary measure)
+    exp4_band_mean: [plv__psd]
+    exp5_multibranch: [plv__separate__mean]
+  inverses: [lcmv, wmne]
+  mode: B
+  atlas: primary
+  margin: 0.02
+  min_fraction_of_cells_better: 0.75
+
+# The atlas is NOT chosen by classification performance (that would select the measurement on the outcome). It is
+# chosen before any result of the final framework, on source-resolution criteria computed without EEG or labels
+# (source.resolution; docs/final/parcellation.md): the FINEST atlas whose ROI estimates, for BOTH inverses,
+#   * are not forced to be linearly redundant (number of regions <= rank of the ROI operator), and
+#   * have a median cross-talk fraction <= max_median_crosstalk, and
+#   * are dominated by their own region for at least min_own_region_dominance of the ROIs.
+# Computed with the stores' fsaverage BEM (Colab); a sphere-model result is provisional. Coarser atlases need their
+# own stores, built only after the author's approval; dk68 stays the reference / sensitivity analysis either way.
+atlas_resolution:
+  candidates: [dk68, dk34_gyral, r18, lobes12]      # finest first
+  max_median_crosstalk: 0.60
+  min_own_region_dominance: 0.80
+  require_no_forced_redundancy: true

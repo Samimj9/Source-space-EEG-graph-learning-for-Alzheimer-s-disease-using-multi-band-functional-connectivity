@@ -54,3 +54,45 @@ def test_decision_scores_use_their_own_threshold():
     m = binary_metrics(y, margin, threshold=0.0)
     assert (m["tp"], m["fn"], m["fp"], m["tn"]) == (1, 1, 1, 1)
     assert m["roc_auc"] == pytest.approx(binary_metrics(y, 1 / (1 + np.exp(-margin)))["roc_auc"])   # rank-based
+
+
+# ------------------------------------------------------------------------------------------- AUC uncertainty
+def test_delong_auc_equals_sklearn_and_its_se_matches_the_bootstrap():
+    from sklearn.metrics import roc_auc_score
+
+    from adgraph.evaluation.metrics import auc_delong
+
+    rng = np.random.default_rng(0)
+    y = np.r_[np.ones(29), np.zeros(23)].astype(int)
+    s = rng.standard_normal(52) + 0.8 * y
+    d = auc_delong(y, s)
+    assert d["auc"] == pytest.approx(roc_auc_score(y, s))
+    boot = []
+    for _ in range(3000):
+        i = np.r_[rng.choice(29, 29), 29 + rng.choice(23, 23)]
+        boot.append(roc_auc_score(y[i], s[i]))
+    assert d["se"] == pytest.approx(np.std(boot), rel=0.15)
+    assert d["ci_low"] < d["auc"] < d["ci_high"] <= 1
+
+
+def test_paired_delong():
+    from adgraph.evaluation.metrics import delong_paired
+
+    rng = np.random.default_rng(1)
+    y = np.r_[np.ones(20), np.zeros(20)].astype(int)
+    a = rng.standard_normal(40) + y
+    same = delong_paired(y, a, a)
+    assert same["diff"] == 0 and same["p"] == 1.0
+    better = delong_paired(y, a + 3 * y, a)
+    assert better["diff"] > 0 and better["p"] < 0.05
+    perfect = delong_paired(y, y + 0.0, y + 0.0)                          # no variance, identical: p = 1
+    assert perfect["p"] == 1.0
+
+
+def test_wilson_interval():
+    from adgraph.evaluation.metrics import wilson_ci
+
+    lo, hi = wilson_ci(7, 7)
+    assert hi == 1.0 and lo == pytest.approx(0.6457, abs=1e-3)            # 95 % Wilson interval of 7 / 7
+    lo, hi = wilson_ci(3, 6)
+    assert lo == pytest.approx(0.1876, abs=1e-3) and hi == pytest.approx(0.8124, abs=1e-3)

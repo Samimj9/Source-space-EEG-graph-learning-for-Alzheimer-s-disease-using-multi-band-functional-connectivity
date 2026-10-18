@@ -231,7 +231,7 @@ def _dataset_tree(tmp_path, layout=LOC, drop_d2=None):
 def _strict(tmp_path, paths):
     out = tmp_path / "out"
     out.mkdir(exist_ok=True)
-    return subprocess.run([sys.executable, "scripts/inspect_raw.py", "--paths", str(paths), "--out", str(out),
+    return subprocess.run([sys.executable, "scripts/legacy/inspect_raw.py", "--paths", str(paths), "--out", str(out),
                            "--strict", "--allow-ephemeral-storage"], cwd=REPO, capture_output=True, text=True)
 
 

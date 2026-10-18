@@ -1,0 +1,15 @@
+# Exp 4: multiband GCN on the band-AVERAGED adjacency (intentional band averaging: A = mean over the five bands,
+# one graph). Node features keep every band as separate columns: [log, relative] PSD of all bands (F = 10) or, as a
+# separate configuration, DE of all bands (F = 5). {PLV, |ciPLV|} x {psd, de} = 4 variants.
+extends: ../gnn.yaml
+experiment: exp4_band_mean
+graph:
+  band_mode: mean
+node_features:
+  components: [psd]
+  psd_bands: all
+sweep:
+  graph.connectivity: [plv, ciplv]
+variants:
+  psd: {node_features.psd_kinds: [log, rel]}
+  de: {node_features.psd_kinds: [de]}

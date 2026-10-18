@@ -1,8 +1,8 @@
-"""Subject-level splits for the evaluation settings of DESIGN.md.
+"""Participant-level splits of the final framework (DESIGN.md).
 
-Folds are always built from the list of *subjects* (one row per ``key``) and only
-then expanded to windows, so overlapping 20 s windows of one subject can never be
-on both sides of a split. ``fold_indices`` re-checks this for every split.
+Folds are always built from the list of *participants* (one row per ``key``) and only then expanded to windows, so
+overlapping windows of one participant can never be on both sides of a split. ``fold_indices`` re-checks this for
+every split.
 """
 
 from __future__ import annotations
@@ -14,21 +14,13 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 
 SETTINGS = {
-    # name: (datasets used for training/CV, test dataset or None for CV, stratify columns)
-    "within_D1": (("D1",), None, ("y",)),
-    "within_D2": (("D2",), None, ("y",)),
-    "pooled": (("D1", "D2"), None, ("dataset", "y")),
-    "cross_D1_to_D2": (("D1",), "D2", ("y",)),
-    "cross_D2_to_D1": (("D2",), "D1", ("y",)),
-    # Dataset 3 (OpenNeuro ds004504, AD/HC; methodology log entry 44): its own graph runs (graphsD3_v*)
-    "within_D3": (("D3",), None, ("y",)),
-    # D3 LCMV / Xu-protocol suite (methodology log entry 50): one frozen participant split (xu_partition)
-    "xu_dev_cv": (("D3",), None, ("y",)),       # 5-fold participant CV inside the 80 % development set only
-    "xu_holdout": (("D3",), None, ("y",)),      # fit on the whole development set, test once on the 20 % holdout
+    # name: (datasets used, test dataset or None for CV, stratify columns). One frozen participant split
+    # (xu_partition): 52 development / 13 holdout participants of ds004504 (methodology log entry 50).
+    "xu_dev_cv": (("D3",), None, ("y",)),       # 5-fold participant CV inside the development set only
+    "xu_holdout": (("D3",), None, ("y",)),      # fit on the whole development set, test once on the holdout
 }
 XU_SETTINGS = ("xu_dev_cv", "xu_holdout")
 XU_SPLIT = {"test_fraction": 0.2, "seed": 20250702, "dev_folds": 5}
-CROSS_SETTINGS = ("cross_D1_to_D2", "cross_D2_to_D1")
 
 
 @dataclass(frozen=True)
@@ -81,33 +73,26 @@ def xu_partition(subj: pd.DataFrame, test_fraction: float = XU_SPLIT["test_fract
     return sorted(set(subj["key"]) - set(test)), test
 
 
-def make_splits(meta: pd.DataFrame, setting: str, k: int = 5, n_repeats: int = 20, seed: int = 0,
+def make_splits(meta: pd.DataFrame, setting: str, k: int = 5, n_repeats: int = 1, seed: int = 0,
                 target: str = "y", scheme: str = "kfold") -> list[Split]:
-    """Outer splits for one evaluation setting.
+    """Outer splits of one setting.
 
-    within/pooled: repeated stratified subject K-fold (``scheme='kfold'``) or
-    leave-one-subject-out (``scheme='loso'``). cross: one split, all source
-    subjects -> all target subjects (repeats are just seeds for the model).
-    """
-    train_ds, test_ds, strata = SETTINGS[setting]
+    ``xu_dev_cv``: stratified participant K-fold (K = 5) over the 52 development participants only (the holdout never
+    enters); repeat r uses seed + r. ``xu_holdout``: one split, all development participants -> the 13 holdout
+    participants (repeats are model seeds only)."""
+    if setting not in SETTINGS:
+        raise ValueError(f"unknown setting {setting!r}; choose from {list(SETTINGS)}")
+    if scheme != "kfold":
+        raise ValueError("only participant k-fold CV is part of the final protocol")
+    train_ds, _, strata = SETTINGS[setting]
     subj = subject_table(meta, target)
-    if test_ds is not None:
-        src = subj[subj["dataset"].isin(train_ds)]["key"].tolist()
-        tgt = subj[subj["dataset"] == test_ds]["key"].tolist()
-        if not src or not tgt:
-            raise ValueError(f"{setting}: empty source or target")
-        return [Split(setting, r, 0, tuple(src), tuple(tgt)) for r in range(n_repeats)]
     subj = subj[subj["dataset"].isin(train_ds)].reset_index(drop=True)
-    if setting in XU_SETTINGS:
-        dev, test = xu_partition(subj)
-        if setting == "xu_holdout":           # repeats = model seeds; the split never changes
-            return [Split(setting, r, 0, tuple(dev), tuple(test)) for r in range(n_repeats)]
-        subj = subj[subj["key"].isin(dev)].reset_index(drop=True)   # holdout participants never enter the CV
-        k = XU_SPLIT["dev_folds"]
+    dev, test = xu_partition(subj)
+    if setting == "xu_holdout":
+        return [Split(setting, r, 0, tuple(dev), tuple(test)) for r in range(n_repeats)]
+    subj = subj[subj["key"].isin(dev)].reset_index(drop=True)          # holdout participants never enter the CV
+    k = XU_SPLIT["dev_folds"]
     splits = []
-    if scheme == "loso":
-        keys = subj["key"].tolist()
-        return [Split(setting, 0, i, tuple(k_ for k_ in keys if k_ != key), (key,)) for i, key in enumerate(keys)]
     for r in range(n_repeats):
         for f, (tr, te) in enumerate(stratified_subject_folds(subj, k, seed + r, strata)):
             splits.append(Split(setting, r, f, tuple(tr), tuple(te)))
@@ -126,19 +111,6 @@ def inner_folds(train_meta: pd.DataFrame, k: int, seed: int, strata: tuple[str, 
     for tr, te in stratified_subject_folds(subj, k, seed, strata):
         out.append((np.flatnonzero(np.isin(keys, tr)), np.flatnonzero(np.isin(keys, te))))
     return out
-
-
-def subject_holdout(train_meta: pd.DataFrame, fraction: float, seed: int, target: str = "y"):
-    """One stratified subject-level train/validation split inside a training view (early stopping)."""
-    subj = subject_table(train_meta, target)
-    rng = np.random.default_rng(seed)
-    val = []
-    for _, grp in subj.groupby("y"):
-        n = max(1, int(round(fraction * len(grp))))
-        val += rng.choice(grp["key"].to_numpy(), size=min(n, len(grp) - 1), replace=False).tolist()
-    keys = train_meta["key"].to_numpy()
-    is_val = np.isin(keys, val)
-    return np.flatnonzero(~is_val), np.flatnonzero(is_val)
 
 
 def assert_disjoint(train_meta: pd.DataFrame, test_meta: pd.DataFrame) -> None:

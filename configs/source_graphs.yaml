@@ -1,0 +1,116 @@
+# Source-graph stores of the final framework (OpenNeuro ds004504 v1.0.9 provider derivatives, 36 AD + 29 HC; FTD
+# excluded by design). ONE configuration: the inverse solution and the cortical atlas are parameters.
+#
+#   adgraph.sourcegraphs.config.resolve(inverse, atlas) -> the complete store configuration
+#
+# For atlas dk68 the resolved configurations are IDENTICAL (same dict, same config hash) to the configurations the
+# validated stores were built with (legacy/configs/lcmv_xu/pipeline.yaml -> 811690218bfa, legacy/configs/wmne_xu/
+# pipeline.yaml -> c32bc6c67f0e; tested), so the existing stores are found and verified, never rebuilt:
+#   lcmv / dk68:  D3_LCMV_XU/graphsLX_v1_811690218bfa_corr1   (mode B)   graphsLX10_v1_811690218bfa_corr1   (mode A)
+#   wmne / dk68:  D3_WMNE_XU/graphsWX_v1_c32bc6c67f0e         (mode B)   graphsWX10_v1_c32bc6c67f0e         (mode A)
+# Coarser atlases (docs/final/parcellation.md) add `source.atlas` and get their own store names
+# (graphsLX-<atlas>_v1_<hash>, ...): new stores, built only after explicit approval (scripts/build_stores.py).
+version: 1
+
+shared:
+  datasets: [D3]
+  input:
+    format: eeglab                  # derivatives/sub-XXX/eeg/sub-XXX_task-eyesclosed_eeg.set (MNE: uV -> V)
+  channels:                         # the 19 recorded 10-20 electrodes (verified montage, methodology log entry 46)
+    recorded: [Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz]
+    drop: []
+    montage: eeglab_chanlocs
+    coordinates:
+      source: eeglab_chanlocs
+      units: mm
+      head_radius_m: [0.06, 0.13]
+      frame: mri
+      accepted_lookups: [standard_BEM/elec/standard_1005.elc, standard_BEM/elec/standard_1020.elc]
+      compare_template: colin27_1005
+    verify_layout: false
+  units:
+    plausible_std_v: [1.0e-7, 2.0e-4]   # median channel std of the selected, average-referenced data
+    flat_std_v: 1.0e-7                  # a channel below 0.1 uV is not a measurement: the participant stops
+    scale:
+      D3: 1.0
+  preprocessing:
+    sfreq: 250.0                    # every continuous segment is resampled on its own (fixed 4 s padding)
+    bandpass: false                 # the provider's 0.5-45 Hz Butterworth filter is used as given
+    reference: average              # common average of the 19 channels
+  discontinuities:                  # EEGLAB 'boundary' events split the recording; nothing crosses one
+    source: eeglab_boundary
+    handling: split
+  bands:                            # Xu et al. (2025), Front. Neurosci. 19:1555657
+    delta: [0.5, 4.0]
+    theta: [4.0, 8.0]
+    alpha: [8.0, 13.0]
+    beta: [13.0, 25.0]
+    gamma: [25.0, 45.0]
+  filters:
+    transition_bandwidth_hz: 1.0    # MNE FIR zero-phase firwin, 1 Hz transitions; finite analytic kernels
+  windowing:
+    window_s: 10.0
+    step_s: 1.0                     # 90 % overlap
+    selection_s: 300.0              # five minutes of usable EEG per participant (sourcegraphs.recording)
+    rejection:                      # adaptive peak-to-peak rule per participant
+      mad_k: 5.0
+      max_bad_channel_fraction: 0.15
+    min_windows: 5                  # the pre-specified exclusion rule (CLAUDE.md rule 4)
+    tenfold_samples: 10             # mode A: the first 10 accepted windows per participant (65 -> 650)
+  source:                           # shared by both inverses
+    subject: fsaverage
+    spacing: ico5
+    bem: fsaverage-5120-5120-5120-bem-sol.fif
+    mindist_mm: 5.0
+    parcellation: aparc             # Desikan-Killiany labels (68 cortical ROIs; coarser atlases merge them)
+    roi_mode: mean_flip             # sign-flip by cortical normals, then average over the label
+  psd:
+    method: welch
+    welch:
+      segment_s: 2.0
+      overlap: 0.5
+      window: hann
+      average: mean
+    relative_range: [0.5, 45.0]
+    sensor: true
+  features:
+    differential_entropy: true      # DE = 0.5 * ln(2*pi*e*var(band-passed window))
+    save_signed_ciplv: false
+    save_roi_timeseries: true
+  split:                            # frozen participant split (evaluation.splits.XU_SPLIT)
+    test_fraction: 0.2
+    seed: 20250702
+    dev_folds: 5
+
+inverses:
+  lcmv:
+    output_subdir: D3_LCMV_XU
+    store_names: [graphsLX, graphsLX10]     # the default names: not written into the dk68 configuration
+    source:
+      orientation: fixed_normal     # forward converted to cortical-normal orientation (surf_ori, force_fixed)
+      method: lcmv
+      lcmv:
+        reg: 0.05                   # Tikhonov loading: 5 % of the mean eigenvalue of the data covariance
+        weight_norm: unit-noise-gain-invariant
+        noise_cov: ad_hoc
+        rank: data                  # numerical rank of each participant's data covariance
+        covariance: accepted_windows   # each participant's own accepted samples (broadband), labels never used
+  wmne:
+    output_subdir: D3_WMNE_XU
+    store_names: [graphsWX, graphsWX10]
+    source:
+      orientation: loose_0.2_normal_component   # free-orientation forward, loose 0.2, signed normal component
+      method: wmne
+      wmne:                         # the historical wMNE settings (depth-weighted minimum norm)
+        method: MNE
+        loose: 0.2
+        depth: 0.8
+        lambda2: 0.1111111111111111 # 1 / SNR^2, SNR = 3
+        noise_cov: ad_hoc
+        pick_ori: normal
+
+# Existing validated stores (dk68 only): store name -> the corrected copy actually used. The LCMV stores were
+# corrected once (corr1, methodology log entry 53); the wMNE stores were built after that fix.
+corrected_stores:
+  lcmv: corr1
+  wmne: null

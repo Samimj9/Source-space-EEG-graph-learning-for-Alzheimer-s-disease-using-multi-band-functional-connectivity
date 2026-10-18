@@ -46,11 +46,6 @@ def test_classical_connectivity_features(store, conn):
     assert d.payload["X"][0, 0] == store.arrays[conn][0, 0, 0, 1]
 
 
-def test_classical_age_and_meta(store):
-    d = build_classical(store, {"source": "age"})
-    assert d.payload["X"].shape == (store.n_windows, 1)
-    for col in ("window_id", "key", "dataset", "subject_id", "y"):
-        assert col in d.meta
 
 
 @pytest.mark.parametrize("conn", ["plv", "ciplv"])
@@ -117,10 +112,6 @@ def test_constant_and_identity(store):
         build_graph(store, g(), nf([]))
 
 
-def test_dataset_probe_target(store):
-    d = build_classical(store, {"source": "source", "psd_kinds": ["log"]}, target="dataset")
-    assert d.target == "y_dataset"
-    assert (d.meta["y_dataset"] == (d.meta["dataset"] == "D2")).all()
 
 
 @pytest.mark.parametrize("conn", ["plv", "ciplv"])
@@ -160,40 +151,38 @@ def test_store_validates_signed_ciplv(store):
         GraphStore(bad, store.windows, store.bands, store.band_edges, store.roi_names, store.channels)
 
 
-def test_experiment_node_feature_layouts(store):
-    from pathlib import Path
+# ------------------------------------------------------------------------------------------- final experiments
+def _final_graph_variants():
+    from adgraph.experiments.config import expand_variants, experiment_configs, load_experiment
 
-    from adgraph.experiments.config import expand_variants, load_experiment
-    from adgraph.graphs.dataset import build_dataset
-
-    exp = Path("configs/experiments")
-    n = store.n_windows
-    for cfg, shape_x, names in [
-        ("exp3_conn_psd.yaml", (n, 1, 68, 2), ["psd_log:theta", "psd_rel:theta"]),
-        ("exp3b_conn_psd_allbands.yaml", (n, 1, 68, 8), None),
-        ("exp4_band_mean.yaml", (n, 1, 68, 8), None),
-        ("exp5_multiband.yaml", (n, 4, 68, 2), ["psd_log:band", "psd_rel:band"]),
-        ("exp6_multiband_psd_strength.yaml", (n, 4, 68, 3), ["psd_log:band", "psd_rel:band", "strength"]),
-    ]:
-        v = expand_variants(load_experiment(exp / cfg))[0]
-        d = build_dataset(store, v)
-        assert d.payload["x"].shape == shape_x, cfg
-        if names:
-            assert d.info["feature_names"] == names
-    # Exp 3 primary: theta graph gets theta PSD, beta graph gets beta PSD
-    vs = {v["variant"]: v for v in expand_variants(load_experiment(exp / "exp3_conn_psd.yaml"))}
-    for band, b in (("theta", 0), ("beta", 3)):
-        d = build_dataset(store, vs[f"plv__{band}__gcn"])
-        assert np.allclose(d.payload["x"][:, 0, :, 0], store.arrays["psd_log"][:, b])
-        assert np.allclose(d.payload["x"][:, 0, :, 1], store.arrays["psd_rel"][:, b])
+    return [(e, v) for e, p in experiment_configs().items() for v in expand_variants(load_experiment(p))
+            if v["input"] == "graph"]
 
 
-def test_covariates_payload(store):
-    from adgraph.graphs.dataset import add_covariates
+EXPECTED_KF = {  # experiment: {variant: (graphs K, features F)}; F counts node-feature columns per graph
+    "exp2": {None: (1, 1)}, "exp3": {None: (1, 2)},
+    "exp4": {"plv__psd": (1, 10), "ciplv__psd": (1, 10), "plv__de": (1, 5), "ciplv__de": (1, 5)},
+    "exp5": {None: (5, 2)},
+    "exp6": {"plv__no_psd": (5, 1), "plv__no_strength": (5, 2), None: (5, 3)},
+    "exp7": {None: (5, 3)},
+    "exp8": {"plv__psd": (5, 2), "ciplv__psd": (5, 2), "plv__de": (5, 1), "ciplv__de": (5, 1), None: (5, 4)},
+}
 
-    d = add_covariates(build_graph(store, g(), nf(["constant"])), ["age"])
-    assert d.payload["cov"].shape == (store.n_windows, 1)
-    with pytest.raises(ValueError):
-        add_covariates(build_classical(store, {"source": "age"}), ["age"])
-    with pytest.raises(ValueError):
-        add_covariates(d, ["mmse"])
+
+@pytest.mark.parametrize("exp,v", _final_graph_variants(), ids=lambda x: x if isinstance(x, str) else x["variant"])
+def test_final_node_feature_layouts_and_band_alignment(d3_store, exp, v):
+    data = build_graph(d3_store, v["graph"], v["node_features"])
+    x, a = data.payload["x"], data.payload["adj"]
+    exp_kf = EXPECTED_KF[exp]
+    k, f = exp_kf.get(v["variant"], exp_kf.get(None))
+    if v["variant"].endswith(("drop_delta", "drop_theta", "drop_alpha", "drop_beta", "drop_gamma")):
+        k = 4
+    assert x.shape == (d3_store.n_windows, k, 68, f) and a.shape == (d3_store.n_windows, k, 68, 68)
+    bands = v["graph"]["bands"]
+    if v["graph"]["band_mode"] == "multi" and "psd" in v["node_features"]["components"]:
+        kind = v["node_features"]["psd_kinds"][0]
+        col = data.info["feature_names"].index(f"psd_{kind}:band")
+        for i, b in enumerate(bands):                                     # graph i carries band i's PSD and PLV
+            j = d3_store.bands.index(b)
+            assert np.array_equal(x[:, i, :, col], d3_store.arrays[f"psd_{kind}"][:, j].astype(np.float32))
+            assert np.array_equal(a[:, i], d3_store.arrays[v["graph"]["connectivity"]][:, j])

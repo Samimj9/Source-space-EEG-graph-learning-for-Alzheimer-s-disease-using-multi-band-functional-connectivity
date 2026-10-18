@@ -68,7 +68,7 @@ def make_raw(dur, cut_s=(), seed=0, data=None):
 
 def run_subject(monkeypatch, raw, cfg=CFG):
     import adgraph.io.eeg as eeg
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     monkeypatch.setattr(eeg, "read_header", lambda path, fmt: raw.copy())
     W = np.random.default_rng(5).standard_normal((68, len(CH)))

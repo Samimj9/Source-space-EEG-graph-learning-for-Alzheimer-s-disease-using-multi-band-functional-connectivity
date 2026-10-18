@@ -4,18 +4,20 @@ Guidance for Claude (and humans) working in this repository.
 
 ## What this project is
 
-Code for a technical research paper: **source-space EEG graph learning for
-Alzheimer's disease (AD) vs. healthy control (HC) classification using
-multi-band functional connectivity.**
+Code for a technical research paper: **source-space EEG graph learning for Alzheimer's disease (AD) vs. healthy control (HC)
+classification using multi-band functional connectivity.**
 
-Pipeline (one graph per EEG window, per frequency band):
+The current code is the **final framework, release final-1.0** (`docs/final/framework.md`, `FINAL_RUN_GUIDE.md`,
+DESIGN.md v2.0, methodology log entry 58) on OpenNeuro ds004504 (65 participants, 36 AD / 29 HC):
 
 ```
-raw EEG (EDF) -> preprocessing -> windowing + artifact rejection
-  -> source reconstruction (fsaverage, MNE) -> Desikan-Killiany 68 ROIs
-  -> band-limited PLV connectivity (theta, alpha1, alpha2, beta)
-  -> multi-band graphs (68 nodes) -> GNN / baselines -> subject-level evaluation
+validated store (LCMV | wMNE  x  window mode B | A  x  atlas) --verify + lock--> participant QC gate
+  --> Exp 0-8 (one config each; graph construction for GNNs) --> participant-level evaluation (52 / 13 frozen split)
 ```
+
+Earlier work (D1 / D2 with wMNE, the first D3 pipeline, the LX / WX suites with their ES200 and R1 variants) is archived
+in `legacy/` (and on branch `claude/ecstatic-davinci-a2e8mh`); its D1 / D2 graph builder stays importable and tested as
+`adgraph.legacy`.
 
 The pipeline runs in **Google Colab with Google Drive mounted**. This repo holds
 code, configs, docs and small summary tables only.
@@ -86,134 +88,98 @@ e.g. `D1-3`, `D2-3`.
 ### Dataset 3 (OpenNeuro ds004504; `docs/dataset_d3.md`, methodology log entry 44)
 
 - 36 AD + 29 HC, provider-preprocessed derivatives; FTD excluded by design (never downloaded).
-- Downloaded by `notebooks/d3/D3_01_download_and_build_graphs.ipynb` to `My Drive/OpenNeuro/ds004504`
-  (`paths.yaml: dataset3.root`).
-- Pipeline `configs/pipeline_d3.yaml`:
-  - no second band-pass;
-  - bad channels reported only;
+- Downloaded (once, already done) by `scripts/d3_data.py` to `My Drive/OpenNeuro/ds004504`
+  (`paths.yaml: dataset3.root`); the source-graph stores are built from these derivatives.
+- Shared preprocessing rules (both the stores and the legacy `configs/pipeline_d3.yaml` builder):
+  - no second band-pass; bad channels reported only;
   - recordings split at EEGLAB `boundary` events, each segment resampled on its own; no window crosses a
     discontinuity or its margin (`preprocessing/discontinuities.py`, methodology log entry 45);
   - electrode coordinates from each `.set` file's `chanlocs` (frame from the provider's lookup record, no
     template fallback, one operator per geometry; `io/chanlocs.py`, methodology log entry 46). They are a
-    shared Colin27 template lookup, not individual measurements;
-  - runs in `graphsD3_v4_*`.
-- Experiments `configs/experiments/d3/` (`graph_family: D3`, setting `within_D3`); results in `experiments_D3/`.
-- Own code pin `D3_CODE_COMMIT.txt` (`colab_setup.py --family D3`); D3 notebooks never change the D1/D2 pin
-  `CODE_COMMIT.txt` (`scripts/code_pin.py`).
-- Never mix D3 graph runs or results with D1/D2 ones. Cross-dataset D3 ↔ D1/D2 is not implemented yet.
+    shared Colin27 template lookup, not individual measurements.
+- The historical wMNE graphs `graphsD3_v4_*`, their experiments (`experiments_D3/`) and the pin
+  `D3_CODE_COMMIT.txt` belong to the earlier work. Never mix them, or D1 / D2 results, with the final framework's.
 
-### D3 LCMV beamforming + Xu protocol suite (`docs/lcmv_xu.md`, methodology log entry 50)
+### The final framework (release final-1.0; `docs/final/`, methodology log entry 58)
 
-- Separate pipeline: `src/adgraph/lcmvxu/`, `configs/lcmv_xu/pipeline.yaml`, `configs/experiments/lx/` (mode B, all
-  windows) and `lx/tenfold/` (mode A, 10 samples per participant); notebooks `notebooks/lcmv_xu/`.
-- Outputs only under `<processed>/D3_LCMV_XU/` (graphs `graphsLX_v1_*` / `graphsLX10_v1_*`, results
-  `experiments_B_all_windows/` / `experiments_A_xu_tenfold/`); own pin `D3_LCMV_XU/CODE_COMMIT.txt` (`--family LX`).
-- Per-participant LCMV, 68 DK ROIs, Xu's five bands, 10 s / 1 s windows, frozen 80/20 participant split
-  (`xu_dev_cv`, `xu_holdout`). Never mix with D1/D2 or the wMNE D3 runs.
-
-### D3 matched wMNE / Xu comparison (`docs/wmne_xu.md`, methodology log entry 55)
-
-- Same `lcmvxu` pipeline with `configs/wmne_xu/pipeline.yaml` (identical to LCMV-Xu except `source`: historical wMNE);
-  `scripts/wx_build.py` (build, validate, `match` against the corrected LCMV stores); notebooks `notebooks/wmne_xu/`.
-- Outputs only under `<processed>/D3_WMNE_XU/` (stores `graphsWX_v1_*` / `graphsWX10_v1_*`, experiments
-  `experiments_{A_xu_tenfold,B_all_windows,H_historical_graphs}/`); own pin `D3_WMNE_XU/CODE_COMMIT.txt` (`--family WX`).
-- Families `WX`, `WX10` (configs `configs/experiments/wx/`, inheriting the LX definitions) and `D3H` (historical
-  `graphsD3_v4` graphs, `configs/experiments/wx_hist/`); every run verifies the frozen LCMV split and folds.
-- Never write into `D3_LCMV_XU/` from this suite, and never add early stopping to only one of the two suites.
-
-### Early-stopping protocol for both Xu suites (`docs/early_stopping.md`, methodology log entry 56)
-
-- GNN Exp 2-8 only: `configs/experiments/{lx,wx}_es/` (max 200 epochs, patience 10, min_delta 1e-4, best restored,
-  inner validation from outer training participants only); notebooks `notebooks/{lcmv_xu,wmne_xu}/early_stopping/`.
-- Results in new `lx*_es_*` / `wx*_es_*` experiment folders; the 60-epoch results stay untouched.
-- Own pins `ES200_CODE_COMMIT.txt` per suite (the second adopts the first); suite pins are never moved by them.
-- LX-ES and WX-ES configs must stay identical apart from name and family (tested).
-
-### Band identity in shared multiband encoders (`docs/band_identity.md`, methodology log entry 57)
-
-- A shared-encoder `MultiBandGNN` without `model.band_identity` is invariant to band permutation (Exp 5 shared, Exp 6
-  originals; kept as baselines). Corrected variants: `*_exp5_bandid`, `*_exp6_bandid` (`band_identity: onehot`),
-  notebooks `notebooks/{lcmv_xu,wmne_xu}/corrected/`, own pins `R1_CODE_COMMIT.txt`.
-- `tests/test_xu_audit.py` checks label orientation for every model family and band-permutation sensitivity for every
-  multiband variant; a new shared multiband model must either carry band identity or be documented as invariant.
+- **Stores (read only, locked):** LCMV `D3_LCMV_XU/graphsLX{,10}_v1_811690218bfa_corr1`, wMNE
+  `D3_WMNE_XU/graphsWX{,10}_v1_c32bc6c67f0e` (mode B / A; 68 DK ROIs, 5 Xu bands). One store configuration
+  `configs/source_graphs.yaml`; `sourcegraphs.config.resolve(inverse, atlas)` reproduces both stores' configurations
+  exactly (tested). Never rebuild or modify them; coarser atlases get new stores (`scripts/build_stores.py`, author
+  approval).
+- **One version system:** `adgraph.release`, outputs only under `<processed>/FINAL_v1/`, one code pin
+  `FINAL_v1/CODE_COMMIT.txt`. The earlier pins (`CODE_COMMIT.txt`, `D3_CODE_COMMIT.txt`, LX / WX / ES200 / R1 pins) are
+  historical: never moved, never written by the final framework.
+- **Protocol:** frozen 52 / 13 participant split (`xu_dev_cv` 5 folds, `xu_holdout`); GNNs exactly 60 epochs
+  (`gnn_fixed60_v1`), no early stopping, no search; classical models participant-level inner CV for C. The holdout was
+  inspected in earlier work: descriptive only, never used for any selection.
+- **Experiments:** `configs/final/experiments/exp0-8*.yaml`; inverse, window mode, atlas and graph construction are
+  run-time context (`experiments.config.with_context`). LCMV and wMNE variants must stay identical apart from the
+  inverse (tested). A shared-encoder multiband model must carry `model.band_identity: onehot` (validate refuses it
+  otherwise, unless declared `band_invariant_baseline`; methodology log entry 57).
+- **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
+  `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
+- **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the graph construction is
+  chosen by the pre-specified development-CV rule only; the atlas by source-resolution criteria only, never by
+  classification results.
 
 ## Repository layout
 
 ```
-DESIGN.md           Frozen evaluation design (settings, splits, metrics, cross-dataset gate).
-configs/            YAML configs: pipeline.yaml, paths template, experiments/. Committed.
-src/adgraph/        Importable Python package (all reusable logic lives here).
-  io/               loading EDF + participant metadata, subject registry
-  preprocessing/    filtering, resampling, referencing, montage, windowing, rejection
-  source/           forward model, inverse, parcellation
-  features/         PSD band power
-  connectivity/     band-limited PLV and ciPLV
-  graphs/           store schema (store.py), experiment inputs and DataViews (dataset.py)
-  models/           LR/SVM (classical.py), dense GCN / EdgeWeightedGAT / WeightedGraphSAGE, fusion, trainer
-  evaluation/       subject-level splits, metrics, statistics
-  experiments/      config loading/variants, cross-dataset gate, runner
-  visualization/    publication figures from saved outputs only (docs/figures.md)
-notebooks/          Thin Colab notebooks: mount Drive, install, call src/. Numbered by stage.
-scripts/            CLI entry points mirroring the notebooks (for reproducibility).
-tests/              Unit tests on synthetic data only (no real EEG in tests).
-docs/               Data inventory, methods decisions log, paper notes.
-results/            Small, shareable outputs only (aggregate tables, figures). No per-subject data.
+DESIGN.md           Evaluation design (v2.0 = the final framework; v1.x = the earlier results).
+FINAL_RUN_GUIDE.md  Notebook order, configurations, ROI recommendation, output directories.
+configs/            final/ (protocol, classical, gnn, graphs, selection, run_plan, experiments/exp0-8),
+                    source_graphs.yaml (stores), pipeline*.yaml (legacy builder), paths template.
+src/adgraph/        The package.
+  sourcegraphs/     LCMV / wMNE store building, validation, matching, protocol checks
+  stores.py, release.py   store verification + lock; the release (version, pin, output root)
+  io/ preprocessing/ source/ features/ connectivity/   shared signal processing (source/atlas.py, resolution.py)
+  graphs/           store schema, datasets, graph construction + diagnostics
+  qc/               participant QC (categories A / B / C), fold-level QC
+  models/           LR / SVM, dense GCN multiband GNN, EARM-GNN, Xu dual GCN, trainer
+  evaluation/       participant splits, metrics (DeLong, bootstrap, Wilson), reporting
+  experiments/      configs, planner, runner, report, selection
+  legacy/           frozen D1 / D2 / graphsD3_v4 builder (importable, tested)
+notebooks/          Generated Colab notebooks of the final framework (00-03, Exp0-Exp8, 99).
+scripts/            final.py (the CLI), build_stores.py, colab_setup.py, make_notebooks.py, legacy/ (builder tools).
+tests/              Unit / synthetic tests (no real EEG).
+docs/               final/ (framework, graph construction, QC, parcellation, inventory), logs, earlier docs.
+legacy/             Archived earlier code, configs, notebooks and tests (not importable; docs/final/inventory.md).
+results/            Small, shareable outputs only. No per-subject data.
 ```
 
-Notebooks stay thin: setup cells + calls into `src/adgraph`. Logic that is
-written in a notebook gets moved into the package before it is relied on.
+Notebooks stay thin: setup cell + calls of `scripts/final.py` / `scripts/build_stores.py`. Logic written in a notebook
+moves into the package before it is relied on.
 
 ## Colab workflow
 
-Notebooks are generated by `scripts/make_notebooks.py`; never edit them by hand.
-`notebooks/README.md` holds the index, Colab links and the Drive output layout. Each notebook is run
-with *Runtime → Run all* and needs no editing.
+Notebooks are generated by `scripts/make_notebooks.py`; never edit them by hand. Order: `configs/final/run_plan.yaml`
+(`00_setup_and_stores`, `01_participant_qc`, `02_parcellation`, `03_graph_construction`, `Exp0`-`Exp8`,
+`99_results_report`), **one notebook at a time**, each *Runtime → Run all*.
 
-- **Order:**
-  1. `01_build_graphs` (graphs + QC);
-  2. **one experiment notebook at a time** (`notebooks/experiments/Exp0..Exp6`, plus
-     `notebooks/additional/` for Exp3b, baselines, the dataset probe and EEG + age);
-  3. `03_comparative_figures`.
-- **Scope.** An experiment notebook runs only its own config, via
-  `scripts/experiment.py status | run | report`. It never starts another experiment.
-  The whole-plan runner (`scripts/run_plan.py`, `configs/run_plan.yaml`) is only reachable
-  from `notebooks/advanced/`, and only after `RUN_EVERYTHING = True` is set deliberately.
-- **Setup cell.** The first cell is identical in every notebook. It mounts Drive, clones
-  the branch and runs `scripts/colab_setup.py`, which:
-  - locates `AD-LEB`;
-  - picks `AD-LEB/processed` when writable, else `My Drive/AD-LEB-processed`;
-  - writes `configs/paths.yaml`;
-  - pins the code commit in `<output>/CODE_COMMIT.txt`, so all sessions and notebooks use
-    one commit (`UPDATE_CODE = True` moves the pin deliberately);
-  - installs `requirements.txt`.
-- **Shell steps** go through `adgraph.colab.sh`. It shows the output and raises on
-  failure, so "Run all" stops. Never use `!cmd` in a notebook.
-- **Checks before graphs.** Notebook 01 runs these automatically: the input check (20 + 23
-  recordings, 10/10 and 10/13 labels), the test suite (once per commit and environment)
-  and `inspect_raw.py --strict`.
-- **Protocol.** Experiment notebooks run the config's full protocol (repeats, nested CV,
-  grids). They show live progress, then a results table, runtime and memory per unit, and
-  single-experiment diagnostic figures. Those diagnostics are not paper figures. Failures end
-  the notebook with a visible error after the results are shown. There is no cost-estimation
-  stage.
-- **Never change** repeats, grids or model configurations to save time without the author's
-  approval.
-- **Progress bars** (`adgraph.progress`, methodology log entry 35):
-  - one tqdm line per stage, never nested: subjects, assembly, experiment folds +
-    permutations, figures;
-  - library code calls `progress.set(...)` / `progress.advance()`, which are no-ops without
-    an active bar;
-  - items recovered from checkpoints are counted as done from the start;
-  - an ETA appears only from items processed in this session;
-  - `adgraph.colab.sh` forwards `\r` redraws so the bar updates in place in Colab.
+- **Scope.** An experiment notebook runs only its own experiment (`scripts/final.py status | run | report --exp
+  expN`) over the contexts of its `CONTEXTS` cell (the only cell meant to be edited). It never starts another
+  experiment.
+- **Setup cell.** Identical in every notebook: mounts Drive, clones `claude/unified-final-framework`, runs
+  `scripts/colab_setup.py` (locates `AD-LEB`, chooses the output folder, writes `configs/paths.yaml`, pins the code in
+  `<output>/FINAL_v1/CODE_COMMIT.txt` (`UPDATE_CODE = True` moves it deliberately), installs `requirements.txt`).
+- **Shell steps** go through `adgraph.colab.sh` (shows output, raises on failure). Never use `!cmd` in a notebook.
+- **Protocol.** Notebooks run the config's full protocol. Never change repeats, grids, epochs or model
+  configurations to save time without the author's approval.
+- **Progress bars** (`adgraph.progress`, methodology log entry 35): one tqdm line per stage; library code calls
+  `progress.set(...)` / `progress.advance()`; items recovered from checkpoints count as done.
 
-## Graph construction (pipeline v4, boundary-aware)
+## Legacy graph builder (D1 / D2, pipeline v4, boundary-aware)
 
-- Parameters: `configs/pipeline.yaml`. Code: `src/adgraph/pipeline.py`.
-  Colab driver: `notebooks/01_build_graphs.ipynb`.
-- Order: `scripts/inspect_raw.py` (header check), then
-  `scripts/build_graphs.py --limit 1` (smoke test), then the full
-  `scripts/build_graphs.py`.
+Not used by the final framework (whose stores come from `adgraph.sourcegraphs`); kept so earlier results stay
+reproducible. It computes differential entropy with the definition of the source-graph stores (methodology log
+entry 58).
+
+- Parameters: `configs/pipeline.yaml`. Code: `src/adgraph/legacy/pipeline.py`. Archived Colab driver:
+  `legacy/notebooks/01_build_graphs.ipynb`.
+- Order: `scripts/legacy/inspect_raw.py` (header check), then
+  `scripts/legacy/build_graphs.py --limit 1` (smoke test), then the full
+  `scripts/legacy/build_graphs.py`.
 - **Frozen primary segmentation:** 20 s windows, 50 % overlap (5000 / 2500
   samples at 250 Hz), same for both datasets, cut after all filtering of the
   continuous signal.
@@ -239,60 +205,34 @@ with *Runtime → Run all* and needs no editing.
 
 ## Experiments
 
-- Configs: `configs/experiments/` (Exp 0–6 plus baselines). One experiment at a
-  time: `scripts/experiment.py estimate|run|status|report --config <cfg>` (what the
-  notebooks call). Lower-level runner: `scripts/run_experiment.py`. Details:
-  `docs/experiments.md` §6.
-- Keep graph construction and experiments separate. The graph-run directory
-  is the only interface between them.
+- Configs: `configs/final/experiments/` (Exp 0-8), shared `configs/final/{protocol,classical,gnn}.yaml`. One experiment
+  at a time: `scripts/final.py status | run | report --exp expN --inverse lcmv|wmne --mode B|A [--graph ...]`.
+- Keep store building and experiments separate. The verified store is the only interface between them.
 - Leakage rules are enforced in code:
-  - Stateless per-window features go in `graphs/dataset.py`.
-  - Anything fitted lives inside an estimator, whose `fit` accepts only a
-    `train` `DataView`.
-  - Never fit a scaler, selector or threshold outside a model.
-- Encoders are `gcn` (standard), `edge_weighted_gat` and `weighted_graphsage`.
-  In writing, always call the latter two EdgeWeightedGAT and
-  WeightedGraphSAGE, never plain GAT or GraphSAGE.
-- The primary SVM is scored by its `decision_function` margin, with no
-  calibration and threshold 0. Optional Platt calibration (`grouped_platt`) and
-  every inner split are subject-grouped.
-- Signed ciPLV's sign is the sign of the non-zero-lag phase relation for the ROI
-  order. Never describe it as directed or causal connectivity.
+  - Stateless per-window features go in `graphs/dataset.py`; graph constructions are stateless per window except
+    `quantile`.
+  - Anything fitted lives inside an estimator, whose `fit` accepts only a `train` `DataView`.
+  - Never fit a scaler, selector, threshold or QC reference outside a model or the training participants.
+- The only GNN encoder is the standard weighted-adjacency `gcn` (EdgeWeightedGAT / WeightedGraphSAGE are archived; in
+  writing always use those names, never plain GAT or GraphSAGE).
+- The primary SVM is scored by its `decision_function` margin, with no calibration and threshold 0.
+- Signed ciPLV's sign is the sign of the non-zero-lag phase relation for the ROI order. Never describe it as directed
+  or causal connectivity; it is never an adjacency.
+- Experiment 7 (EARM-GNN) is exploratory (designed after earlier results); comparisons are descriptive.
 - Decision rationale lives in `docs/methodology_architecture_log.md`.
-- EEG + age configs live in `configs/experiments/age/`.
-- Repeats, folds, epochs and grids are provisional for classical models. **GNNs use fixed
-  hyperparameters with no search or inner CV** (`configs/experiments/gnn_fixed_base.yaml`, protocol
-  `gnn_fixed_hparams_v1`, DESIGN.md v1.5, methodology log entry 42): Tier 1 = `*_fixedhp.yaml`
-  (10 repeats), Tier 2 = `*_fixedhp_tier2.yaml`. Never add a grid to a fixed-protocol config (it fails
-  to load), and never mix nested-CV GNN results (historical `exp2_conn_minimal/`) with fixed ones.
-- **Experiment 7 (EARM-GNN, `docs/earm_gnn.md`, methodology log entry 43)** is an exploratory extension designed
-  after the Tier 1 results: same protocol, ablations fixed adjacency and mean fusion, own code pin
-  (`experiments/exp7_earm_gnn/CODE_COMMIT.txt`). Report it as exploratory; comparisons are descriptive.
 - **Do not run experiments or the pipeline on real data unless the user asks.**
-  `--synthetic` and `pytest` are always fine.
-- Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed).
+  `scripts/final.py smoke`, `--synthetic`-style runs and `pytest` are always fine.
+- Tests: `pytest` (synthetic data only; the fsaverage steps are stubbed or approximated).
 
 ## Figures
 
-- Figures are generated by `scripts/make_figures.py` with `configs/figures/paper.yaml`
-  (inventory) and `configs/figures/style.yaml`. Every figure is documented in
-  `docs/figures.md`.
-- Figures read only saved outputs. Never hard-code a result value in plotting code or
-  config.
-- Plot subjects, not windows.
-- Keep PLV and |ciPLV| separate.
-- No significance marks unless they come from a saved, corrected, subject-level
-  statistics file.
-- Label display-only thresholds and exploratory projections as such.
-- Each figure is saved with its data, metadata and a manifest, and is never overwritten.
-  Synthetic figures are watermarked and are never results.
-- The pre-result figure decisions are frozen; see the "Pre-result design decisions"
-  section of `docs/figures.md`:
-  - Exp 2/3 have no representative band.
-  - Main figures are Fig. 1–7.
-  - The primary models are Exp 0 SVM, Exp 1 SVM and Exp 6 full.
-  - PLV is primary and |ciPLV| is the robustness analysis.
-  - Changing any of these needs a logged reason.
+The D1 / D2 paper-figure tooling (`visualization`, `configs/figures/`, `scripts/make_figures.py`) is archived in
+`legacy/`. The final framework writes per-experiment diagnostic figures from saved outputs only
+(`experiments.report`); they are diagnostics, not paper figures. Rules for any figure: read only saved outputs,
+never hard-code a result value, plot participants not windows, keep PLV and |ciPLV| separate, no significance marks
+unless they come from a saved, corrected, participant-level statistics file, label exploratory projections, never
+overwrite, watermark synthetic figures. The pre-result figure decisions of `docs/figures.md` apply to the earlier
+D1 / D2 figures.
 
 ## Checkpointing and resume (see methodology log entries 31–32)
 

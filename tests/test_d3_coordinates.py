@@ -99,7 +99,7 @@ def test_load_raw_uses_the_file_positions(tmp_path):
 
 def _run(tmp_path, monkeypatch, shifted=()):
     import adgraph.io.eeg as eeg
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
     from test_d3 import synthetic_raw, write_participants
 
     root = tmp_path / "ds004504"
@@ -150,7 +150,7 @@ def test_one_operator_per_distinct_geometry(tmp_path, monkeypatch):
 
 def test_subject_never_uses_another_geometrys_operator(monkeypatch):
     import adgraph.io.eeg as eeg
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
     from test_d3 import synthetic_raw
     from test_d3_discontinuities import Rec
 
@@ -164,7 +164,7 @@ def test_subject_never_uses_another_geometrys_operator(monkeypatch):
 
 
 def test_template_operator_not_reused_and_d1d2_unchanged():
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     g = chanlocs.establish(provider_chanlocs(CH), common_channels(CFG), CFG)
     old = json.loads(json.dumps(CFG))

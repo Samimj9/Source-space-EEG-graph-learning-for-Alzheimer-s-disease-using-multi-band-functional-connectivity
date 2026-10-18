@@ -1,0 +1,26 @@
+# Evaluation protocol of the final framework (DESIGN.md v2.0, docs/final/framework.md). Shared by Exp 0-8.
+#   * one frozen participant split of ds004504 (xu_partition): 52 development / 13 holdout participants;
+#   * xu_dev_cv: 5-fold participant-grouped CV inside the development set (seed 0; the folds of the earlier LX/WX
+#     suites); xu_holdout: fit on all 52 development participants, evaluate once on the 13 holdout participants;
+#   * participant score = mean of the window scores; fixed thresholds (0.5 for probabilities, 0 for SVM margins);
+#   * primary metric: participant-level ROC-AUC of the pooled out-of-fold scores; reported with the mean fold AUC,
+#     balanced accuracy, sensitivity, specificity, confusion matrix, DeLong and bootstrap CIs;
+#   * the holdout was inspected in earlier experiments: it is reported descriptively and never used for selection.
+target: label                    # AD = 1, HC = 0 (the only target)
+settings: [xu_dev_cv, xu_holdout]
+evaluation:
+  k: 5
+  n_repeats: 1                   # one CV repeat (the frozen folds); repeat r would use seed + r
+  inner_k: 5                     # classical models only: participant-level inner CV for C
+  seed: 0
+  threshold: 0.5                 # probabilities (LR, GNNs)
+  decision_threshold: 0.0        # SVM decision_function margins
+  selection_metric: roc_auc      # classical inner CV (participant level)
+  n_bootstrap: 2000              # participants resampled with replacement
+  save_model_state: false
+  permutation:
+    n: 0                         # participant-label permutations (optional, e.g. 200)
+    n_repeats: 1
+qc:
+  fold_policy: report            # fold-level outlier flags (thresholds fitted on training participants) are
+                                 # recorded; no participant is excluded or reweighted

@@ -134,7 +134,7 @@ def check_inputs(paths: dict, expected: dict = EXPECTED):
     Returns the per-dataset summary table. Reads file names and the participant sheets only."""
     import pandas as pd
 
-    from .pipeline import build_registry
+    from .legacy.pipeline import build_registry
 
     problems = []
     for key in ("participants",):
@@ -196,6 +196,10 @@ def has_completed_work(output_root: str | Path, family: str = "D1D2") -> bool:
     ``experiments/``; pin ``CODE_COMMIT.txt``) or 'D3' (``graphsD3_v*``, ``experiments_D3/``; pin
     ``D3_CODE_COMMIT.txt``)."""
     root = Path(output_root)
+    if family == "FINAL":                         # the final framework (adgraph.release): its own folder and pin
+        from .release import ROOT
+
+        return any((root / ROOT).glob("**/*.done.json"))
     if family == "D3":
         return any(root.glob("graphsD3_v*/subjects/*/subject.done.json")) or any(
             root.glob("experiments_D3/**/*.done.json"))

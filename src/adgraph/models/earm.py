@@ -88,7 +88,7 @@ class EARMGNN(nn.Module):
     def __init__(self, in_dim: int, n_bands: int, n_rois: int, hidden: int = 32, n_blocks: int = 3,
                  dropout: float = 0.3, adaptive_adjacency: bool = True, gate_rank: int = 8,
                  gate_init_bias: float = 2.0, gate_l1: float = 0.01, band_embedding: bool = True,
-                 pool_hidden: int = 16, fusion: str = "attention", mlp_hidden: int = 32, n_covariates: int = 0):
+                 pool_hidden: int = 16, fusion: str = "attention", mlp_hidden: int = 32):
         super().__init__()
         if fusion not in ("attention", "mean"):
             raise ValueError("EARM-GNN fusion must be 'attention' (full model) or 'mean' (ablation)")
@@ -100,9 +100,8 @@ class EARMGNN(nn.Module):
         self.jk = nn.Linear(hidden * (n_blocks + 1), hidden)
         self.pool_score = nn.Sequential(nn.Linear(hidden, pool_hidden), nn.Tanh(), nn.Linear(pool_hidden, 1))
         self.fusion = BandFusion(fusion, 3 * hidden, n_bands)
-        self.n_covariates = n_covariates
         self.embed_dropout = nn.Dropout(dropout)
-        self.head = nn.Sequential(nn.Linear(3 * hidden + n_covariates, mlp_hidden), nn.ReLU(),
+        self.head = nn.Sequential(nn.Linear(3 * hidden, mlp_hidden), nn.ReLU(),
                                   nn.Dropout(dropout), nn.Linear(mlp_hidden, 1))
 
     # -- components
@@ -146,17 +145,9 @@ class EARMGNN(nn.Module):
     def fused_embedding(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         return self.fusion(self.band_embeddings(x, adj))[0]
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor, cov: torch.Tensor | None = None,
-                return_band_weights: bool = False):
+    def forward(self, x: torch.Tensor, adj: torch.Tensor, return_band_weights: bool = False):
         fused, w = self.fusion(self.band_embeddings(x, adj))
-        fused = self.embed_dropout(fused)
-        if self.n_covariates:
-            if cov is None or cov.shape != (fused.shape[0], self.n_covariates):
-                raise ValueError(f"model expects covariates of shape (B, {self.n_covariates})")
-            fused = torch.cat([fused, cov], dim=-1)
-        elif cov is not None:
-            raise ValueError("covariates given to a model built without them")
-        logits = self.head(fused).squeeze(-1)
+        logits = self.head(self.embed_dropout(fused)).squeeze(-1)
         return (logits, w) if return_band_weights else logits
 
 

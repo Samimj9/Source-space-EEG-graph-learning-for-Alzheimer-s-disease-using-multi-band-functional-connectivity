@@ -4,7 +4,6 @@ from dependency_guard import (pytest_collectreport, pytest_runtest_logreport,  #
                               pytest_sessionfinish, pytest_terminal_summary)
 
 from adgraph import storage
-from adgraph.synthetic import make_synthetic_store
 
 
 @pytest.fixture(autouse=True)
@@ -16,19 +15,27 @@ def _not_in_colab(monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def synthetic_results(tmp_path_factory):
-    """Synthetic graph run + experiment outputs from the real runner (the costliest fixture),
-    built once per session and shared read-only; tests that modify results work on copies."""
-    from pathlib import Path
+def store():
+    """Small synthetic graph run of the legacy D1 / D2 schema and cohort sizes (D1 10/10, D2 10/13), for the tests
+    of the legacy graph builder and of the shared store / dataset code."""
+    from adgraph.legacy.synthetic import make_synthetic_store
 
-    from adgraph.visualization.demo import build_synthetic_results
-
-    root = tmp_path_factory.mktemp("synthetic_inputs")
-    store, results = build_synthetic_results(root, cohort={"D1": (5, 5), "D2": (5, 6)})
-    return store, Path(results)
+    return make_synthetic_store(psd_effect=0.6, conn_effect=0.6, seed=0)
 
 
 @pytest.fixture(scope="session")
-def store():
-    """Small synthetic graph run with the real schema and cohort sizes (D1 10/10, D2 10/13)."""
-    return make_synthetic_store(psd_effect=0.6, conn_effect=0.6, seed=0)
+def d3_store():
+    """Synthetic store of the final framework: ds004504 cohort (65 participants, 36 AD / 29 HC), five Xu bands,
+    68 Desikan-Killiany ROIs, 19 sensors, planted spectral and connectivity effects (read-only)."""
+    from adgraph.synthetic import make_store
+
+    return make_store(n_windows=4, psd_effect=0.8, conn_effect=0.8, seed=0)
+
+
+@pytest.fixture
+def release_root(tmp_path):
+    """A processed directory holding synthetic LCMV and wMNE stores (modes B and A) at the release's store paths."""
+    from adgraph.synthetic import write_release_stores
+
+    write_release_stores(tmp_path, n_windows=3, psd_effect=0.8, conn_effect=0.8, band_direction=0.5)
+    return tmp_path

@@ -45,7 +45,7 @@ def _raw(x, sf):
 
 
 def _process(x, sf, W, cfg=CFG):
-    from adgraph.pipeline import process_recording
+    from adgraph.legacy.pipeline import process_recording
     from adgraph.preprocessing.clean import preprocess
 
     raw = _raw(x, sf)
@@ -159,7 +159,7 @@ def test_discarded_edges_cannot_influence_any_output(sf):
 
 def test_v3_configuration_still_uses_the_original_path():
     """Removing the boundary section restores the v3 behaviour (windows from the 10 s trim, FFT Hilbert)."""
-    from adgraph.pipeline import process_recording
+    from adgraph.legacy.pipeline import process_recording
     from adgraph.preprocessing.clean import preprocess
 
     v3 = copy.deepcopy(CFG)
@@ -176,7 +176,7 @@ def test_rebuild_end_to_end_and_validation(tmp_path, monkeypatch):
     pytest.importorskip("edfio")
     import pandas as pd
 
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
     from test_end_to_end import _write_edf
 
     d1, d2 = tmp_path / "d1", tmp_path / "d2"
@@ -205,7 +205,7 @@ def test_rebuild_end_to_end_and_validation(tmp_path, monkeypatch):
     paths_yaml.write_text(f"drive_root: {tmp_path}\nprocessed_dir: {tmp_path / 'out'}\n"
                           f"dataset1: {{eeg_dir: '{d1}', participants: '{tmp_path / 'p1.xlsx'}'}}\n"
                           f"dataset2: {{eeg_dir: '{d2}', participants: '{tmp_path / 'p2.xlsx'}'}}\n")
-    r = subprocess.run([sys.executable, "scripts/validate_graph_run.py", "--paths", str(paths_yaml), "--allow-dirty"],
+    r = subprocess.run([sys.executable, "scripts/legacy/validate_graph_run.py", "--paths", str(paths_yaml), "--allow-dirty"],
                        cwd=REPO, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "COMPLETION REPORT" in r.stdout and "FAIL" not in r.stdout
@@ -216,8 +216,8 @@ def test_rebuild_end_to_end_and_validation(tmp_path, monkeypatch):
 
 
 def test_latest_run_prefers_the_highest_version(tmp_path):
-    import adgraph.pipeline as pl
-    from adgraph.synthetic import make_synthetic_store
+    import adgraph.legacy.pipeline as pl
+    from adgraph.legacy.synthetic import make_synthetic_store
 
     for name, version, stamp in (("graphs_v4_a", 4, "2026-10-14T00:00:00"), ("graphs_v3_b", 3, "2026-10-15T00:00:00")):
         st = make_synthetic_store()

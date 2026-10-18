@@ -9,7 +9,7 @@ import pytest
 
 from adgraph.config import load_yaml
 from adgraph.io.eeg import load_raw
-from adgraph.preprocessing.amplitude import amplitude_report
+from adgraph.legacy.amplitude import amplitude_report
 from adgraph.preprocessing.clean import preprocess
 
 pytest.importorskip("mne")
@@ -135,7 +135,7 @@ def test_cli_writes_only_a_new_diagnostics_folder(tmp_path):
                      "dataset1: {eeg_dir: '{drive_root}/EEGs/Dataset 1 (2017)'}\n"
                      "dataset2: {eeg_dir: '{drive_root}/EEGs/Dataset 2 (2019)/RestingState'}\n")
     out = tmp_path / "out"
-    r = subprocess.run([sys.executable, "scripts/diagnose_amplitude.py", "--paths", str(paths), "--out", str(out),
+    r = subprocess.run([sys.executable, "scripts/legacy/diagnose_amplitude.py", "--paths", str(paths), "--out", str(out),
                         "--allow-ephemeral-storage"], cwd=REPO, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "D1-1" in r.stdout and "D2-2" in r.stdout and "evidence:" in r.stdout

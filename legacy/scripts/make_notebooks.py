@@ -1,0 +1,1619 @@
+"""Generate every Colab notebook from one template (keeps them identical and thin).
+
+    python scripts/make_notebooks.py          # rewrite notebooks/ ; tests check they are up to date
+
+Layout:
+    notebooks/01_build_graphs.ipynb                 graphs + QC (run first)
+    notebooks/experiments/Exp<k>_*.ipynb            ONE experiment each (Exp0-Exp7)
+    notebooks/additional/*.ipynb                    one per secondary analysis (Exp3b, baselines,
+                                                    dataset probe, EEG + age)
+    notebooks/03_comparative_figures.ipynb          paper figures across experiments
+    notebooks/advanced/Run_all_experiments_ADVANCED.ipynb   whole plan; does nothing unless enabled
+    notebooks/advanced/Restore_D1D2_code_pin.ipynb          restores the D1/D2 code pin (maintenance)
+    notebooks/README.md                             index with Colab links and the Drive output layout
+
+Every notebook: Runtime -> Run all, nothing to edit. Scientific code lives in src/adgraph.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pandas as pd
+
+from adgraph.experiments.config import expand_variants, hparam_grid, load_experiment
+
+REPO = Path(__file__).resolve().parents[1]
+OWNER_REPO = "Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity"
+BRANCH = "claude/ecstatic-davinci-a2e8mh"
+REPO_URL = f"https://github.com/{OWNER_REPO}.git"
+COLAB = f"https://colab.research.google.com/github/{OWNER_REPO}/blob/{BRANCH}/notebooks"
+
+# (folder, notebook name, config, title, one-line description)
+EXPERIMENTS = [
+    ("experiments", "Exp0_sensor_psd", "exp0_sensor_psd", "Experiment 0 · sensor PSD (LR, SVM)",
+     "Electrode band power (30 channels × 4 bands × {log, relative}) with logistic regression and SVM."),
+    ("experiments", "Exp1_source_psd", "exp1_source_psd", "Experiment 1 · source PSD (LR, SVM)",
+     "Source ROI band power (68 ROIs × 4 bands × {log, relative}) with logistic regression and SVM."),
+    ("experiments", "Exp2_conn_minimal", "exp2_conn_minimal_fixedhp",
+     "Experiment 2 · single-band graphs, minimal node features (fixed hyperparameters)",
+     "One band graph (PLV or |ciPLV|) per model, constant node feature; GCN (Tier 1)."),
+    ("experiments", "Exp3_conn_psd", "exp3_conn_psd_fixedhp",
+     "Experiment 3 · single-band graphs + matching-band PSD (fixed hyperparameters)",
+     "One band graph per model; node features = matching-band ROI PSD [log, relative]; GCN (Tier 1)."),
+    ("experiments", "Exp4_band_mean", "exp4_band_mean_fixedhp", "Experiment 4 · band-averaged graph (fixed hyperparameters)",
+     "Mean of the 4 band adjacencies; node features = ROI PSD of all bands; GCN."),
+    ("experiments", "Exp5_multiband", "exp5_multiband_fixedhp", "Experiment 5 · multi-band GNN (fixed hyperparameters)",
+     "4 band graphs, matched-band PSD nodes; shared GCN encoder, mean / attention fusion (Tier 1)."),
+    ("experiments", "Exp6_multiband_psd_strength", "exp6_multiband_psd_strength_fixedhp",
+     "Experiment 6 · multi-band GNN with PSD + strength (fixed hyperparameters)",
+     "4 band graphs, nodes = [log PSD, relative PSD, strength] per band, attention fusion; full model "
+     "(PLV, |ciPLV|) + 7 PLV ablations (Tier 1)."),
+    ("additional", "Tier2_Exp2_other_encoders", "exp2_conn_minimal_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 2 with EdgeWeightedGAT and WeightedGraphSAGE",
+     "Secondary: the Exp 2 single-band graphs with the two other encoders, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp3_other_encoders", "exp3_conn_psd_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 3 with EdgeWeightedGAT and WeightedGraphSAGE",
+     "Secondary: the Exp 3 single-band graphs with the two other encoders, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp5_other_fusions", "exp5_multiband_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 5 band-specific encoders and concat / gate fusion",
+     "Secondary: the Exp 5 variants not in Tier 1, same fixed hyperparameters."),
+    ("additional", "Tier2_Exp6_ciplv_ablations", "exp6_multiband_psd_strength_fixedhp_tier2",
+     "Tier 2 (optional) · Experiment 6 ablations with |ciPLV|",
+     "Secondary: the seven Exp 6 ablations with |ciPLV|, same fixed hyperparameters."),
+    ("additional", "Exp3b_conn_psd_allbands", "exp3b_conn_psd_allbands_fixedhp",
+     "Experiment 3b (secondary) · single-band graphs + all-band PSD (fixed hyperparameters)",
+     "Secondary Experiment 3 node features (all bands)."),
+    ("additional", "Baseline_age_only", "baseline_age", "Baseline · age only", "Age as the only predictor."),
+    ("additional", "Baseline_connectivity_classical", "baseline_conn_classical",
+     "Baseline · connectivity features with LR / SVM", "Flattened connectivity matrices with classical models."),
+    ("additional", "Probe_dataset_identity", "probe_dataset", "Dataset-identity probe (D1 vs D2)",
+     "Predicts the dataset instead of the diagnosis (DESIGN.md §6), pooled setting only."),
+] + [
+    ("additional", f"Age_{name}", f"age/{cfg}_plus_age", f"EEG + age · {title}", f"{title} with age as a covariate.")
+    for name, cfg, title in [
+        ("Exp0_sensor_psd", "exp0_sensor_psd", "Experiment 0"), ("Exp1_source_psd", "exp1_source_psd", "Experiment 1"),
+        ("Exp2_conn_minimal", "exp2_conn_minimal_fixedhp", "Experiment 2"),
+        ("Exp3_conn_psd", "exp3_conn_psd_fixedhp", "Experiment 3"),
+        ("Exp4_band_mean", "exp4_band_mean_fixedhp", "Experiment 4"),
+        ("Exp5_multiband", "exp5_multiband_fixedhp", "Experiment 5"),
+        ("Exp6_multiband_psd_strength", "exp6_multiband_psd_strength_fixedhp", "Experiment 6"),
+        ("Baseline_connectivity_classical", "baseline_conn_classical", "connectivity baseline")]
+]
+
+SETUP = f'''# ===== Setup: nothing to edit. Mounts Drive, gets the code, installs the pinned environment. =====
+UPDATE_CODE = False   # leave False. True only if you were asked to switch to newer code
+                      # (all notebooks then use the newest commit; unfinished work is recomputed).
+BRANCH = '{BRANCH}'
+REPO_URL = '{REPO_URL}'
+
+import os, subprocess, sys
+from google.colab import drive
+drive.mount('/content/drive')
+
+def _run(cmd, cwd=None):  # shows output and stops "Run all" on failure
+    p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(p.stdout)
+    if p.returncode:
+        raise RuntimeError(f'failed: {{" ".join(cmd)}}')
+
+os.chdir('/content')
+_run(['rm', '-rf', '/content/repo'])
+_run(['git', 'clone', '-q', '-b', BRANCH, REPO_URL, '/content/repo'])
+os.chdir('/content/repo')
+_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))
+sys.path.insert(0, '/content/repo/src')   # the package, for this notebook's own cells
+
+from adgraph.colab import sh
+from adgraph.config import load_paths
+PATHS = load_paths('configs/paths.yaml')
+OUT = PATHS['processed_dir']
+print('outputs on Drive:', OUT)
+'''
+
+SETUP_D3 = (SETUP
+            .replace("# ===== Setup: nothing to edit.", "# ===== Dataset 3 setup: nothing to edit.")
+            .replace("UPDATE_CODE = False   # leave False. True only if you were asked to switch to newer code\n"
+                     "                      # (all notebooks then use the newest commit; unfinished work is recomputed).",
+                     "UPDATE_D3_CODE = False   # leave False. True only if you were asked to switch D3 to newer code\n"
+                     "# Dataset 3 has its own code pin, <outputs>/D3_CODE_COMMIT.txt (all D3 notebooks run that commit);\n"
+                     "# the D1/D2 pin CODE_COMMIT.txt is only reported, never read for checkout or changed here.")
+            .replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                     "_run([sys.executable, 'scripts/colab_setup.py', '--family', 'D3']\n"
+                     "     + (['--update-code'] if UPDATE_D3_CODE else []))")
+            + "print('Dataset 3 folder:', PATHS['dataset3']['root'])\n")
+assert "UPDATE_D3_CODE" in SETUP_D3 and "--family" in SETUP_D3
+
+SETUP_MAINTENANCE = (SETUP
+                     .replace("UPDATE_CODE = False   # leave False. True only if you were asked to switch to newer code\n"
+                              "                      # (all notebooks then use the newest commit; unfinished work is recomputed).\n",
+                              "# maintenance: runs the newest code of the branch and reads or writes no code pin\n")
+                     .replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                              "_run([sys.executable, 'scripts/colab_setup.py', '--no-pin'])"))
+assert "--no-pin" in SETUP_MAINTENANCE
+
+HOWTO = """
+**How to use:** *Runtime → Run all*. Nothing to edit. Allow Google Drive access when asked.
+
+If Colab disconnects or the runtime ends, open the notebook again and *Run all* again: finished
+work is kept on Google Drive and skipped, and the computation continues where it stopped.
+Everything (checkpoints, results, figures, manifests) is written to Drive, never to the
+temporary Colab disk.
+"""
+
+
+def md(t: str) -> dict:
+    return {"cell_type": "markdown", "metadata": {}, "source": t.strip("\n").splitlines(keepends=True)}
+
+
+def code(t: str) -> dict:
+    return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
+            "source": t.strip("\n").splitlines(keepends=True)}
+
+
+def notebook(cells: list[dict], gpu: bool = False) -> dict:
+    meta = {"colab": {"provenance": []}, "kernelspec": {"display_name": "Python 3", "name": "python3"},
+            "language_info": {"name": "python"}}
+    if gpu:
+        meta["accelerator"] = "GPU"
+        meta["colab"]["gpuType"] = "T4"
+    return {"cells": cells, "metadata": meta, "nbformat": 4, "nbformat_minor": 0}
+
+
+def protocol(cfg_path: str) -> tuple[list[dict], str]:
+    variants = expand_variants(load_experiment(REPO / "configs" / "experiments" / f"{cfg_path}.yaml"))
+    v = variants[0]
+    ev = v["evaluation"]
+    grid = len(hparam_grid(v))
+    gnn = v["input"] == "graph"
+    settings = [s for s in v["settings"] if any(s in x["settings"] for x in variants)]
+    restricted = sorted({x["variant"] for x in variants if x["settings"] != v["settings"]})
+    if grid == 1:
+        search = ("fixed hyperparameters, no hyperparameter search and no inner CV: one fit per outer training "
+                  "fold" + (f" (protocol `{v['protocol']['name']}`)" if v.get("protocol") else ""))
+    else:
+        search = (f"inner {ev['inner_k']}-fold subject-level CV over {grid} hyperparameter combination(s); "
+                  f"refit on the full training fold")
+    text = (f"- **{len(variants)} variant(s):** " + ", ".join(f"`{x['variant']}`" for x in variants[:24])
+            + (" …" if len(variants) > 24 else "") + "\n"
+            f"- **Settings:** " + ", ".join(settings) + " (cross-dataset only if the DESIGN.md §7 gate passes)"
+            + (f"; variants with their own settings: {', '.join(f'`{x}`' for x in restricted)}" if restricted else "")
+            + "\n"
+            f"- **Protocol (from the config, unchanged):** {ev['n_repeats']} repeats × {ev['k']}-fold subject-level "
+            f"outer CV; {search}" + (f"; {v['training']['epochs']} epochs" if gnn else "") + ".")
+    return variants, text
+
+
+# experiments added after their family's results existed run their own code pin (as Exp7 does), so the family
+# pin (and every completed result and graph run under it) never has to move for them
+OWN_PIN = {"d3/d3_exp2_conn_minimal_fixedhp", "d3/d3_exp3_conn_psd_fixedhp", "d3/d3_exp4_band_mean_fixedhp",
+           "d3/d3_exp5_multiband_fixedhp"}
+
+
+def own_pin_cells(results: str, experiment: str, config: str) -> list[dict]:
+    return [md(f"""## 0. This experiment's code pin
+This experiment runs the commit recorded in its own folder (`{results}/{experiment}/CODE_COMMIT.txt`, set on the
+first run). The family pin used by the setup cell, the graph run and every other experiment's results stay
+unchanged. Leave `UPDATE_EXPERIMENT_CODE = False`; `True` moves only this experiment's pin to the newest code."""),
+            code(f"""UPDATE_EXPERIMENT_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+EXP_DIR = Path(OUT) / '{results}' / '{experiment}'
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+has_work = EXP_DIR.exists() and any(EXP_DIR.rglob('*.done.json'))
+EXP_COMMIT, _ = resolve_code_pin(EXP_DIR / 'CODE_COMMIT.txt', head, update=UPDATE_EXPERIMENT_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP_COMMIT])
+if not Path('/content/repo', '{config}').exists():
+    raise RuntimeError(f'pin {{EXP_COMMIT[:10]}} lacks {config}: set UPDATE_EXPERIMENT_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from this experiment's commit
+from adgraph.colab import sh
+print('{experiment} code commit:', EXP_COMMIT)
+for pin in ('D3_CODE_COMMIT.txt', 'CODE_COMMIT.txt'):
+    if (Path(OUT) / pin).exists():
+        print(f'{{pin}} (not used here, unchanged):', (Path(OUT) / pin).read_text().split()[0])""")]
+
+
+def experiment_notebook(folder, name, cfg_path, title, desc) -> tuple[dict, dict]:
+    variants, proto = protocol(cfg_path)
+    experiment = variants[0]["experiment"]
+    gnn = variants[0]["input"] == "graph"
+    config = f"configs/experiments/{cfg_path}.yaml"
+    d3 = variants[0].get("graph_family") == "D3"
+    results = "experiments_D3" if d3 else "experiments"
+    nb = notebook([
+        md(f"# {title}\n\n{desc}\n\n**Runs only this experiment** (`{config}`): every predefined variant and "
+           f"setting, with subject-level cross-validation, evaluation and checkpointing. It never starts another "
+           f"experiment.\n\n{proto}\n" + HOWTO + f"""
+**Progress** is shown as one updating line: completed outer folds of the whole experiment
+(previously completed folds recovered from Drive count as done immediately), current variant,
+setting, repeat and fold, inner-CV trial (if any){", training epoch" if gnn else ""}, and the counts of finished /
+resumed / failed / skipped units. An ETA is shown only for the current variant and setting, from folds
+computed in this session.{" Large GNN experiments take several Colab sessions: just *Run all* again after each disconnect." if gnn else ""}
+
+Results are saved under `<outputs>/{results}/{experiment}/` on Drive: per-fold/repeat checkpoints,
+window and subject predictions, metrics per repeat, selected hyperparameters, summaries, manifests,
+runtime and peak memory per unit (`_run_status.csv`), and a report folder (results table +
+**single-experiment diagnostic figures**). The comparative paper figures across experiments are made
+separately (`03_comparative_figures.ipynb`).
+
+Requires the graphs from `""" + ("d3/D3_01_download_and_build_graphs.ipynb" if d3 else "01_build_graphs.ipynb")
+           + "`." + (" Dataset 3 (OpenNeuro ds004504, AD vs HC): graph runs `graphsD3_v4_*`, results in "
+                     "`experiments_D3/`, never mixed with D1/D2." if d3 else "")),
+        code(SETUP_D3 if d3 else SETUP),
+        *(own_pin_cells(results, experiment, config) if cfg_path in OWN_PIN else []),
+        md("## 1. This experiment: progress so far (from the checkpoints on Drive)"),
+        code(f"""CONFIG = '{config}'   # this notebook's experiment
+EXPERIMENT = '{experiment}'
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+""" + ("""if not torch.cuda.is_available():
+    print('NOTE: GNN experiment on CPU. It works, but a GPU runtime (Runtime > Change runtime type > T4 GPU) '
+          'is much faster. Interrupt now if you want to switch; nothing is lost.')
+""" if gnn else "") + """sh(f"python scripts/experiment.py status --config {CONFIG}")"""),
+        md("## 2. Run (or resume) this experiment\nSaves every completed fold to Drive as it goes. "
+           "Units that fail are recorded and the others continue; failures are reported at the end of "
+           "section 3 (after the results are shown) and stop *Run all* with an error."),
+        code("""RUN_ERROR = None
+try:
+    sh(f"python scripts/experiment.py run --config {CONFIG}")
+except RuntimeError as exc:
+    RUN_ERROR = exc
+    print('\\nSome units failed or are incompatible; details after the results below.')"""),
+        md("## 3. Results of this experiment (saved outputs only)\nSubject-level metrics: mean ± SD over CV "
+           "repeats, subject-bootstrap 95 % CI. Runtime and peak memory per variant and setting. "
+           "Diagnostic figures of this experiment only; not the comparative paper figures. Nothing is "
+           "selected or ranked here."),
+        code("""sh(f"python scripts/experiment.py report --config {CONFIG}")
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+exp_dir = Path(OUT) / '""" + results + """' / EXPERIMENT
+report = sorted((exp_dir / '_reports').glob('report_*'))[-1]
+print('report folder on Drive:', report)
+pd.set_option('display.max_rows', 500, 'display.width', 250)
+table = pd.read_csv(report / 'results_summary.csv')
+display(table) if len(table) else print('no completed results yet')
+status = pd.read_csv(exp_dir / '_run_status.csv') if (exp_dir / '_run_status.csv').exists() else pd.DataFrame()
+if len(status):
+    print('runtime and peak memory of the last run (seconds, MB):')
+    display(status[['variant', 'setting', 'state', 'seconds', 'mem_peak_mb', 'message']])
+for png in sorted((report / 'figures').glob('D[12]_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))
+print('all figures:', sorted(p.name for p in (report / 'figures').glob('*.png')))
+bad = status[status['state'].isin(['failed', 'incompatible'])] if len(status) else status
+if RUN_ERROR is not None or len(bad):
+    raise RuntimeError(f"{len(bad)} unit(s) of {EXPERIMENT} did not complete (see the table above and "
+                       f"{exp_dir / '_run_status.csv'}); completed units are saved. Fix the cause, then Run all "
+                       "again: only the incomplete units are recomputed.")"""),
+    ], gpu=gnn)
+    entry = {"folder": folder, "name": name, "title": title, "config": config, "gpu": gnn}
+    return nb, entry
+
+
+EXP7_CONFIG = "configs/experiments/exp7_earm_gnn.yaml"
+
+
+def exp7_notebook() -> tuple[dict, dict]:
+    """Experiment 7 (EARM-GNN): model check, training/evaluation, comparison, D1/D2 diagnostic."""
+    variants, proto = protocol("exp7_earm_gnn")
+    nb = notebook([
+        md("""# Experiment 7 · EEG-Guided Adaptive Residual Multiband GNN (EARM-GNN)
+
+**Exploratory extension**, developed after the Tier 1 GCN results (Exp 2-4) had been observed
+(methodology log entry 43, `docs/earm_gnn.md`). It is evaluated exactly like the other GNNs: frozen v4
+graph run (1,527 windows, 43 participants), the same subject-level splits and seeds, fixed hyperparameters
+(no search, no inner CV, one fit per outer training fold), PLV and |ciPLV| as separate variants, plus two
+pre-specified ablations: **fixed adjacency** (no learned edge gates) and **mean fusion** (no band attention).
+Nothing is chosen from held-out results, and both datasets are reported.
+
+""" + proto + "\n" + HOWTO + """
+**What this notebook does:** (0) pins Exp7's own code commit, (1) checks the frozen graph run and the
+features, builds every variant, shows layers, parameter counts and tensor shapes and runs a small
+forward/backward smoke test, (2) trains and evaluates every variant and setting (resumable; every outer
+fold is saved to Drive), (3) shows the results, ROC curves and confusion matrices, (4) compares EARM-GNN
+with the GCN experiments and the PSD baselines (saved outputs only; descriptive), (5) runs a short
+read-only D1 / D2 diagnostic, (6) prints a final summary.
+
+Use a **GPU runtime** (*Runtime → Change runtime type → T4 GPU*). Results:
+`<outputs>/experiments/exp7_earm_gnn/` on Drive. Other experiments are never touched."""),
+        code(SETUP),
+        md("""## 0. Exp7 code pin
+Exp7 runs the commit recorded in its own folder (`experiments/exp7_earm_gnn/CODE_COMMIT.txt`, set on the
+first run), so it can run while the other experiments stay on the global pin (`CODE_COMMIT.txt`, unchanged).
+Leave `UPDATE_EXP7_CODE = False`; `True` moves only Exp7's pin to the newest code (unfinished Exp7 work is then
+recomputed)."""),
+        code("""UPDATE_EXP7_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+EXP7_DIR = Path(OUT) / 'experiments' / 'exp7_earm_gnn'
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{BRANCH}'], text=True).strip()
+has_work = EXP7_DIR.exists() and any(EXP7_DIR.rglob('*.done.json'))
+EXP7_COMMIT, _ = resolve_code_pin(EXP7_DIR / 'CODE_COMMIT.txt', head, update=UPDATE_EXP7_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP7_COMMIT])
+for f in ('src/adgraph/models/earm.py', 'scripts/exp7_earm.py', 'configs/experiments/exp7_earm_gnn.yaml'):
+    if not Path('/content/repo', f).exists():
+        raise RuntimeError(f'Exp7 pin {EXP7_COMMIT[:10]} lacks {f}: set UPDATE_EXP7_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from the Exp7 commit
+from adgraph.colab import sh
+print('Exp7 code commit:', EXP7_COMMIT)
+print('global pin of the other experiments (unchanged):', (Path(OUT) / 'CODE_COMMIT.txt').read_text().split()[0])"""),
+        md("""## 1. Frozen graph run, features, architecture and smoke test
+Checks that the selected graph run is the frozen v4 run (`graph_run_id 6d75de9975f0d9ae`), that PLV,
+|ciPLV|, log and relative PSD are present, finite and valid, and that node strength equals the strength of
+each band's own EEG adjacency. Builds every variant and prints its parameter count, the layer structure,
+the trainable parameters, tensor shapes of one forward pass, and runs two training epochs on a quarter of
+the participants to confirm finite losses and gradients reaching the edge gates. This is NOT an evaluation."""),
+        code(f"""CONFIG = '{EXP7_CONFIG}'   # this notebook's experiment
+EXPERIMENT = 'exp7_earm_gnn'
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+if not torch.cuda.is_available():
+    print('NOTE: no GPU. It works on CPU but is much slower (Runtime > Change runtime type > T4 GPU).')
+sh("python scripts/exp7_earm.py inspect")
+sh(f"python scripts/experiment.py status --config {{CONFIG}}")"""),
+        md("""## 2. Train and evaluate (resumable)
+Every completed outer fold (predictions, fitted parameters, learned edge gates, training history) is saved
+to Drive at once; after a disconnect, *Run all* again and only unfinished folds are computed."""),
+        code("""RUN_ERROR = None
+try:
+    sh(f"python scripts/experiment.py run --config {CONFIG}")
+except RuntimeError as exc:
+    RUN_ERROR = exc
+    print('\\nSome units failed or are incompatible; details at the end of the notebook.')"""),
+        md("""## 3. Results of Experiment 7 (saved outputs only)
+Subject-level metrics: mean ± SD over CV repeats, subject-bootstrap 95 % CI; ROC curves, confusion matrices
+and subject scores per setting; runtime per unit."""),
+        code("""sh(f"python scripts/experiment.py report --config {CONFIG}")
+import pandas as pd
+from IPython.display import Image, display
+report = sorted((EXP7_DIR / '_reports').glob('report_*'))[-1]
+pd.set_option('display.max_rows', 500, 'display.width', 250)
+table = pd.read_csv(report / 'results_summary.csv')
+display(table) if len(table) else print('no completed results yet')
+status = pd.read_csv(EXP7_DIR / '_run_status.csv') if (EXP7_DIR / '_run_status.csv').exists() else pd.DataFrame()
+if len(status):
+    display(status[['variant', 'setting', 'state', 'seconds', 'mem_peak_mb', 'message']])
+for png in sorted((report / 'figures').glob('D[123]_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+        md("""## 4. Comparison with the GCN experiments and the PSD baselines
+Saved outputs only (nothing retrained): EARM-GNN full and its two ablations, Exp 6 / 5 / 4 GCN, Exp 1 and
+Exp 0 PSD models. Paired differences use only the CV repeats both results share (identical subject splits);
+they are **descriptive** (no significance test). Experiments not run yet are simply absent."""),
+        code("""sh("python scripts/exp7_earm.py compare")
+cmp = sorted((EXP7_DIR / '_comparison').glob('comparison_*'))[-1]
+read = lambda name: pd.read_csv(cmp / name) if (cmp / name).stat().st_size > 1 else pd.DataFrame()
+display(pd.read_csv(cmp / 'auc_by_setting.csv', index_col=0).round(3))
+full = read('comparison_table.csv')
+if len(full):
+    display(full[['model', 'connectivity', 'setting', 'n_repeats', 'roc_auc_mean', 'roc_auc_sd', 'roc_auc_ci95_low',
+                  'roc_auc_ci95_high', 'balanced_accuracy_mean', 'sensitivity_mean', 'specificity_mean', 'f1_mean',
+                  'n_parameters', 'fit_seconds_mean']].round(3))
+diff = read('paired_differences.csv')
+if len(diff):
+    print('EARM-GNN full minus comparator (subject-level ROC AUC, per shared repeat; descriptive):')
+    display(diff[diff['metric'] == 'roc_auc'].drop(columns=['reference', 'metric']).round(3))
+for png in sorted((cmp / 'figures').glob('E7_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+        md("""## 5. Short D1 / D2 diagnostic (read-only)
+Recording quality and interpolated (e.g. persistently flat) channels per dataset, feature distributions and
+dataset shift, class separability of simple features **without a model**, and whether poor D1 results are
+near-constant, reversed or non-discriminating predictions. Nothing is reprocessed or excluded; D1 stays in
+every analysis. Written to `<outputs>/diagnostics/dataset_shift_<time>/`."""),
+        code("""sh("python scripts/exp7_earm.py diagnose")"""),
+        md("""## 6. Final summary
+Subject-level ROC AUC [95 % CI] per setting for EARM-GNN, its ablations, the GCN experiments and the PSD
+baselines, and the training-loss histories of EARM-GNN. Within-D2 results are one dataset's
+cross-validation, not independent validation."""),
+        code("""import numpy as np
+import matplotlib.pyplot as plt
+if len(full):
+    f = full.assign(auc=full.apply(lambda r: f"{r.roc_auc_mean:.3f} [{r.roc_auc_ci95_low:.2f}, {r.roc_auc_ci95_high:.2f}]",
+                                   axis=1))
+    order = [s for s in ['within_D1', 'within_D2', 'pooled', 'cross_D1_to_D2', 'cross_D2_to_D1'] if s in set(f['setting'])]
+    display(f.pivot_table(index=['model', 'connectivity'], columns='setting', values='auc', aggfunc='first',
+                          sort=False).reindex(columns=order))
+hist = {}
+for npz in EXP7_DIR.glob('*__full/*/units/fold_*.model.npz'):
+    hist.setdefault((npz.parts[-4], npz.parts[-3]), []).append(np.load(npz)['history_train_loss'])
+if hist:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for (variant, setting), curves in sorted(hist.items()):
+        ax.plot(np.mean(curves, 0), label=f'{variant} / {setting} ({len(curves)} folds)')
+    ax.set_xlabel('epoch'); ax.set_ylabel('weighted training loss (mean over folds)'); ax.legend(fontsize=7)
+    ax.set_title('EARM-GNN full: training loss (training subjects only)')
+    plt.show()
+print('\\n'.join([
+    'How to read this:',
+    '* EARM-GNN is an exploratory extension designed after the Tier 1 GCN results were seen; report it as such.',
+    '* Ablation A (fixed adjacency) and B (mean fusion) each differ from the full model in one component;',
+    '  the paired differences are descriptive. No permutation test was run: claim no significance.',
+    '* Both datasets are primary (S1, S2). Poor D1 performance is a result, not a reason to drop D1 (section 5).',
+    '* Fixed hyperparameters, set before any Exp7 result; nothing was tuned on test subjects.']))"""),
+        code("""bad = status[status['state'].isin(['failed', 'incompatible'])] if len(status) else status
+if RUN_ERROR is not None or len(bad):
+    raise RuntimeError(f"{len(bad)} unit(s) of {EXPERIMENT} did not complete (see {EXP7_DIR / '_run_status.csv'}); "
+                       "completed units are saved. Fix the cause, then Run all again: only incomplete units are recomputed.")
+print('Experiment 7 complete.')"""),
+    ], gpu=True)
+    entry = {"folder": "experiments", "name": "Exp7_EARM_GNN", "title": "Experiment 7 · EARM-GNN",
+             "config": EXP7_CONFIG, "gpu": True}
+    return nb, entry
+
+
+# ============================================================================ Dataset 3 (ds004504)
+D3_EXPERIMENTS = [
+    ("D3_Exp0_sensor_psd", "d3/d3_exp0_sensor_psd", "D3 · Experiment 0 · sensor PSD (LR, SVM)",
+     "Dataset 3 (ds004504, AD vs HC): electrode band power (19 channels × 4 bands × {log, relative})."),
+    ("D3_Exp1_source_psd", "d3/d3_exp1_source_psd", "D3 · Experiment 1 · source PSD (LR, SVM)",
+     "Dataset 3: source ROI band power (68 ROIs × 4 bands × {log, relative})."),
+    ("D3_Baseline_age_only", "d3/d3_baseline_age", "D3 · Baseline · age only",
+     "Dataset 3: age as the only predictor (DESIGN.md §5)."),
+    ("D3_Exp2_conn_minimal", "d3/d3_exp2_conn_minimal_fixedhp",
+     "D3 · Experiment 2 · single-band connectivity only (GCN)",
+     "Dataset 3: each band on its own (theta, alpha1, alpha2, beta), single-band source connectivity graph with a "
+     "constant node feature, GCN; PLV and |ciPLV| (the Tier 1 Exp 2 design, methodology log entry 49)."),
+    ("D3_Exp3_conn_psd_single_band", "d3/d3_exp3_conn_psd_fixedhp",
+     "D3 · Experiment 3 · single-band connectivity + PSD (GCN)",
+     "Dataset 3: each band on its own (theta, alpha1, alpha2, beta), single-band source connectivity graph with "
+     "matching-band [log, relative] PSD node features, GCN; PLV and |ciPLV| (the Tier 1 Exp 3 design, "
+     "methodology log entry 48)."),
+    ("D3_Exp4_band_mean", "d3/d3_exp4_band_mean_fixedhp",
+     "D3 · Experiment 4 · band-averaged graph (GCN)",
+     "Dataset 3: band-averaged adjacency of the four bands, nodes = [log, relative] source PSD of all four bands, "
+     "GCN; PLV and |ciPLV| (the Tier 1 Exp 4 design, methodology log entry 49)."),
+    ("D3_Exp5_multiband", "d3/d3_exp5_multiband_fixedhp",
+     "D3 · Experiment 5 · multi-band GNN (shared GCN, mean / attention fusion)",
+     "Dataset 3: four band graphs, one shared GCN encoder, mean or attention fusion, nodes = matching-band "
+     "[log, relative] PSD; PLV and |ciPLV| (the Tier 1 Exp 5 design, methodology log entry 49)."),
+    ("D3_Exp6_GCN_full", "d3/d3_exp6_gcn_full", "D3 · Experiment 6 · multi-band GCN, full model",
+     "Dataset 3: four band graphs, nodes = [log PSD, relative PSD, strength], attention fusion; PLV and |ciPLV|."),
+    ("D3_Exp7_EARM_GNN", "d3/d3_exp7_earm_gnn", "D3 · Experiment 7 · EARM-GNN (+ two ablations)",
+     "Dataset 3: EARM-GNN full, fixed adjacency and mean fusion; PLV and |ciPLV| (exploratory, docs/earm_gnn.md)."),
+]
+
+def d3_build_notebook() -> dict:
+    return notebook([
+        md("""# D3 · 01 · Download ds004504 and build its source-space graphs
+
+**Dataset 3** = OpenNeuro **ds004504** (Miltiadous et al., 2023; doi:10.18112/openneuro.ds004504, CC0): eyes-closed
+resting-state EEG, 19 channels (10-20), 500 Hz. Used: the **36 AD and 29 HC** participants, from the provider's
+**preprocessed derivatives**; the 23 FTD participants are excluded by design and never downloaded
+(methodology log entry 44, `docs/dataset_d3.md`).
+
+Processing (`configs/pipeline_d3.yaml`): the provider's 0.5-45 Hz filter, ASR and ICA cleaning are used as given
+(nothing repeated). Recordings are split at the EEGLAB 'boundary' events that the provider's cleaning left
+(data removed there): each continuous segment is resampled on its own and no window crosses a discontinuity.
+The forward and inverse models use the electrode coordinates stored in the `.set` files (methodology log entry 46;
+the provider assigned them by an EEGLAB lookup of the DIPFIT Colin27/MNI template, so they are a shared template, not
+individual measurements), one verified operator per distinct electrode geometry. Added: the 10 s edge crop, resampling to 250 Hz, common average reference, the same 20 s /
+50 % windows, window rejection, fsaverage source model, 68 Desikan-Killiany ROIs, bands, PLV / |ciPLV| and PSD
+as D1/D2. Bad-channel rules are evaluated and reported only (no interpolation added).
+""" + HOWTO + """
+**Code pin:** the setup cell runs the commit in `<outputs>/D3_CODE_COMMIT.txt` (Dataset 3's own pin); the
+D1/D2 pin `CODE_COMMIT.txt` is never changed by D3 notebooks.
+
+**Steps:** 1. download (≈ 2.2 GB to `My Drive/OpenNeuro/ds004504`, resumable, MD5-verified) ·
+2. input check (36 AD / 29 HC, 19 channels in every file, EEGLAB boundary events and stored electrode
+coordinates per recording) · 3. smoke test (first subject) and its inspection ·
+3b. real-data montage checks · 4. full graph construction (65 recordings, resumable; **only after you set
+`CONFIRM_D3_FULL_BUILD = True`**) · 5. validation and completion report · 6. summary.
+Output: `<outputs>/graphsD3_v4_<config hash>/` (never mixed with the D1/D2 graph runs). Experiments on D3:
+`notebooks/d3/experiments/`. A GPU is not needed for this notebook."""),
+        code(SETUP_D3),
+        md("## 1. Download ds004504 (AD and HC derivatives only)"),
+        code('sh("python scripts/d3_data.py download")'),
+        md("## 2. Input check (participants and recording headers; no signal is read)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 3. Smoke test: first subject, then its inspection (diagnostics, not paper figures)"),
+        code("""sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --limit 1")
+sh("python scripts/inspect_graph_subjects.py --config configs/pipeline_d3.yaml --limit 1")
+from IPython.display import Image, display
+from adgraph.config import load_yaml
+from adgraph.pipeline import graph_run_dir
+smoke = graph_run_dir(OUT, load_yaml('configs/pipeline_d3.yaml'), 1)
+for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
+    display(Image(str(png)))"""),
+        md("""## 3b. Real-data montage checks (must all PASS)
+Explicitly selected inputs (never "the newest"): the D3 smoke run and the operator recorded in its manifest,
+the frozen D1/D2 run by `graph_run_id 6d75de9975f0d9ae`, the header report of step 2. Checks: (1) electrode
+labels and the coordinates stored in the `.set` file: valid 3D positions for all 19 channels, coordinate frame
+established from the provider's lookup record, the operator built from exactly these positions, the head ->
+fsaverage MRI transformation returning them, every subject on the operator of its own geometry; (2) no confirmed flat channel entered reconstruction (a flat
+channel stops its subject with `FlatChannelError`); (3) inverse operator 68 × 19 with the configured channels,
+verified against the full MNE inverse; (4) 68 ROI names and order identical to D1/D2; (5) EEGLAB 'boundary'
+discontinuities are handled (methodology log entry 45): the recording is split at every boundary, each continuous
+segment is processed on its own and windows lie inside one segment, at least the margin from its ends. The check
+runs the smoke subject and, in memory (nothing saved), the recording with the most boundary events, prints the
+per-participant table (boundary events, segments, candidate windows, windows excluded for a discontinuity,
+windows rejected by QC, accepted windows) and requires **zero accepted windows crossing a discontinuity or its
+margin**; (6) PSD, PLV and |ciPLV| finite, in range and 68 × 68 per band. The coordinate source, frame, montage
+hash and operator id are saved in `d3_montage_checks.json`. A failure stops the notebook here."""),
+        code('sh("python scripts/d3_verify_smoke.py")'),
+        md("""## 4. Full graph construction (resumable)
+Starts only after you have reviewed steps 2-3b: set `CONFIRM_D3_FULL_BUILD = True` and run this cell (and the
+ones below). Progress is saved per subject; if the runtime stops, *Run all* again."""),
+        code("""CONFIRM_D3_FULL_BUILD = False   # set True only after every check of step 3b passed and the smoke test was reviewed
+if not CONFIRM_D3_FULL_BUILD:
+    raise RuntimeError('Full D3 graph construction not started (CONFIRM_D3_FULL_BUILD = False). Review steps 2-3b, '
+                       'then set CONFIRM_D3_FULL_BUILD = True and run this cell and the cells below.')
+sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml --status")
+sh("python scripts/build_graphs.py --config configs/pipeline_d3.yaml")"""),
+        md("## 5. Validate the D3 graph dataset and write the completion report"),
+        code('sh("python scripts/validate_graph_run.py --prefix graphsD3")'),
+        md("## 6. Summary"),
+        code("""import json
+import pandas as pd
+from adgraph.pipeline import latest_complete_graph_run
+run = latest_complete_graph_run(OUT, 'graphsD3')
+m = json.load(open(run / 'manifest.json'))
+print('graph run:', run)
+print('graph_run_id', m['graph_run_id'], '| commit', m['git_commit'], '| operator error',
+      m['source_operator']['verification_rel_error'])
+print('electrode geometry:', {k: v for k, v in m['source_operator'].get('geometry', {}).items() if k != 'pos_m'},
+      '| operators:', len(m.get('source_operators', [])) or 1)
+print('per dataset:', m['summary']['per_dataset'])
+print('excluded by design:', len(m['registry'].get('excluded_by_design', {}).get('D3', [])), 'FTD participants')
+s = pd.read_csv(run / 'subjects.csv')
+display(s[[c for c in ['key', 'label', 'duration_s', 'median_std_uv', 'n_bad_channels', 'qc_spatial_rho', 'status']
+          if c in s]])
+print('discontinuities per participant (EEGLAB boundary events; windows of 20 s):')
+display(s[[c for c in ['key', 'n_boundary_events', 'n_segments', 'n_segments_usable', 'usable_duration_s',
+                       'n_windows_continuous_grid', 'n_windows_excluded_discontinuity', 'n_windows_total',
+                       'n_windows_rejected', 'n_windows_kept', 'status'] if c in s]])
+print(s.groupby('label')['n_windows_kept'].agg(['count', 'sum', 'median']))"""),
+    ])
+
+
+def d3_comparison_notebook() -> dict:
+    return notebook([
+        md("""# D3 · 99 · Comparison of the Dataset 3 experiments (saved outputs only)
+
+Subject-level results on Dataset 3 (ds004504, 36 AD / 29 HC, within-D3 cross-validation): EARM-GNN and its two
+ablations, the multi-band GCN, source and sensor PSD models and the age-only baseline. Tables, ROC curves,
+confusion matrices and per-repeat paired differences (descriptive; no significance test). Nothing is trained.
+Run after the D3 experiment notebooks; missing experiments are simply absent.""" + HOWTO),
+        code(SETUP_D3),
+        md("## 1. Comparison"),
+        code("""sh("python scripts/exp7_earm.py compare --family D3")
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+cmp = sorted((Path(OUT) / 'experiments_D3' / '_comparison').glob('comparison_*'))[-1]
+display(pd.read_csv(cmp / 'auc_by_setting.csv', index_col=0).round(3))
+t = pd.read_csv(cmp / 'comparison_table.csv') if (cmp / 'comparison_table.csv').stat().st_size > 1 else pd.DataFrame()
+if len(t):
+    display(t[['model', 'connectivity', 'n_repeats', 'roc_auc_mean', 'roc_auc_sd', 'roc_auc_ci95_low',
+               'roc_auc_ci95_high', 'balanced_accuracy_mean', 'sensitivity_mean', 'specificity_mean', 'f1_mean',
+               'n_parameters', 'fit_seconds_mean']].round(3))
+for png in sorted((cmp / 'figures').glob('D3_*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))"""),
+    ])
+
+
+def build_graphs_notebook() -> dict:
+    return notebook([
+        md("# 01 · Build source-space graphs (pipeline v4, boundary-aware)\n" + HOWTO + """
+Pipeline v4 (methodology log entry 41, `docs/boundary_processing.md`): the 10 s at each end are discarded
+before any filtering, every filter pads explicitly, the analytic signal is a finite complex FIR, and
+windows keep a computed boundary margin. Outputs go to a NEW directory `graphs_v4_<config hash>/`;
+earlier graph runs, checkpoints, experiments and audits are not touched.
+
+Steps (each stops the notebook with a clear message if something is wrong):
+1. setup and input check: 20 + 23 recordings, labels 10 AD / 10 HC and 10 AD / 13 HC;
+2. synthetic test suite (once per code version, about 10–15 min);
+3. EDF header check (all 30 channels used by the pipeline present);
+4. smoke test on the first subject of each dataset (downloads fsaverage into the Drive cache once);
+5. full graph construction for all 43 recordings (several hours; resumable);
+5b. validation of the assembled dataset (shapes, finite values, ranges, symmetry, window margins) and
+    the completion report (`validation_<time>/dataset_report.csv`, `validation.json`);
+6. quality summary (including peak memory per subject; also saved in `memory_log.csv`).
+
+**Progress** is shown as updating bars: input hashing, the source operator (built once, then loaded
+from the Drive cache), then one line for all recordings (e.g. `12/43`) with the current subject,
+dataset and processing stage (loading, preprocessing, source reconstruction, connectivity per band,
+PSD, saving the checkpoint), the counts of done / resumed / failed / pending recordings and, once two
+recordings have been processed in this session, an ETA. Then assembly and saving of the cohort.
+Recordings already completed on Drive count as done immediately and are not recomputed.
+Runtime and peak memory per recording are saved in `subjects.csv` and `memory_log.csv`.
+
+Then open one experiment notebook in `notebooks/experiments/` (e.g. `Exp0_sensor_psd.ipynb`).
+A GPU is not needed for this notebook."""),
+        code(SETUP),
+        md("## 1. Input check (file names and participant sheets only)"),
+        code("from adgraph.colab import check_inputs\ncheck_inputs(PATHS)"),
+        md("## 2. Synthetic test suite (no EEG)\nMust pass with zero dependency-related skips. Skipped "
+           "automatically if it already passed for this code."),
+        code("from adgraph.colab import run_tests_once\nrun_tests_once(OUT)"),
+        md("## 3. EDF header check (reads no signal)\nFirst verifies the electrode layout "
+           "(`AD-LEB/electrodes_positions_32.loc`) against `channels.recorded`: the EDFs label channels "
+           "by number only (D1 `EEG E01`-`E32`, D2 `Misc ExG1`-`ExG32`), and channel *k* is electrode *k* "
+           "of that file. Then every recording must have the 30 channels used (M1/M2 dropped)."),
+        code("""sh(f"python scripts/inspect_raw.py --paths configs/paths.yaml --out '{OUT}' --strict")"""),
+        md("## 3b. Amplitude diagnostic (read-only)\nReads the first recording of each dataset (the smoke-test "
+           "subjects) and breaks the preprocessing amplitude check down by stage: EDF header units, MNE's unit "
+           "conversion, dataset scale, band-pass, 1 Hz high-pass, average reference, edges, drift, clipping, "
+           "spectra (methodology log entry 38). It writes only to `diagnostics/amplitude_<time>/` and changes "
+           "nothing. Other recordings: add `--keys D1-3 D2-5`."),
+        code("""sh(f"python scripts/diagnose_amplitude.py --paths configs/paths.yaml --out '{OUT}'")
+from pathlib import Path
+from IPython.display import Image, display
+display(Image(str(sorted(Path(OUT, 'diagnostics').glob('amplitude_*/amplitude.png'))[-1])))"""),
+        md("## 4. Smoke test: first subject of each dataset\nWritten to Drive as `graphs_v3_<hash>_limit1/`; "
+           "it is never used for analysis."),
+        code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --limit 1")'),
+        md("## 4b. Inspect the smoke-test subjects (read-only)\nPreprocessing QC (unit safeguard, amplitude "
+           "on the analysed interval, bad channels), every candidate window kept or rejected and why, ROI and "
+           "sensor band power, mean PLV and |ciPLV| per band. Review these before the full build (step 5). "
+           "Diagnostics, not paper figures (methodology log entry 39)."),
+        code("""sh("python scripts/inspect_graph_subjects.py --paths configs/paths.yaml --limit 1")
+from pathlib import Path
+from IPython.display import Image, display
+from adgraph.config import load_yaml
+from adgraph.pipeline import graph_run_dir
+smoke = graph_run_dir(OUT, load_yaml('configs/pipeline.yaml'), 1)
+for png in sorted(sorted(smoke.glob('inspection_*'))[-1].glob('*.png')):
+    display(Image(str(png)))"""),
+        md("## 5. Full graph construction (resumable)\nProgress is saved per subject. If the runtime stops, "
+           "*Run all* again."),
+        code('sh("python scripts/build_graphs.py --paths configs/paths.yaml --status")\n'
+             'sh("python scripts/build_graphs.py --paths configs/paths.yaml")'),
+        md("## 5b. Validate the graph dataset and write the completion report\nImplementation checks only "
+           "(shapes, finite values, ranges, symmetry, window grid and boundary margins, manifest). With the "
+           "boundary audit folder present, the accepted windows of the audited production run are listed next "
+           "to the new counts. Stops the notebook if any check fails."),
+        code("""from pathlib import Path
+AUDIT_PART2 = Path('/content/drive/MyDrive/AD-LEB-audit/qc_boundary_audit_7fd5a69/part2')   # optional reference
+ref = f" --reference-audit '{AUDIT_PART2}'" if AUDIT_PART2.is_dir() else ''
+sh("python scripts/validate_graph_run.py --paths configs/paths.yaml" + ref)"""),
+        md("## 6. Quality summary"),
+        code("""import json
+import pandas as pd
+from adgraph.experiments.gate import gate_failures
+from adgraph.graphs.store import GraphStore
+from adgraph.pipeline import latest_complete_graph_run
+
+run = latest_complete_graph_run(OUT)
+m = json.load(open(run / 'manifest.json'))
+print('graph run:', run)
+print('commit', m['git_commit'], '| config', m['config_hash'], '| graph_run_id', m['graph_run_id'],
+      '| operator error', m['source_operator']['verification_rel_error'])
+print(json.dumps(m['summary']['per_dataset'], indent=1))
+print('subjects not ok:', m['summary']['subjects_not_ok'] or 'none')
+fails = gate_failures(GraphStore.load(run, keys=()))
+print('cross-dataset gate (DESIGN.md §7):', 'PASSED' if not fails else 'NOT passed: ' + '; '.join(fails))
+mem = pd.read_csv(run / 'memory_log.csv') if (run / 'memory_log.csv').exists() else None
+if mem is not None:
+    print(f"memory: highest peak {mem['mem_peak_mb'].max():.0f} MB per unit "
+          f"(machine total {mem['mem_total_mb'].max():.0f} MB; lowest available {mem['mem_available_before_mb'].min():.0f} MB)")
+s = pd.read_csv(run / 'subjects.csv')
+from IPython.display import display
+display(s[[c for c in ['key', 'label', 'orig_sfreq', 'duration_s', 'gross_robust_std_uv', 'median_std_uv',
+                       'median_robust_std_uv', 'n_bad_channels', 'n_windows_kept', 'n_windows_total',
+                       'qc_edge_window_ptp_ratio', 'channel_naming', 'qc_spatial_rho', 'seconds',
+                       'mem_peak_mb', 'status'] if c in s]])
+if 'qc_spatial_rho' in s:   # channel-mapping QC: nearby electrodes correlate more (clearly negative expected)
+    print('distance vs |correlation| rho per recording: median', round(s['qc_spatial_rho'].median(), 2),
+          '| not clearly negative (> -0.1):', s.loc[s['qc_spatial_rho'] > -0.1, 'key'].tolist() or 'none')
+errors = s[s['status'].astype(str).str.startswith('error')]
+if len(errors):   # below_min_windows is the pre-specified exclusion, not an error
+    raise RuntimeError(f"{len(errors)} recording(s) failed: {errors[['key', 'status']].to_dict('records')}. "
+                       "Completed recordings are saved; fix the cause and Run all again (only failed ones rerun).")"""),
+    ])
+
+
+def comparative_notebook(configs: list[str]) -> dict:
+    return notebook([
+        md("# 03 · Comparative figures (across experiments)\n" + HOWTO + """
+Builds the **paper figures** (`configs/figures/paper.yaml`, `docs/figures.md`) that compare
+experiments, **only from saved outputs**. Run it after the experiments you want to compare have
+finished; it trains nothing and starts no experiment. Figures whose inputs do not exist yet are
+skipped, and figures drawn with some inputs still missing are listed as INCOMPLETE (with what is
+missing). Each run writes a new folder `figures/figures_<time>/` with figures, plotted data and a
+manifest. Single-experiment diagnostics are in each experiment's own report folder instead."""),
+        code(SETUP),
+        md("## 1. Which experiments have results"),
+        code(f"""from pathlib import Path
+import pandas as pd
+from adgraph.experiments.plan import experiments_overview
+from adgraph.graphs.store import GraphStore
+from adgraph.pipeline import latest_complete_graph_run
+
+GRAPHS = latest_complete_graph_run(OUT)
+RESULTS = f"{{OUT}}/experiments"
+CONFIGS = {json.dumps(configs)}
+print('graph run:', GRAPHS)
+pd.set_option('display.width', 250)
+experiments_overview(CONFIGS, GraphStore.load(GRAPHS, keys=()), RESULTS)"""),
+        md("## 2. Generate the comparative figures"),
+        code("""sh(f"python scripts/make_figures.py --config configs/figures/paper.yaml --results '{RESULTS}' "
+   f"--graphs '{GRAPHS}' --out '{OUT}/figures'")
+from IPython.display import Image, display
+latest = sorted(Path(f"{OUT}/figures").glob('figures_*'))[-1]
+print('figures in', latest)
+for png in sorted(latest.glob('Fig*.png')):
+    print(png.name)
+    display(Image(filename=str(png)))
+print('supplementary:', sorted(p.name for p in latest.glob('S*.png')))"""),
+    ])
+
+
+def advanced_notebook() -> dict:
+    return notebook([
+        md("# ADVANCED · run every experiment of `configs/run_plan.yaml`\n" + HOWTO + """
+**Optional. Not part of the normal workflow.** The normal workflow is one experiment notebook at a
+time (`notebooks/experiments/`), checking each result before starting the next.
+
+This notebook can run *all* experiments in priority order (≈ hundreds of GPU-hours with the full
+protocol). With the default `RUN_EVERYTHING = False`, *Run all* only shows the progress of the whole
+plan and **starts nothing**. To launch the full plan you must deliberately set
+`RUN_EVERYTHING = True` in section 2."""),
+        code(SETUP),
+        md("## 1. Progress of the whole plan (computes nothing)"),
+        code('sh("python scripts/run_plan.py --paths configs/paths.yaml --status")'),
+        md("## 2. Launch everything (disabled by default)"),
+        code("""RUN_EVERYTHING = False   # deliberately set True to run ALL experiments of configs/run_plan.yaml
+if RUN_EVERYTHING:
+    sh("python scripts/run_plan.py --paths configs/paths.yaml")
+else:
+    print('Not started (RUN_EVERYTHING = False). Use the per-experiment notebooks instead.')"""),
+    ], gpu=True)
+
+
+def restore_pin_notebook() -> dict:
+    return notebook([
+        md("""# ADVANCED · Restore the D1/D2 code pin (maintenance, run once)
+""" + HOWTO + """
+Dataset 3 now has its own code pin (`<outputs>/D3_CODE_COMMIT.txt`, methodology log entry 45). Before that, D3
+notebooks used the shared pin `CODE_COMMIT.txt`, which a D3 session could move to a Dataset 3 commit. This
+notebook sets `CODE_COMMIT.txt` back to the last D1/D2 pin that predates Dataset 3, read from the pin's own
+history (expected: `1b6988a`, the fixed-hyperparameter commit). The old lines stay in the file as history.
+
+It changes **only that text file**: no graph, checkpoint or result is modified. It refuses (and changes nothing)
+if any D1/D2 unit was completed under the current pin. Running it again is harmless (it then reports
+"unchanged"). It runs the newest code without reading or writing any pin."""),
+        code(SETUP_MAINTENANCE),
+        md("## 1. Pins and the commits recorded by completed units (before)"),
+        code('sh("python scripts/code_pin.py status")'),
+        md("## 2. Restore the D1/D2 pin"),
+        code('sh("python scripts/code_pin.py restore-d1d2")'),
+    ])
+
+
+DRIVE_LAYOUT = """\
+<outputs>/                          AD-LEB/processed (or My Drive/AD-LEB-processed if that is read-only)
+├── CODE_COMMIT.txt                 code commit used by every D1/D2 session and notebook
+├── D3_CODE_COMMIT.txt              Dataset 3's own code pin (notebooks/d3; never changes CODE_COMMIT.txt)
+├── header_report_<time>.csv        EDF header checks (notebook 01, step 3)
+├── diagnostics/amplitude_<time>/   read-only amplitude diagnostic (notebook 01, step 3b)
+├── cache/
+│   ├── subjects/fsaverage/         fsaverage template (downloaded once)
+│   ├── operators/operator_<id>.npz + .done.json   verified 68x30 sensor->ROI operator
+│   ├── input_sha256.json           content hashes of EDFs and sheets
+│   └── tests_passed/<commit>_<env>.txt            test-suite pass record
+├── graphs_v3_<config hash>_limit1/ earlier smoke tests (pipeline v3; kept, never used for analysis)
+├── graphs_v4_<config hash>_limit1/ smoke test of the boundary-aware pipeline (never used for analysis)
+├── graphs_v4_<config hash>/        graph run used by the experiments (highest version, entry 41)
+│   ├── run_identity.json  status.csv  memory_log.csv  last_attempt.json (failed subjects of the last run)
+│   ├── subjects/<D1-k|D2-k>/       per-subject checkpoint: arrays.npz windows.csv subject.json subject.done.json
+│   │                               qc_channels.csv qc_windows.csv (failed.json: the error of a failed subject)
+│   ├── inspection_<time>/          read-only per-subject QC figures (notebook 01, step 4b)
+│   ├── graphs.npz  windows.csv  subjects.csv  manifest.json  assembly.done.json
+│   │                               (only when every subject succeeded and the cohort is not empty)
+│   ├── validation_<time>/          dataset_report.csv validation.json (notebook 01, step 5b)
+│   └── _superseded/<time>/         replaced checkpoints (never deleted)
+├── experiments/
+│   └── <experiment>/               one folder per experiment notebook
+│       ├── <variant>/<setting>/    predictions_windows.csv predictions_subjects.csv metrics_repeats.csv
+│       │                           folds.csv hparams.csv summary.json manifest.json [embeddings.npz]
+│       │                           final.done.json _identity.json status.csv units/ (fold, inner-trial,
+│       │                           permutation checkpoints)
+│       ├── _run_status.csv         state, runtime (s) and peak memory (MB) per variant and setting
+│       ├── _estimates/             (only if `experiment.py estimate` is run manually)
+│       └── _reports/report_<time>/ results_summary.csv progress.csv README.txt figures/ (diagnostics D1-D4)
+│   └── exp7_earm_gnn/              Experiment 7 (EARM-GNN): as above, plus CODE_COMMIT.txt (Exp7's own code pin),
+│                                   units/fold_*.model.npz (fitted parameters, edge gates, training history),
+│                                   _inspect/ (model check), _comparison/comparison_<time>/ (tables + figures)
+├── diagnostics/dataset_shift_<time>/  read-only D1 / D2 diagnostic (Exp7 notebook)
+└── figures/figures_<time>/         comparative paper figures (notebook 03): figure files, data,
+                                    metadata, figure_manifest.json
+"""
+
+
+def readme(entries: list[dict]) -> str:
+    rows = "\n".join(
+        f"| [{e['folder']}/{e['name']}.ipynb]({COLAB}/{e['folder']}/{e['name']}.ipynb) | `{e['config']}` | "
+        f"{'GPU (T4)' if e['gpu'] else 'CPU'} |" for e in entries)
+    return f"""# Colab notebooks
+
+Open a notebook in Colab (links below), then *Runtime → Run all*. Nothing needs to be edited;
+everything is saved to Google Drive, and *Run all* again resumes after a disconnect (finished work
+is shown as done and never recomputed). Progress is shown as updating progress bars. These files
+are generated by `scripts/make_notebooks.py` (do not edit them by hand).
+
+1. [01_build_graphs.ipynb]({COLAB}/01_build_graphs.ipynb): graphs + QC (first, once).
+2. One experiment at a time ([notebooks/experiments](experiments)): each runs **only** its own
+   experiment with the full protocol, saves its results and shows them. Review, then choose the next.
+3. [03_comparative_figures.ipynb]({COLAB}/03_comparative_figures.ipynb): paper figures comparing
+   experiments (after the experiments you need have finished).
+
+Optional: secondary analyses in [notebooks/additional](additional), and
+[advanced/Run_all_experiments_ADVANCED.ipynb]({COLAB}/advanced/Run_all_experiments_ADVANCED.ipynb)
+(whole plan; starts nothing unless explicitly enabled). Maintenance:
+[advanced/Restore_D1D2_code_pin.ipynb]({COLAB}/advanced/Restore_D1D2_code_pin.ipynb) (sets the D1/D2 code
+pin back to its pre-Dataset 3 commit; changes no result).
+
+D3 LCMV beamforming + Xu et al. (2025) protocol suite (separate outputs `<outputs>/D3_LCMV_XU/`, own code pin):
+[notebooks/lcmv_xu](lcmv_xu): `LX_00_build_dataset` first, `LX_01_correct_and_validate` once (entry 53), then
+`LX_Exp0` ... `LX_Exp8` (one at a time),
+then `LX_99_report` (`LX_98_run_all_optional` runs everything, only if enabled; `docs/lcmv_xu.md`).
+
+Matched wMNE comparison (separate outputs `<outputs>/D3_WMNE_XU/`, own code pin; methodology log entry 55,
+`docs/wmne_xu.md`): [notebooks/wmne_xu](wmne_xu): `WX_00_build_dataset` (build, validate, match against the corrected
+LCMV stores), then `WX_Exp0` ... `WX_Exp8` (one at a time, identical definitions to `LX_Exp*`), optionally
+`historical/WXH_Exp0` ... `WXH_Exp7` (existing wMNE graphs under the frozen protocol), then `WX_99_compare`.
+
+200-epoch early-stopping protocol for Exp 2-8 of both suites (methodology log entry 56, `docs/early_stopping.md`;
+separate results, own pins `ES200_CODE_COMMIT.txt`): `lcmv_xu/early_stopping/LX_ES_Exp2` ... `LX_ES_Exp8` and
+`wmne_xu/early_stopping/WX_ES_Exp2` ... `WX_ES_Exp8`, one at a time; then `WX_99_compare` pairs them.
+
+Corrected band-identity variants R1 (methodology log entry 57, `docs/band_identity.md`; originals kept as baselines;
+own pins `R1_CODE_COMMIT.txt`): `lcmv_xu/corrected/LX_R1_Exp5_bandid_fixed60` (and `_es200`), `LX_R1_Exp6_bandid_*` and
+the `wmne_xu/corrected/WX_R1_*` counterparts.
+
+## Experiment notebooks
+
+| Notebook | Config | Runtime type |
+|---|---|---|
+{{rows}}
+
+## Google Drive output structure
+
+```
+{{DRIVE_LAYOUT}}```
+""".replace("{rows}", rows).replace("{DRIVE_LAYOUT}", DRIVE_LAYOUT)
+
+
+# ============================================================================ D3 LCMV / Xu-protocol suite
+SETUP_LX = (SETUP_D3
+            .replace("# ===== Dataset 3 setup: nothing to edit.", "# ===== D3 LCMV / Xu suite setup: nothing to edit.")
+            .replace("UPDATE_D3_CODE = False   # leave False. True only if you were asked to switch D3 to newer code\n"
+                     "# Dataset 3 has its own code pin, <outputs>/D3_CODE_COMMIT.txt (all D3 notebooks run that commit);\n"
+                     "# the D1/D2 pin CODE_COMMIT.txt is only reported, never read for checkout or changed here.",
+                     "UPDATE_LX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The LCMV / Xu suite has its own code pin, <outputs>/D3_LCMV_XU/CODE_COMMIT.txt (all LX notebooks run\n"
+                     "# that commit); the D1/D2 and D3 pins are only reported, never changed here.")
+            .replace("'--family', 'D3']\n     + (['--update-code'] if UPDATE_D3_CODE else []))",
+                     "'--family', 'LX']\n     + (['--update-code'] if UPDATE_LX_CODE else []))")
+            + "LX = OUT + '/D3_LCMV_XU'\nprint('suite outputs:', LX)\n")
+assert "UPDATE_LX_CODE" in SETUP_LX and "'LX'" in SETUP_LX
+
+LX_HOWTO = HOWTO + """
+**Suite:** D3 LCMV beamforming + Xu et al. (2025) protocol (methodology log entry 50, `docs/lcmv_xu.md`). All outputs
+are under `<outputs>/D3_LCMV_XU/`; D1/D2 and the earlier D3 (wMNE) runs and results are never touched."""
+
+LX_EXPERIMENTS = [
+    (0, "lx_exp0_sensor_psd_de", "Sensor-space PSD / DE classical baselines (LR, SVM)", False),
+    (1, "lx_exp1_source_psd_de", "LCMV source-space PSD / DE classical baselines (LR, SVM)", False),
+    (2, "lx_exp2_conn_minimal", "Source connectivity-only GCN (5 bands x PLV / |ciPLV|)", True),
+    (3, "lx_exp3_single_band", "Single-band GCN with matched-band PSD nodes (5 bands x PLV / |ciPLV|)", True),
+    (4, "lx_exp4_band_mean", "Band-averaged multiband GCN (all-band PSD or DE nodes)", True),
+    (5, "lx_exp5_multibranch", "Multi-band GNN: shared and band-specific branches, mean / attention fusion", True),
+    (6, "lx_exp6_psd_strength", "Full multiband GCN (PSD + node strength) with ablations", True),
+    (7, "lx_exp7_earm_gnn", "EARM-GNN: adaptive EEG-guided edge gates, residual blocks, band attention", True),
+    (8, "lx_exp8_xu_dual_gcn", "Xu-inspired dual-adjacency source-space GCN (functional + atlas layers)", True),
+]
+LX_OWN_PIN = {8}          # added after Exp 0-7 had started on the suite pin: runs its own commit
+
+
+def lx_own_pin_cells(name: str, cfg_b: str) -> list[dict]:
+    a_name = name.replace("lx_", "lx10_")
+    return [md(f"""## 0. This experiment's code pin
+Exp 8 was added after Exp 0-7 had started on the suite pin (`D3_LCMV_XU/CODE_COMMIT.txt`). It runs the commit
+recorded in `D3_LCMV_XU/{name}_CODE_COMMIT.txt` (set on its first run; it never moves while Exp 8 has completed
+work), so the suite pin and every completed Exp 0-7 result stay unchanged. Leave `UPDATE_EXP8_CODE = False`."""),
+            code(f"""UPDATE_EXP8_CODE = False
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+dirs = [Path(LX) / 'experiments_A_xu_tenfold' / '{a_name}', Path(LX) / 'experiments_B_all_windows' / '{name}']
+has_work = any(any(d.rglob('*.done.json')) for d in dirs if d.exists())
+EXP_COMMIT, _ = resolve_code_pin(Path(LX) / '{name}_CODE_COMMIT.txt', head, update=UPDATE_EXP8_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', EXP_COMMIT])
+for f in ('{cfg_b}', 'src/adgraph/models/xu_dual.py', 'scripts/lx_exp8_inspect.py'):
+    if not Path('/content/repo', f).exists():
+        raise RuntimeError(f'pin {{EXP_COMMIT[:10]}} lacks {{f}}: set UPDATE_EXP8_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from Exp 8's commit
+from adgraph.colab import sh
+print('{name} code commit:', EXP_COMMIT)
+print('suite pin (Exp 0-7, unchanged):', (Path(LX) / 'CODE_COMMIT.txt').read_text().split()[0])""")]
+
+
+def lx_correct_notebook() -> dict:
+    return notebook([
+        md("""# LX · 01 · Correct and validate the D3 LCMV / Xu dataset (`corr1`; run once, CPU)
+The full build at `b38685e` (65/65 participants) failed one validation check, D3-23 [65725, 68225). That window is
+safe: it lies exactly at the 3.3 s filter margin, and the validator rebuilt the boundary from seconds rounded to
+1 ms in floating point. D3-23 and D3-58 also selected 305.62 s and 309.62 s: an extra final 10 s piece with one
+window each, outside the 300 s target. Methodology log entry 53, `docs/lcmv_xu.md` §11.
+
+This notebook:
+1. **moves the suite code pin once** to the corrected code, only while no LX experiment has completed work;
+2. writes **new** stores `graphsLX_v1_*_corr1` (mode B) and `graphsLX10_v1_*_corr1` (mode A) from the existing
+   ones:
+   - it removes only the windows outside the corrected 300 s selection (expected: one each for D3-23 and D3-58),
+     consistently across every array and table;
+   - no beamformer, connectivity or feature is recomputed, and nothing is rebuilt;
+   - every step is verified first (EEGLAB headers; the stored windows; the rejection rule re-applied for the two
+     changed participants), and nothing is written if a check fails;
+3. runs the **full validation of both corrected stores** (exact boundary positions, 300 s cap, split, shapes,
+   weights, counts).
+
+The original stores, the 65 participant checkpoints and their LCMV operators are not modified. Experiments then
+use only the validated corrected stores. **Do not run `lx_build.py build` again**; it does nothing once the
+corrected stores exist. No model is trained here."""),
+        code(SETUP_LX),
+        md("## 1. Move the suite pin to the corrected code (once; only if no LX experiment has completed work)"),
+        code("""import glob
+from pathlib import Path
+pin = Path(LX) / 'CODE_COMMIT.txt'
+pinned = pin.read_text().split()[0]
+has_fix = subprocess.run(['git', '-C', '/content/repo', 'cat-file', '-e',
+                          f'{pinned}:src/adgraph/lcmvxu/correct.py']).returncode == 0
+if not has_fix:
+    done = glob.glob(LX + '/experiments_*/**/*.done.json', recursive=True)
+    if done:
+        raise RuntimeError(f'{len(done)} completed LX experiment unit(s) are pinned to {pinned[:10]}; '
+                           'the pin is not moved automatically. Ask before continuing.')
+    _run(['git', '-C', '/content/repo', 'checkout', '-q', f'origin/{BRANCH}'])
+    _run([sys.executable, 'scripts/colab_setup.py', '--family', 'LX', '--update-code'])
+    for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+        del sys.modules[m]
+from adgraph.colab import sh
+print('suite pin:', pin.read_text().split()[0], '| previous:', pinned[:10])"""),
+        md("## 2. Correction (new versioned stores; originals unchanged)"),
+        code('sh("python scripts/lx_build.py correct")'),
+        md("## 3. Full validation of both corrected stores (all checks must PASS)"),
+        code('sh("python scripts/lx_build.py validate")'),
+        md("## 4. What changed"),
+        code("""import json
+import pandas as pd
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+run = sorted(glob.glob(LX + '/graphsLX_v*_corr1'))[-1]
+summary = json.load(open(run + '/correction.json'))
+print('participants changed:', summary['participants_changed'])
+display(pd.read_csv(run + '/correction_removed_windows.csv'))
+display(pd.read_csv(run + '/correction_participants.csv').query('changed'))
+print('mode B windows:', summary['n_windows_mode_B'], '| mode A windows:', summary['n_windows_mode_A'])
+print('beamforming repeated:', summary['beamforming_repeated'],
+      '| connectivity / features recomputed:', summary['connectivity_or_features_recomputed'])
+for d in (run, run.replace('graphsLX_', 'graphsLX10_')):
+    v = json.load(open(d + '/validation.json'))
+    print(Path(d).name, 'validation passed:', v['passed'], '| windows:', v['n_windows'])"""),
+    ])
+
+
+def lx_build_notebook() -> dict:
+    return notebook([
+        md("""# LX · 00 · Build the D3 LCMV / Xu-protocol dataset
+OpenNeuro ds004504 v1.0.9 derivatives (**already on Drive, not downloaded again**): 36 AD + 29 HC (FTD excluded by
+design), 19 channels with the verified EEGLAB electrode coordinates. Every EEGLAB `boundary` cuts the recording;
+each continuous segment is resampled on its own; five minutes of usable EEG per participant are selected
+deterministically; 10 s windows with a 1 s step (90 % overlap) never cross a boundary or its filter margin.
+Per participant: LCMV beamformer (own data covariance, rank-aware, unit-noise-gain), 68 Desikan-Killiany ROIs,
+five Xu bands (delta 0.5-4, theta 4-8, alpha 8-13, beta 13-25, gamma 25-45 Hz), PSD, differential entropy,
+PLV and |ciPLV|. Two graph stores: **mode B** (all accepted windows) and **mode A** (Xu tenfold: 10 samples per
+participant, 65 -> 650).
+""" + LX_HOWTO + """
+**Steps:** 1. input check (participants, channels, coordinates) · 2. recording QC of all 65 participants (durations,
+boundaries, segments, five-minute selection; no source model) · 3. smoke test: one participant through the full
+LCMV path, verified against MNE's own `apply_lcmv_raw` · 4. full build (starts automatically only if the smoke test
+passed; resumable per participant) · 5. validation (no window crosses a boundary, frozen participant split,
+shapes, finiteness) · 6. participant QC report. A GPU is not needed for this notebook."""),
+        code(SETUP_LX),
+        md("## 1. Input check (36 AD / 29 HC, 19 channels and verified electrode coordinates in every file)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 2. Recording QC of every participant (no source model)"),
+        code('sh("python scripts/lx_build.py inspect")'),
+        md("## 3. Smoke test: one participant, full LCMV path (separate `_limit1` run)"),
+        code("""sh("python scripts/lx_build.py build --limit 1")
+sh("python scripts/lx_build.py validate --limit 1")
+SMOKE_PASSED = True                       # reached only if both commands above succeeded"""),
+        md("## 4. Full build (all 65 participants; resumable, completed participants are skipped)"),
+        code("""if not SMOKE_PASSED:
+    raise RuntimeError('smoke test did not pass; the full build is not started')
+sh("python scripts/lx_build.py build")"""),
+        md("## 5. Validation of both graph stores"),
+        code('sh("python scripts/lx_build.py validate")'),
+        md("## 6. Participant QC report"),
+        code("""import glob, json
+import pandas as pd
+run = sorted(p for p in glob.glob(LX + '/graphsLX_v*') if '_limit' not in p)[-1]
+qc = pd.read_csv(run + '/qc_report.csv')
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+display(qc[[c for c in ['key', 'label', 'original_duration_s', 'n_boundary_events', 'n_segments', 'n_usable_segments',
+                        'selection_mode', 'selected_duration_s', 'n_windows_candidate', 'n_windows_accepted',
+                        'n_windows_rejected', 'n_tenfold', 'lcmv_rank', 'status', 'reason'] if c in qc]])
+print(qc['status'].value_counts().to_dict(), '| windows (mode B):', int(qc['n_windows_kept'].sum()),
+      '| samples (mode A):', int(qc['n_tenfold'].sum()))
+print('frozen split:', {k: v for k, v in json.load(open(run + '/xu_split.json')).items() if k.startswith('n_')})"""),
+    ])
+
+
+def lx_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    cfg_b = f"configs/experiments/lx/{name}.yaml"
+    cfg_a = f"configs/experiments/lx/tenfold/{name.replace('lx_', 'lx10_')}.yaml"
+    variants, proto = protocol(f"lx/{name}")
+    return notebook([
+        md(f"""# LX · Experiment {n} · {title}
+
+{proto}
+""" + LX_HOWTO + f"""
+**Validation (identical for Exp 0-7):** the frozen participant split saved with the dataset (`xu_split.json`):
+`xu_dev_cv` = 5-fold participant-grouped CV inside the 80 % development participants; `xu_holdout` = fit on all
+development participants, evaluated once on the 20 % holdout participants. Normalization, class weights and
+(classical models only) the C selection use training participants only. Participant-level metrics (mean window
+score per participant) are primary; window-level metrics are secondary.
+
+**Runs both modes:** A (Xu tenfold, 650 samples; `{cfg_a}`) first, then B (all accepted windows; `{cfg_b}`).
+Resumable: every completed fold is saved to Drive. Results: `<outputs>/D3_LCMV_XU/experiments_A_xu_tenfold/` and
+`.../experiments_B_all_windows/`.""" + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_LX),
+        *(lx_own_pin_cells(name, cfg_b) if n in LX_OWN_PIN else []),
+        *([md("## 0b. Architecture check (no data): anatomical matrix, layers, parameter count per variant, one "
+              "forward/backward pass on synthetic inputs of the real shapes"),
+           code('sh("python scripts/lx_exp8_inspect.py")')] if n in LX_OWN_PIN else []),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results (saved outputs only)"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {cfg}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    exp = Path(cfg).stem
+    reports = sorted(glob.glob(f'{LX}/{root}/{exp}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+        for png in sorted(glob.glob(reports[-1] + '/figures/*.png'))[:6]:
+            display(Image(filename=png))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {sorted(ERRORS)}; completed units are saved. Run all again.')"""),
+        *([md("## 4. Comparison Exp 0-8 (all completed results of the suite; participant- and window-level metrics)"),
+           code("""sh("python scripts/lx_report.py")
+rep = sorted(glob.glob(LX + '/reports/report_*'))[-1]
+t = pd.read_csv(rep + '/comparison.csv')
+cols = ['mode', 'experiment', 'variant', 'setting', 'n_participants', 'participant_accuracy',
+        'participant_balanced_accuracy', 'participant_f1', 'participant_roc_auc', 'window_accuracy',
+        'window_balanced_accuracy', 'window_f1', 'window_roc_auc', 'device']
+display(t[[c for c in cols if c in t]].round(3)) if len(t) else print('no completed results yet')
+for png in sorted(glob.glob(rep + '/figures/*.png')):
+    display(Image(filename=png))""")] if n in LX_OWN_PIN else []),
+    ], gpu=gpu)
+
+
+def lx_master_notebook() -> dict:
+    return notebook([
+        md("""# LX · 98 · Optional master runner: Exp 0-7, mode A then mode B
+""" + LX_HOWTO + """
+**Optional.** The normal workflow is one experiment notebook at a time. With the default `RUN_EVERYTHING = False`,
+*Run all* only shows the status of every experiment and starts nothing. Set `RUN_EVERYTHING = True` deliberately
+to run all eight experiments in both modes (resumable; failures are reported and the next experiment continues),
+followed by the comparison report. Use a **GPU runtime**."""),
+        code(SETUP_LX),
+        md("## 1. Status of all experiments"),
+        code("""import glob
+for cfg in sorted(glob.glob('configs/experiments/lx/tenfold/lx10_exp*.yaml')) + sorted(glob.glob('configs/experiments/lx/lx_exp*.yaml')):
+    sh(f"python scripts/experiment.py status --config {cfg}")"""),
+        md("## 2. Run everything (disabled by default)"),
+        code("""RUN_EVERYTHING = False   # deliberately set True to run Exp 0-7 in modes A and B
+if RUN_EVERYTHING:
+    sh("python scripts/lx_run_all.py")
+else:
+    print('Not started (RUN_EVERYTHING = False).')"""),
+    ], gpu=True)
+
+
+def lx_report_notebook() -> dict:
+    return notebook([
+        md("""# LX · 99 · Comparison across Exp 0-7 (saved outputs only)
+""" + LX_HOWTO + """
+One row per mode x experiment x variant x setting: participant-level metrics (primary) and window-level metrics
+(secondary), confusion counts, ROC curves, and the compute environment (CPU / GPU) of each result. Nothing is
+trained, selected or ranked. Each run writes a new `reports/report_<time>/` folder."""),
+        code(SETUP_LX),
+        md("## Comparison"),
+        code("""sh("python scripts/lx_report.py")
+import glob
+import pandas as pd
+from IPython.display import Image, display
+rep = sorted(glob.glob(LX + '/reports/report_*'))[-1]
+pd.set_option('display.max_rows', 500, 'display.width', 250)
+t = pd.read_csv(rep + '/comparison.csv')
+if len(t):
+    display(t[['mode', 'experiment', 'variant', 'setting', 'n_participants', 'participant_accuracy',
+               'participant_balanced_accuracy', 'participant_sensitivity', 'participant_specificity',
+               'participant_precision', 'participant_f1', 'participant_roc_auc', 'window_roc_auc',
+               'window_balanced_accuracy', 'device']].round(3))
+for png in sorted(glob.glob(rep + '/figures/*.png')):
+    print(png)
+    display(Image(filename=png))"""),
+    ])
+
+
+
+# ============================================================================ matched wMNE / Xu suite (entry 55)
+SETUP_WX = (SETUP_LX
+            .replace("# ===== D3 LCMV / Xu suite setup: nothing to edit.", "# ===== D3 wMNE / Xu suite setup: nothing to edit.")
+            .replace("UPDATE_LX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The LCMV / Xu suite has its own code pin, <outputs>/D3_LCMV_XU/CODE_COMMIT.txt (all LX notebooks run\n"
+                     "# that commit); the D1/D2 and D3 pins are only reported, never changed here.",
+                     "UPDATE_WX_CODE = False   # leave False. True only if you were asked to switch this suite to newer code\n"
+                     "# The wMNE / Xu suite has its own code pin, <outputs>/D3_WMNE_XU/CODE_COMMIT.txt (all WX notebooks run\n"
+                     "# that commit); the LCMV suite pin D3_LCMV_XU/CODE_COMMIT.txt and all other pins are only reported.")
+            .replace("'--family', 'LX']\n     + (['--update-code'] if UPDATE_LX_CODE else []))",
+                     "'--family', 'WX']\n     + (['--update-code'] if UPDATE_WX_CODE else []))")
+            .replace("print('suite outputs:', LX)\n", "WX = OUT + '/D3_WMNE_XU'\nprint('suite outputs:', WX, '| LCMV reference (read only):', LX)\n"))
+assert "UPDATE_WX_CODE" in SETUP_WX and "'WX'" in SETUP_WX and "UPDATE_LX_CODE" not in SETUP_WX
+
+WX_HOWTO = HOWTO + """
+**Suite:** matched wMNE counterpart of the D3 LCMV / Xu suite (methodology log entry 55, `docs/wmne_xu.md`). All
+outputs are under `<outputs>/D3_WMNE_XU/`, with its own code pin `D3_WMNE_XU/CODE_COMMIT.txt`. The LCMV suite
+(`D3_LCMV_XU/`: stores, results, pins), `graphsD3_v4_*` and D1/D2 are only read, never written. Safe to run while
+LCMV experiments run in another Colab session (separate folders and pin; one GPU per session)."""
+
+
+def wx_build_notebook() -> dict:
+    return notebook([
+        md("""# WX · 00 · Build the matched D3 wMNE / Xu-protocol dataset
+The same recordings, segments, five-minute selection, 10 s / 1 s windows, rejection, Xu bands, PSD / DE / PLV /
+|ciPLV|, 68 Desikan-Killiany ROIs, mode A (tenfold) and mode B as the corrected LCMV stores; **only the inverse
+differs**: the historical wMNE settings (depth-weighted MNE, loose 0.2, lambda2 1/9, ad-hoc noise covariance,
+normal component) instead of LCMV. One data-independent 68 x 19 operator for the shared electrode geometry,
+verified against MNE's `apply_inverse_raw` on every participant.
+""" + WX_HOWTO + """
+**Steps:** 1. input check · 2. recording QC (no source model) · 3. smoke test, one participant (`_limit1` run) ·
+4. full build (only if the smoke test passed; resumable per participant) · 5. validation of both stores (exact
+boundary positions, 300 s cap, split, shapes, weights, counts) · 6. **match** against the corrected LCMV stores:
+identical participants, labels, selections, window ids and start / stop samples, tenfold flags, weights, split,
+ROI order and sensor features (the Exp 0 consistency control); experiments refuse stores that do not match ·
+7. QC report. CPU runtime (no GPU needed)."""),
+        code(SETUP_WX),
+        md("## 1. Input check (36 AD / 29 HC, 19 channels and verified electrode coordinates)"),
+        code('sh("python scripts/d3_data.py check")'),
+        md("## 2. Recording QC of every participant (no source model)"),
+        code('sh("python scripts/wx_build.py inspect")'),
+        md("## 3. Smoke test: one participant, full wMNE path (separate `_limit1` run)"),
+        code("""sh("python scripts/wx_build.py build --limit 1")
+sh("python scripts/wx_build.py validate --limit 1")
+SMOKE_PASSED = True                       # reached only if both commands above succeeded"""),
+        md("## 4. Full build (all 65 participants; resumable, completed participants are skipped)"),
+        code("""if not SMOKE_PASSED:
+    raise RuntimeError('smoke test did not pass; the full build is not started')
+sh("python scripts/wx_build.py build")"""),
+        md("## 5. Validation of both stores"),
+        code('sh("python scripts/wx_build.py validate")'),
+        md("## 6. Match against the corrected LCMV stores (read only)"),
+        code('sh("python scripts/wx_build.py match")'),
+        md("## 7. QC report"),
+        code("""import glob, json
+import pandas as pd
+run = sorted(p for p in glob.glob(WX + '/graphsWX_v*') if '_limit' not in p)[-1]
+qc = pd.read_csv(run + '/qc_report.csv')
+pd.set_option('display.max_rows', 100, 'display.width', 250)
+display(qc[[c for c in ['key', 'label', 'selection_mode', 'selected_duration_s', 'n_windows_candidate',
+                        'n_windows_accepted', 'n_tenfold', 'wmne_verification_rel_error', 'status', 'reason'] if c in qc]])
+print(qc['status'].value_counts().to_dict(), '| windows (mode B):', int(qc['n_windows_kept'].sum()),
+      '| samples (mode A):', int(qc['n_tenfold'].sum()))
+for d in (run, run.replace('graphsWX_', 'graphsWX10_')):
+    m = json.load(open(d + '/match.json'))
+    print(d.split('/')[-1], 'matched to', m['reference'].split('/')[-1], '->', 'PASS' if m['passed'] else 'FAIL')"""),
+    ])
+
+
+def wx_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    lx_b = f"configs/experiments/lx/{name}.yaml"
+    cfg_b = f"configs/experiments/wx/{name.replace('lx_', 'wx_')}.yaml"
+    cfg_a = f"configs/experiments/wx/tenfold/{name.replace('lx_', 'wx10_')}.yaml"
+    variants, proto = protocol(f"wx/{name.replace('lx_', 'wx_')}")
+    return notebook([
+        md(f"""# WX · Experiment {n} · {title} (matched wMNE)
+
+The identical experiment as the LCMV notebook (`{lx_b}`; the wMNE configs inherit it unchanged), on the matched
+wMNE stores. {proto}
+""" + WX_HOWTO + f"""
+**Validation:** the frozen LCMV / Xu protocol, verified before any unit runs: the same 65 participants and labels,
+the 52 development / 13 holdout participants of the LCMV `xu_split.json`, identical five development folds; the
+store must have passed validation and the match against the LCMV store. The holdout is never used for selection.
+
+**Runs both modes:** A (`{cfg_a}`) first, then B (`{cfg_b}`). Resumable. Results:
+`<outputs>/D3_WMNE_XU/experiments_A_xu_tenfold/` and `.../experiments_B_all_windows/`."""
+           + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_WX),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results (saved outputs only) and the paired wMNE vs LCMV table"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {cfg}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{WX}/{root}/{Path(cfg).stem}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+sh("python scripts/wx_compare.py")
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {sorted(ERRORS)}; completed units are saved. Run all again.')"""),
+    ], gpu=gpu)
+
+
+WXH_EXPERIMENTS = [
+    (0, "wxh_exp0_sensor_psd", "Sensor-space PSD (LR, SVM)", False),
+    (1, "wxh_exp1_source_psd", "wMNE source PSD (LR, SVM)", False),
+    (2, "wxh_exp2_conn_minimal_fixedhp", "Connectivity-only GCN (4 bands x PLV / |ciPLV|)", True),
+    (3, "wxh_exp3_conn_psd_fixedhp", "Single-band GCN + matched-band PSD (4 bands x PLV / |ciPLV|)", True),
+    (4, "wxh_exp4_band_mean_fixedhp", "Band-averaged GCN", True),
+    (5, "wxh_exp5_multiband_fixedhp", "Multi-band GNN", True),
+    (6, "wxh_exp6_gcn_full", "Full multiband GCN (PSD + strength)", True),
+    (7, "wxh_exp7_earm_gnn", "EARM-GNN", True),
+]
+
+
+def wxh_experiment_notebook(n: int, name: str, title: str, gpu: bool) -> dict:
+    cfg = f"configs/experiments/wx_hist/{name}.yaml"
+    variants, proto = protocol(f"wx_hist/{name}")
+    return notebook([
+        md(f"""# WXH · Experiment {n} · {title} (historical wMNE graphs, frozen protocol)
+
+The existing D3 definition (`configs/experiments/d3/{name.replace('wxh_', 'd3_')}.yaml`, unchanged) on the existing
+wMNE store `graphsD3_v4_*` (20 s windows, 50 % overlap, bands theta / alpha1 / alpha2 / beta), evaluated with the
+frozen LCMV / Xu protocol (same 52 / 13 participants and five development folds, one repeat) instead of `within_D3`.
+**Validation-matched only:** windows and bands differ from the LCMV suite, so this does not isolate the inverse;
+it separates the effect of the validation protocol from the earlier D3 results. {proto}
+""" + WX_HOWTO + f"""
+One mode (all windows of the historical store). Results: `<outputs>/D3_WMNE_XU/experiments_H_historical_graphs/`."""
+           + (" Use a **GPU runtime** (T4)." if gpu else " CPU is sufficient.")),
+        code(SETUP_WX),
+        md("## 1. Status"),
+        code(f"""CONFIG = '{cfg}'
+sh(f"python scripts/experiment.py status --config {{CONFIG}}")"""),
+        md("## 2. Run (resumable)"),
+        code("""ERROR = None
+try:
+    sh(f"python scripts/experiment.py run --config {CONFIG}")
+except RuntimeError as exc:
+    ERROR = exc"""),
+        md("## 3. Results (saved outputs only)"),
+        code("""import glob
+from pathlib import Path
+import pandas as pd
+sh(f"python scripts/experiment.py report --config {CONFIG}")
+reports = sorted(glob.glob(f'{WX}/experiments_H_historical_graphs/{Path(CONFIG).stem}/_reports/report_*'))
+if reports:
+    display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+if ERROR:
+    raise RuntimeError('some units failed; completed units are saved. Run all again.')"""),
+    ], gpu=gpu)
+
+
+def wx_compare_notebook() -> dict:
+    return notebook([
+        md("""# WX · 99 · wMNE versus LCMV under the frozen Xu protocol (saved outputs only)
+Pairs every completed LCMV result with the matched wMNE result of the same mode, experiment, variant and setting
+(same participants, folds, definitions; only the inverse differs) and lists the historical-graph results
+separately. Descriptive: differences are reported, not ranked; the holdout has 13 participants.
+""" + WX_HOWTO),
+        code(SETUP_WX),
+        code("""import glob
+import pandas as pd
+pd.set_option('display.max_rows', 400, 'display.width', 250)
+sh("python scripts/wx_compare.py")
+rep = sorted(glob.glob(WX + '/reports/compare_*'))[-1]
+for f in ('paired.csv', 'historical.csv'):
+    try:
+        display(pd.read_csv(f'{rep}/{f}').round(3))
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        print(f, 'not available yet')"""),
+    ])
+
+
+
+# ============================================================================ 200-epoch early stopping (entry 56)
+ES_PIN = "ES200_CODE_COMMIT.txt"
+
+
+def es_pin_cells(suite: str) -> list[dict]:
+    own, other = ("LX", "WX") if suite == "LX" else ("WX", "LX")
+    prefixes = ["lx_es_", "lx10_es_"] if suite == "LX" else ["wx_es_", "wx10_es_"]
+    return [md(f"""## 0. Code pin of the early-stopping protocol
+The fixed 60-epoch results of this suite stay on the suite pin (unchanged; completed work is never invalidated).
+This notebook runs the commit recorded in `{'D3_LCMV_XU' if suite == 'LX' else 'D3_WMNE_XU'}/{ES_PIN}`. On its first
+run it adopts the other suite's early-stopping commit if that exists, so LCMV and wMNE train with identical code;
+otherwise it records the branch head. It never moves while early-stopping work of this suite exists. Leave
+`UPDATE_ES_CODE = False`."""),
+            code(f"""UPDATE_ES_CODE = False
+LX, WX = OUT + '/D3_LCMV_XU', OUT + '/D3_WMNE_XU'      # both suites' folders (the other one is only read)
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+own_pin, other_pin = Path({own}) / '{ES_PIN}', Path({other}) / '{ES_PIN}'
+sibling = other_pin.read_text().split()[0] if other_pin.exists() and other_pin.read_text().split() else None
+target = head if UPDATE_ES_CODE else (sibling or head)
+dirs = [Path({own}) / 'experiments_A_xu_tenfold', Path({own}) / 'experiments_B_all_windows']
+has_work = any(any(d.glob(pre + '*/**/*.done.json')) for d in dirs if d.exists() for pre in {prefixes!r})
+ES_COMMIT, _ = resolve_code_pin(own_pin, target, update=UPDATE_ES_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', ES_COMMIT])
+if not Path('/content/repo/tests/test_early_stopping.py').exists():
+    raise RuntimeError(f'pin {{ES_COMMIT[:10]}} lacks the early-stopping code: set UPDATE_ES_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]                     # this notebook's own imports now come from the early-stopping commit
+from adgraph.colab import sh
+print('early-stopping code commit:', ES_COMMIT)
+print('other suite early-stopping commit:', sibling or '(not yet set)')
+if sibling and sibling != ES_COMMIT:
+    print('WARNING: LCMV and wMNE early-stopping pins differ; the comparison would mix training code versions')
+print('suite pin (60-epoch results, unchanged):', (Path({own}) / 'CODE_COMMIT.txt').read_text().split()[0])""")]
+
+
+def es_experiment_notebook(suite: str, n: int, name: str, title: str) -> dict:
+    lo = suite.lower()
+    rest = name[len("lx_"):]
+    cfg_b = f"configs/experiments/{lo}_es/{lo}_es_{rest}.yaml"
+    cfg_a = f"configs/experiments/{lo}_es/tenfold/{lo}10_es_{rest}.yaml"
+    variants, proto = protocol(f"{lo}_es/{lo}_es_{rest}")
+    var = "LX" if suite == "LX" else "WX"
+    return notebook([
+        md(f"""# {suite}-ES · Experiment {n} · {title} · 200-epoch early stopping
+
+The {'LCMV' if suite == 'LX' else 'matched wMNE'} experiment `{rest}` with the **early-stopping protocol**
+`gnn_fixed_hparams_es200_v1` (methodology log entry 56, `docs/early_stopping.md`). It is identical to the 60-epoch
+experiment except training:
+- at most 200 epochs;
+- patience 10, monitoring the inner-validation loss with min_delta 1e-4;
+- the best epoch restored;
+- no refit.
+
+Hyperparameters, seeds, splits and reporting are unchanged, and the protocol is identical for LCMV and wMNE.
+
+**No leakage:** in every outer fit, the inner validation participants (20 %, stratified, whole participants) are
+drawn from that fit's training participants only, so the outer CV fold and the 13 holdout participants are never
+used for stopping or checkpoint selection. {proto}
+""" + (LX_HOWTO if suite == "LX" else WX_HOWTO) + f"""
+**Results** (separate from the 60-epoch results, never overwritten):
+`<outputs>/{'D3_LCMV_XU' if suite == 'LX' else 'D3_WMNE_XU'}/experiments_A_xu_tenfold/{lo}10_es_{rest}/` and
+`.../experiments_B_all_windows/{lo}_es_{rest}/`. Every fold's `hparams.csv` row records the best / stopping epoch,
+the best validation loss, the inner validation participants and both loss curves. Use a **GPU runtime** (T4)."""),
+        code(SETUP_LX if suite == "LX" else SETUP_WX),
+        *es_pin_cells(suite),
+        md("## 1. Status (from the checkpoints on Drive)"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+import torch
+print('runtime:', ('GPU ' + torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU only')
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc
+        print(f'mode {mode}: some units failed; details after the results')"""),
+        md("## 3. Results and early-stopping summary (saved outputs only)"),
+        code(f"""import glob
+from pathlib import Path
+import pandas as pd
+from IPython.display import Image, display
+pd.set_option('display.max_rows', 300, 'display.width', 250)
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {{cfg}}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{{{var}}}/{{root}}/{{Path(cfg).stem}}/_reports/report_*'))
+    if reports:
+        print('==== mode', mode, reports[-1])
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+sh("python scripts/es_report.py --suite {suite}")
+rep = sorted(glob.glob({var} + '/reports/early_stopping_*'))[-1]
+display(pd.read_csv(rep + '/summary.csv').query("experiment.str.contains('{rest}')", engine='python'))
+for png in sorted(glob.glob(rep + '/curves_*{rest}*.png')):
+    display(Image(filename=png))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+    ], gpu=True)
+
+
+
+# ============================================================================ corrected variants R1 (entry 57)
+R1_PIN = "R1_CODE_COMMIT.txt"
+R1_EXPERIMENTS = [(5, "exp5_bandid", "Exp 5 shared encoders + one-hot band identity"),
+                  (6, "exp6_bandid", "Exp 6 PSD + strength (shared GCN) + one-hot band identity")]
+
+
+def r1_notebook(suite: str, n: int, key: str, title: str, protocol: str) -> dict:
+    lo = suite.lower()
+    es = protocol == "es200"
+    cfg_b = f"configs/experiments/{lo}{'_es' if es else ''}/{lo}{'_es' if es else ''}_{key}.yaml"
+    cfg_a = f"configs/experiments/{lo}{'_es' if es else ''}/tenfold/{lo}10{'_es' if es else ''}_{key}.yaml"
+    _, proto = protocol_text = protocol_of(cfg_b)
+    own, other = ("LX", "WX") if suite == "LX" else ("WX", "LX")
+    folder = "D3_LCMV_XU" if suite == "LX" else "D3_WMNE_XU"
+    pins = md(f"""## 0. Code pin of the corrected variants (R1)
+The original experiments and their pins are not touched. This notebook runs the commit recorded in
+`{folder}/{R1_PIN}`. On its first run it adopts the other suite's R1 commit if that exists, so LCMV and wMNE use
+identical code; otherwise it records the branch head. It never moves while R1 work of this suite exists. Leave
+`UPDATE_R1_CODE = False`.""")
+    pin_code = code(f"""UPDATE_R1_CODE = False
+LX, WX = OUT + '/D3_LCMV_XU', OUT + '/D3_WMNE_XU'
+import subprocess, sys
+from pathlib import Path
+from adgraph.colab import resolve_code_pin
+
+head = subprocess.check_output(['git', '-C', '/content/repo', 'rev-parse', f'origin/{{BRANCH}}'], text=True).strip()
+own_pin, other_pin = Path({own}) / '{R1_PIN}', Path({other}) / '{R1_PIN}'
+sibling = other_pin.read_text().split()[0] if other_pin.exists() and other_pin.read_text().split() else None
+target = head if UPDATE_R1_CODE else (sibling or head)
+has_work = any(any(Path({own}).glob(f'experiments_*/*bandid*/**/*.done.json')) for _ in [0])
+R1_COMMIT, _ = resolve_code_pin(own_pin, target, update=UPDATE_R1_CODE, has_work=has_work)
+_run(['git', '-C', '/content/repo', 'checkout', '-q', R1_COMMIT])
+if not Path('/content/repo/tests/test_xu_audit.py').exists():
+    raise RuntimeError(f'pin {{R1_COMMIT[:10]}} lacks the band-identity code: set UPDATE_R1_CODE = True and run again')
+for m in [m for m in sys.modules if m == 'adgraph' or m.startswith('adgraph.')]:
+    del sys.modules[m]
+from adgraph.colab import sh
+print('R1 code commit:', R1_COMMIT, '| other suite R1 commit:', sibling or '(not yet set)')
+if sibling and sibling != R1_COMMIT:
+    print('WARNING: LCMV and wMNE R1 pins differ; the comparison would mix code versions')""")
+    var = suite
+    return notebook([
+        md(f"""# {suite}-R1 · Experiment {n} · {title} · {'200-epoch early stopping' if es else 'fixed 60 epochs'}
+
+**Corrected architectural variant** (methodology log entry 57, `docs/band_identity.md`). The original shared-encoder
+models are invariant to permuting the five band graphs (no band identity). This variant appends a one-hot band
+indicator to every band's node features (`model.band_identity: onehot`). Everything else is identical to the
+original experiment, which stays as the baseline in its own folder. {proto}
+""" + (LX_HOWTO if suite == "LX" else WX_HOWTO) + f"""
+**Results:** `<outputs>/{folder}/experiments_A_xu_tenfold/{Path(cfg_a).stem}/` and
+`.../experiments_B_all_windows/{Path(cfg_b).stem}/` (new folders). Use a **GPU runtime** (T4)."""),
+        code(SETUP_LX if suite == "LX" else SETUP_WX),
+        pins, pin_code,
+        md("## 1. Status"),
+        code(f"""CONFIGS = {{'A': '{cfg_a}', 'B': '{cfg_b}'}}
+for mode, cfg in CONFIGS.items():
+    print('==== mode', mode)
+    sh(f"python scripts/experiment.py status --config {{cfg}}")"""),
+        md("## 2. Run mode A, then mode B (resumable)"),
+        code("""ERRORS = {}
+for mode, cfg in CONFIGS.items():
+    try:
+        sh(f"python scripts/experiment.py run --config {cfg}")
+    except RuntimeError as exc:
+        ERRORS[mode] = exc"""),
+        md("## 3. Results (saved outputs only)"),
+        code(f"""import glob
+from pathlib import Path
+import pandas as pd
+for mode, cfg in CONFIGS.items():
+    sh(f"python scripts/experiment.py report --config {{cfg}}")
+    root = 'experiments_A_xu_tenfold' if mode == 'A' else 'experiments_B_all_windows'
+    reports = sorted(glob.glob(f'{{{var}}}/{{root}}/{{Path(cfg).stem}}/_reports/report_*'))
+    if reports:
+        display(pd.read_csv(reports[-1] + '/results_summary.csv'))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in mode(s) {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+    ], gpu=True)
+
+
+def protocol_of(cfg_path: str):
+    return protocol(cfg_path.removeprefix("configs/experiments/").removesuffix(".yaml"))
+
+
+def main(nbdir: Path = REPO / "notebooks") -> dict[Path, dict]:
+    nbdir = Path(nbdir)
+    outputs = {nbdir / "01_build_graphs.ipynb": build_graphs_notebook(),
+               nbdir / "advanced" / "Run_all_experiments_ADVANCED.ipynb": advanced_notebook(),
+               nbdir / "advanced" / "Restore_D1D2_code_pin.ipynb": restore_pin_notebook()}
+    entries = []
+    for folder, name, cfg, title, desc in EXPERIMENTS:
+        nb, entry = experiment_notebook(folder, name, cfg, title, desc)
+        outputs[nbdir / folder / f"{name}.ipynb"] = nb
+        entries.append(entry)
+    nb, entry = exp7_notebook()
+    outputs[nbdir / "experiments" / "Exp7_EARM_GNN.ipynb"] = nb
+    entries.append(entry)
+    d1d2_configs = [e["config"] for e in entries]
+    outputs[nbdir / "d3" / "D3_01_download_and_build_graphs.ipynb"] = d3_build_notebook()
+    for name, cfg, title, desc in D3_EXPERIMENTS:
+        nb, entry = experiment_notebook("d3/experiments", name, cfg, title, desc)
+        outputs[nbdir / "d3" / "experiments" / f"{name}.ipynb"] = nb
+        entries.append(entry)
+    outputs[nbdir / "d3" / "D3_99_comparison.ipynb"] = d3_comparison_notebook()
+    outputs[nbdir / "03_comparative_figures.ipynb"] = comparative_notebook(d1d2_configs)   # D1/D2 paper figures
+    outputs[nbdir / "lcmv_xu" / "LX_00_build_dataset.ipynb"] = lx_build_notebook()
+    outputs[nbdir / "lcmv_xu" / "LX_01_correct_and_validate.ipynb"] = lx_correct_notebook()
+    for n, name, title, gpu in LX_EXPERIMENTS:
+        stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+        outputs[nbdir / "lcmv_xu" / f"LX_Exp{n}_{stem}.ipynb"] = lx_experiment_notebook(n, name, title, gpu)
+    outputs[nbdir / "lcmv_xu" / "LX_98_run_all_optional.ipynb"] = lx_master_notebook()
+    outputs[nbdir / "lcmv_xu" / "LX_99_report.ipynb"] = lx_report_notebook()
+    outputs[nbdir / "wmne_xu" / "WX_00_build_dataset.ipynb"] = wx_build_notebook()
+    for n, name, title, gpu in LX_EXPERIMENTS:
+        stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+        outputs[nbdir / "wmne_xu" / f"WX_Exp{n}_{stem}.ipynb"] = wx_experiment_notebook(n, name, title, gpu)
+    for n, name, title, gpu in WXH_EXPERIMENTS:
+        outputs[nbdir / "wmne_xu" / "historical" / f"WXH_Exp{n}_{name.split('_', 2)[2]}.ipynb"] = \
+            wxh_experiment_notebook(n, name, title, gpu)
+    outputs[nbdir / "wmne_xu" / "WX_99_compare.ipynb"] = wx_compare_notebook()
+    for suite, folder in (("LX", "lcmv_xu"), ("WX", "wmne_xu")):
+        for n, key, title in R1_EXPERIMENTS:
+            for proto in ("fixed60", "es200"):
+                outputs[nbdir / folder / "corrected" / f"{suite}_R1_Exp{n}_bandid_{proto}.ipynb"] = \
+                    r1_notebook(suite, n, key, title, proto)
+    for suite, folder in (("LX", "lcmv_xu"), ("WX", "wmne_xu")):
+        for n, name, title, gpu in LX_EXPERIMENTS:
+            if n < 2:
+                continue                        # classical Exp 0 / 1: no epochs, no early stopping
+            stem = "xu_dual_adjacency" if n == 8 else name.split("_", 2)[2]
+            outputs[nbdir / folder / "early_stopping" / f"{suite}_ES_Exp{n}_{stem}.ipynb"] = \
+                es_experiment_notebook(suite, n, name, title)
+    for path, nb in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")
+    (nbdir / "README.md").write_text(readme(entries))
+    for old in ("02_experiments.ipynb", "03_figures.ipynb"):           # replaced by the files above
+        (nbdir / old).unlink(missing_ok=True)
+    print(f"{len(outputs)} notebooks + README written")
+    return outputs
+
+
+if __name__ == "__main__":
+    main()

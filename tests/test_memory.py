@@ -53,7 +53,7 @@ def test_chunked_band_analytic_is_identical():
 
 
 def test_bounded_process_recording_is_identical(tmp_path, monkeypatch):
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     _, raw = _recording(tmp_path)
     W = np.random.default_rng(1).standard_normal((68, len(common_channels(CFG))))
@@ -83,7 +83,7 @@ def test_lazy_edf_loading_reads_identical_samples(tmp_path):
 
 # ------------------------------------------------------------------ bounded peak, no accumulation
 def test_recording_peak_memory_is_bounded(tmp_path):
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     _, raw = _recording(tmp_path)
     W = np.random.default_rng(1).standard_normal((68, len(common_channels(CFG))))
@@ -140,8 +140,8 @@ def test_memory_tracker_scope():
 
 # ------------------------------------------------------------------ assembly holds the cohort once
 def test_assembly_holds_cohort_arrays_once(tmp_path):
-    import adgraph.pipeline as pl
-    from adgraph.synthetic import make_synthetic_store
+    import adgraph.legacy.pipeline as pl
+    from adgraph.legacy.synthetic import make_synthetic_store
 
     store = make_synthetic_store({"D1": (3, 3), "D2": (3, 3)}, windows_per_subject=(60, 60))
     keys = [k for k in pl.DATA_ARRAY_KEYS if k in store.arrays]
@@ -178,7 +178,7 @@ KILL_SCRIPT = textwrap.dedent('''
     import json, os, signal, sys
     from pathlib import Path
     import numpy as np, yaml
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
     paths, out, sd, cache = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
     cfg = yaml.safe_load(open("configs/pipeline.yaml"))
     W = np.random.default_rng(2).standard_normal((68, 30))

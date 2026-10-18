@@ -1,0 +1,3096 @@
+{
+ "source": "fsaverage white surface + aparc annotation + ico-5 source space (mne.datasets.fetch_fsaverage)",
+ "mne": "1.13.2",
+ "dk68": {
+  "regions": [
+   "bankssts-lh",
+   "bankssts-rh",
+   "caudalanteriorcingulate-lh",
+   "caudalanteriorcingulate-rh",
+   "caudalmiddlefrontal-lh",
+   "caudalmiddlefrontal-rh",
+   "cuneus-lh",
+   "cuneus-rh",
+   "entorhinal-lh",
+   "entorhinal-rh",
+   "frontalpole-lh",
+   "frontalpole-rh",
+   "fusiform-lh",
+   "fusiform-rh",
+   "inferiorparietal-lh",
+   "inferiorparietal-rh",
+   "inferiortemporal-lh",
+   "inferiortemporal-rh",
+   "insula-lh",
+   "insula-rh",
+   "isthmuscingulate-lh",
+   "isthmuscingulate-rh",
+   "lateraloccipital-lh",
+   "lateraloccipital-rh",
+   "lateralorbitofrontal-lh",
+   "lateralorbitofrontal-rh",
+   "lingual-lh",
+   "lingual-rh",
+   "medialorbitofrontal-lh",
+   "medialorbitofrontal-rh",
+   "middletemporal-lh",
+   "middletemporal-rh",
+   "paracentral-lh",
+   "paracentral-rh",
+   "parahippocampal-lh",
+   "parahippocampal-rh",
+   "parsopercularis-lh",
+   "parsopercularis-rh",
+   "parsorbitalis-lh",
+   "parsorbitalis-rh",
+   "parstriangularis-lh",
+   "parstriangularis-rh",
+   "pericalcarine-lh",
+   "pericalcarine-rh",
+   "postcentral-lh",
+   "postcentral-rh",
+   "posteriorcingulate-lh",
+   "posteriorcingulate-rh",
+   "precentral-lh",
+   "precentral-rh",
+   "precuneus-lh",
+   "precuneus-rh",
+   "rostralanteriorcingulate-lh",
+   "rostralanteriorcingulate-rh",
+   "rostralmiddlefrontal-lh",
+   "rostralmiddlefrontal-rh",
+   "superiorfrontal-lh",
+   "superiorfrontal-rh",
+   "superiorparietal-lh",
+   "superiorparietal-rh",
+   "superiortemporal-lh",
+   "superiortemporal-rh",
+   "supramarginal-lh",
+   "supramarginal-rh",
+   "temporalpole-lh",
+   "temporalpole-rh",
+   "transversetemporal-lh",
+   "transversetemporal-rh"
+  ],
+  "members": {
+   "bankssts-lh": [
+    "bankssts-lh"
+   ],
+   "bankssts-rh": [
+    "bankssts-rh"
+   ],
+   "caudalanteriorcingulate-lh": [
+    "caudalanteriorcingulate-lh"
+   ],
+   "caudalanteriorcingulate-rh": [
+    "caudalanteriorcingulate-rh"
+   ],
+   "caudalmiddlefrontal-lh": [
+    "caudalmiddlefrontal-lh"
+   ],
+   "caudalmiddlefrontal-rh": [
+    "caudalmiddlefrontal-rh"
+   ],
+   "cuneus-lh": [
+    "cuneus-lh"
+   ],
+   "cuneus-rh": [
+    "cuneus-rh"
+   ],
+   "entorhinal-lh": [
+    "entorhinal-lh"
+   ],
+   "entorhinal-rh": [
+    "entorhinal-rh"
+   ],
+   "frontalpole-lh": [
+    "frontalpole-lh"
+   ],
+   "frontalpole-rh": [
+    "frontalpole-rh"
+   ],
+   "fusiform-lh": [
+    "fusiform-lh"
+   ],
+   "fusiform-rh": [
+    "fusiform-rh"
+   ],
+   "inferiorparietal-lh": [
+    "inferiorparietal-lh"
+   ],
+   "inferiorparietal-rh": [
+    "inferiorparietal-rh"
+   ],
+   "inferiortemporal-lh": [
+    "inferiortemporal-lh"
+   ],
+   "inferiortemporal-rh": [
+    "inferiortemporal-rh"
+   ],
+   "insula-lh": [
+    "insula-lh"
+   ],
+   "insula-rh": [
+    "insula-rh"
+   ],
+   "isthmuscingulate-lh": [
+    "isthmuscingulate-lh"
+   ],
+   "isthmuscingulate-rh": [
+    "isthmuscingulate-rh"
+   ],
+   "lateraloccipital-lh": [
+    "lateraloccipital-lh"
+   ],
+   "lateraloccipital-rh": [
+    "lateraloccipital-rh"
+   ],
+   "lateralorbitofrontal-lh": [
+    "lateralorbitofrontal-lh"
+   ],
+   "lateralorbitofrontal-rh": [
+    "lateralorbitofrontal-rh"
+   ],
+   "lingual-lh": [
+    "lingual-lh"
+   ],
+   "lingual-rh": [
+    "lingual-rh"
+   ],
+   "medialorbitofrontal-lh": [
+    "medialorbitofrontal-lh"
+   ],
+   "medialorbitofrontal-rh": [
+    "medialorbitofrontal-rh"
+   ],
+   "middletemporal-lh": [
+    "middletemporal-lh"
+   ],
+   "middletemporal-rh": [
+    "middletemporal-rh"
+   ],
+   "paracentral-lh": [
+    "paracentral-lh"
+   ],
+   "paracentral-rh": [
+    "paracentral-rh"
+   ],
+   "parahippocampal-lh": [
+    "parahippocampal-lh"
+   ],
+   "parahippocampal-rh": [
+    "parahippocampal-rh"
+   ],
+   "parsopercularis-lh": [
+    "parsopercularis-lh"
+   ],
+   "parsopercularis-rh": [
+    "parsopercularis-rh"
+   ],
+   "parsorbitalis-lh": [
+    "parsorbitalis-lh"
+   ],
+   "parsorbitalis-rh": [
+    "parsorbitalis-rh"
+   ],
+   "parstriangularis-lh": [
+    "parstriangularis-lh"
+   ],
+   "parstriangularis-rh": [
+    "parstriangularis-rh"
+   ],
+   "pericalcarine-lh": [
+    "pericalcarine-lh"
+   ],
+   "pericalcarine-rh": [
+    "pericalcarine-rh"
+   ],
+   "postcentral-lh": [
+    "postcentral-lh"
+   ],
+   "postcentral-rh": [
+    "postcentral-rh"
+   ],
+   "posteriorcingulate-lh": [
+    "posteriorcingulate-lh"
+   ],
+   "posteriorcingulate-rh": [
+    "posteriorcingulate-rh"
+   ],
+   "precentral-lh": [
+    "precentral-lh"
+   ],
+   "precentral-rh": [
+    "precentral-rh"
+   ],
+   "precuneus-lh": [
+    "precuneus-lh"
+   ],
+   "precuneus-rh": [
+    "precuneus-rh"
+   ],
+   "rostralanteriorcingulate-lh": [
+    "rostralanteriorcingulate-lh"
+   ],
+   "rostralanteriorcingulate-rh": [
+    "rostralanteriorcingulate-rh"
+   ],
+   "rostralmiddlefrontal-lh": [
+    "rostralmiddlefrontal-lh"
+   ],
+   "rostralmiddlefrontal-rh": [
+    "rostralmiddlefrontal-rh"
+   ],
+   "superiorfrontal-lh": [
+    "superiorfrontal-lh"
+   ],
+   "superiorfrontal-rh": [
+    "superiorfrontal-rh"
+   ],
+   "superiorparietal-lh": [
+    "superiorparietal-lh"
+   ],
+   "superiorparietal-rh": [
+    "superiorparietal-rh"
+   ],
+   "superiortemporal-lh": [
+    "superiortemporal-lh"
+   ],
+   "superiortemporal-rh": [
+    "superiortemporal-rh"
+   ],
+   "supramarginal-lh": [
+    "supramarginal-lh"
+   ],
+   "supramarginal-rh": [
+    "supramarginal-rh"
+   ],
+   "temporalpole-lh": [
+    "temporalpole-lh"
+   ],
+   "temporalpole-rh": [
+    "temporalpole-rh"
+   ],
+   "transversetemporal-lh": [
+    "transversetemporal-lh"
+   ],
+   "transversetemporal-rh": [
+    "transversetemporal-rh"
+   ]
+  },
+  "lobes": {
+   "bankssts-lh": "temporal",
+   "bankssts-rh": "temporal",
+   "caudalanteriorcingulate-lh": "cingulate",
+   "caudalanteriorcingulate-rh": "cingulate",
+   "caudalmiddlefrontal-lh": "frontal",
+   "caudalmiddlefrontal-rh": "frontal",
+   "cuneus-lh": "occipital",
+   "cuneus-rh": "occipital",
+   "entorhinal-lh": "temporal",
+   "entorhinal-rh": "temporal",
+   "frontalpole-lh": "frontal",
+   "frontalpole-rh": "frontal",
+   "fusiform-lh": "temporal",
+   "fusiform-rh": "temporal",
+   "inferiorparietal-lh": "parietal",
+   "inferiorparietal-rh": "parietal",
+   "inferiortemporal-lh": "temporal",
+   "inferiortemporal-rh": "temporal",
+   "insula-lh": "insula",
+   "insula-rh": "insula",
+   "isthmuscingulate-lh": "cingulate",
+   "isthmuscingulate-rh": "cingulate",
+   "lateraloccipital-lh": "occipital",
+   "lateraloccipital-rh": "occipital",
+   "lateralorbitofrontal-lh": "frontal",
+   "lateralorbitofrontal-rh": "frontal",
+   "lingual-lh": "occipital",
+   "lingual-rh": "occipital",
+   "medialorbitofrontal-lh": "frontal",
+   "medialorbitofrontal-rh": "frontal",
+   "middletemporal-lh": "temporal",
+   "middletemporal-rh": "temporal",
+   "paracentral-lh": "frontal",
+   "paracentral-rh": "frontal",
+   "parahippocampal-lh": "temporal",
+   "parahippocampal-rh": "temporal",
+   "parsopercularis-lh": "frontal",
+   "parsopercularis-rh": "frontal",
+   "parsorbitalis-lh": "frontal",
+   "parsorbitalis-rh": "frontal",
+   "parstriangularis-lh": "frontal",
+   "parstriangularis-rh": "frontal",
+   "pericalcarine-lh": "occipital",
+   "pericalcarine-rh": "occipital",
+   "postcentral-lh": "parietal",
+   "postcentral-rh": "parietal",
+   "posteriorcingulate-lh": "cingulate",
+   "posteriorcingulate-rh": "cingulate",
+   "precentral-lh": "frontal",
+   "precentral-rh": "frontal",
+   "precuneus-lh": "parietal",
+   "precuneus-rh": "parietal",
+   "rostralanteriorcingulate-lh": "cingulate",
+   "rostralanteriorcingulate-rh": "cingulate",
+   "rostralmiddlefrontal-lh": "frontal",
+   "rostralmiddlefrontal-rh": "frontal",
+   "superiorfrontal-lh": "frontal",
+   "superiorfrontal-rh": "frontal",
+   "superiorparietal-lh": "parietal",
+   "superiorparietal-rh": "parietal",
+   "superiortemporal-lh": "temporal",
+   "superiortemporal-rh": "temporal",
+   "supramarginal-lh": "parietal",
+   "supramarginal-rh": "parietal",
+   "temporalpole-lh": "temporal",
+   "temporalpole-rh": "temporal",
+   "transversetemporal-lh": "temporal",
+   "transversetemporal-rh": "temporal"
+  },
+  "n_vertices": {
+   "bankssts-lh": 2137,
+   "bankssts-rh": 2196,
+   "caudalanteriorcingulate-lh": 1439,
+   "caudalanteriorcingulate-rh": 1608,
+   "caudalmiddlefrontal-lh": 3736,
+   "caudalmiddlefrontal-rh": 3494,
+   "cuneus-lh": 1630,
+   "cuneus-rh": 1638,
+   "entorhinal-lh": 1102,
+   "entorhinal-rh": 902,
+   "frontalpole-lh": 272,
+   "frontalpole-rh": 369,
+   "fusiform-lh": 4714,
+   "fusiform-rh": 4661,
+   "inferiorparietal-lh": 7871,
+   "inferiorparietal-rh": 9676,
+   "inferiortemporal-lh": 4415,
+   "inferiortemporal-rh": 4198,
+   "insula-lh": 5229,
+   "insula-rh": 5090,
+   "isthmuscingulate-lh": 2531,
+   "isthmuscingulate-rh": 2388,
+   "lateraloccipital-lh": 6379,
+   "lateraloccipital-rh": 5963,
+   "lateralorbitofrontal-lh": 4188,
+   "lateralorbitofrontal-rh": 4354,
+   "lingual-lh": 4205,
+   "lingual-rh": 3894,
+   "medialorbitofrontal-lh": 2653,
+   "medialorbitofrontal-rh": 2801,
+   "middletemporal-lh": 4452,
+   "middletemporal-rh": 5057,
+   "paracentral-lh": 3294,
+   "paracentral-rh": 3831,
+   "parahippocampal-lh": 1838,
+   "parahippocampal-rh": 1742,
+   "parsopercularis-lh": 3119,
+   "parsopercularis-rh": 2472,
+   "parsorbitalis-lh": 956,
+   "parsorbitalis-rh": 946,
+   "parstriangularis-lh": 2046,
+   "parstriangularis-rh": 2380,
+   "pericalcarine-lh": 1912,
+   "pericalcarine-rh": 1823,
+   "postcentral-lh": 9519,
+   "postcentral-rh": 9138,
+   "posteriorcingulate-lh": 3266,
+   "posteriorcingulate-rh": 2994,
+   "precentral-lh": 10740,
+   "precentral-rh": 10705,
+   "precuneus-lh": 7308,
+   "precuneus-rh": 7975,
+   "rostralanteriorcingulate-lh": 1350,
+   "rostralanteriorcingulate-rh": 1051,
+   "rostralmiddlefrontal-lh": 7243,
+   "rostralmiddlefrontal-rh": 7864,
+   "superiorfrontal-lh": 12179,
+   "superiorfrontal-rh": 11878,
+   "superiorparietal-lh": 10456,
+   "superiorparietal-rh": 10222,
+   "superiortemporal-lh": 7271,
+   "superiortemporal-rh": 6868,
+   "supramarginal-lh": 8600,
+   "supramarginal-rh": 8150,
+   "temporalpole-lh": 839,
+   "temporalpole-rh": 817,
+   "transversetemporal-lh": 1064,
+   "transversetemporal-rh": 781
+  },
+  "n_source_vertices": {
+   "bankssts-lh": 134,
+   "bankssts-rh": 136,
+   "caudalanteriorcingulate-lh": 90,
+   "caudalanteriorcingulate-rh": 101,
+   "caudalmiddlefrontal-lh": 229,
+   "caudalmiddlefrontal-rh": 219,
+   "cuneus-lh": 101,
+   "cuneus-rh": 99,
+   "entorhinal-lh": 68,
+   "entorhinal-rh": 52,
+   "frontalpole-lh": 17,
+   "frontalpole-rh": 24,
+   "fusiform-lh": 296,
+   "fusiform-rh": 294,
+   "inferiorparietal-lh": 487,
+   "inferiorparietal-rh": 607,
+   "inferiortemporal-lh": 274,
+   "inferiortemporal-rh": 263,
+   "insula-lh": 327,
+   "insula-rh": 321,
+   "isthmuscingulate-lh": 158,
+   "isthmuscingulate-rh": 147,
+   "lateraloccipital-lh": 403,
+   "lateraloccipital-rh": 369,
+   "lateralorbitofrontal-lh": 266,
+   "lateralorbitofrontal-rh": 270,
+   "lingual-lh": 263,
+   "lingual-rh": 244,
+   "medialorbitofrontal-lh": 165,
+   "medialorbitofrontal-rh": 175,
+   "middletemporal-lh": 281,
+   "middletemporal-rh": 315,
+   "paracentral-lh": 211,
+   "paracentral-rh": 239,
+   "parahippocampal-lh": 116,
+   "parahippocampal-rh": 111,
+   "parsopercularis-lh": 190,
+   "parsopercularis-rh": 155,
+   "parsorbitalis-lh": 56,
+   "parsorbitalis-rh": 58,
+   "parstriangularis-lh": 133,
+   "parstriangularis-rh": 150,
+   "pericalcarine-lh": 119,
+   "pericalcarine-rh": 116,
+   "postcentral-lh": 593,
+   "postcentral-rh": 572,
+   "posteriorcingulate-lh": 202,
+   "posteriorcingulate-rh": 188,
+   "precentral-lh": 674,
+   "precentral-rh": 671,
+   "precuneus-lh": 452,
+   "precuneus-rh": 501,
+   "rostralanteriorcingulate-lh": 83,
+   "rostralanteriorcingulate-rh": 63,
+   "rostralmiddlefrontal-lh": 456,
+   "rostralmiddlefrontal-rh": 492,
+   "superiorfrontal-lh": 763,
+   "superiorfrontal-rh": 738,
+   "superiorparietal-lh": 658,
+   "superiorparietal-rh": 642,
+   "superiortemporal-lh": 450,
+   "superiortemporal-rh": 434,
+   "supramarginal-lh": 540,
+   "supramarginal-rh": 509,
+   "temporalpole-lh": 50,
+   "temporalpole-rh": 49,
+   "transversetemporal-lh": 67,
+   "transversetemporal-rh": 46
+  },
+  "centroids_mm": [
+   [
+    -52.67,
+    -44.53,
+    4.56
+   ],
+   [
+    51.89,
+    -40.58,
+    5.63
+   ],
+   [
+    -6.58,
+    17.98,
+    26.07
+   ],
+   [
+    7.26,
+    18.64,
+    26.31
+   ],
+   [
+    -34.63,
+    10.17,
+    42.76
+   ],
+   [
+    34.9,
+    11.85,
+    43.0
+   ],
+   [
+    -8.69,
+    -79.59,
+    18.0
+   ],
+   [
+    8.73,
+    -80.08,
+    18.96
+   ],
+   [
+    -25.75,
+    -7.81,
+    -31.48
+   ],
+   [
+    26.17,
+    -6.86,
+    -31.89
+   ],
+   [
+    -8.63,
+    61.69,
+    -8.67
+   ],
+   [
+    10.31,
+    61.09,
+    -9.96
+   ],
+   [
+    -35.68,
+    -43.27,
+    -19.72
+   ],
+   [
+    35.93,
+    -43.01,
+    -19.18
+   ],
+   [
+    -40.0,
+    -66.38,
+    27.34
+   ],
+   [
+    42.8,
+    -60.9,
+    28.08
+   ],
+   [
+    -48.93,
+    -34.44,
+    -22.25
+   ],
+   [
+    49.28,
+    -31.67,
+    -22.98
+   ],
+   [
+    -34.21,
+    -4.31,
+    2.21
+   ],
+   [
+    35.09,
+    -3.91,
+    2.2
+   ],
+   [
+    -8.96,
+    -45.41,
+    17.54
+   ],
+   [
+    9.81,
+    -44.74,
+    16.95
+   ],
+   [
+    -29.67,
+    -86.86,
+    -1.04
+   ],
+   [
+    30.3,
+    -86.28,
+    0.5
+   ],
+   [
+    -23.99,
+    28.56,
+    -14.41
+   ],
+   [
+    23.6,
+    28.48,
+    -15.24
+   ],
+   [
+    -16.47,
+    -66.8,
+    -4.28
+   ],
+   [
+    16.83,
+    -66.29,
+    -3.58
+   ],
+   [
+    -8.01,
+    34.76,
+    -14.87
+   ],
+   [
+    8.75,
+    35.64,
+    -14.23
+   ],
+   [
+    -55.64,
+    -31.09,
+    -12.85
+   ],
+   [
+    55.92,
+    -29.5,
+    -12.94
+   ],
+   [
+    -9.99,
+    -28.68,
+    56.09
+   ],
+   [
+    9.85,
+    -27.41,
+    55.59
+   ],
+   [
+    -24.68,
+    -31.15,
+    -17.42
+   ],
+   [
+    25.99,
+    -31.25,
+    -16.17
+   ],
+   [
+    -44.63,
+    14.59,
+    13.13
+   ],
+   [
+    44.88,
+    14.37,
+    14.22
+   ],
+   [
+    -41.01,
+    38.77,
+    -11.07
+   ],
+   [
+    42.07,
+    39.15,
+    -9.95
+   ],
+   [
+    -42.38,
+    30.62,
+    2.34
+   ],
+   [
+    44.96,
+    29.75,
+    4.46
+   ],
+   [
+    -13.9,
+    -80.55,
+    5.97
+   ],
+   [
+    13.98,
+    -79.74,
+    6.71
+   ],
+   [
+    -42.29,
+    -23.8,
+    43.61
+   ],
+   [
+    41.57,
+    -22.42,
+    43.83
+   ],
+   [
+    -7.34,
+    -17.44,
+    35.65
+   ],
+   [
+    7.62,
+    -17.07,
+    36.15
+   ],
+   [
+    -37.85,
+    -10.67,
+    42.1
+   ],
+   [
+    36.85,
+    -9.91,
+    43.48
+   ],
+   [
+    -11.64,
+    -57.47,
+    36.73
+   ],
+   [
+    11.73,
+    -56.47,
+    37.73
+   ],
+   [
+    -6.82,
+    33.89,
+    1.64
+   ],
+   [
+    8.02,
+    33.19,
+    1.97
+   ],
+   [
+    -31.33,
+    41.18,
+    16.53
+   ],
+   [
+    32.28,
+    40.93,
+    17.34
+   ],
+   [
+    -12.58,
+    22.92,
+    42.37
+   ],
+   [
+    13.38,
+    24.71,
+    41.97
+   ],
+   [
+    -22.78,
+    -60.88,
+    46.28
+   ],
+   [
+    22.64,
+    -59.51,
+    48.11
+   ],
+   [
+    -52.09,
+    -17.77,
+    -4.38
+   ],
+   [
+    52.98,
+    -14.0,
+    -5.46
+   ],
+   [
+    -50.43,
+    -38.8,
+    30.96
+   ],
+   [
+    50.59,
+    -33.27,
+    30.72
+   ],
+   [
+    -32.82,
+    8.45,
+    -34.83
+   ],
+   [
+    33.92,
+    8.38,
+    -33.12
+   ],
+   [
+    -43.95,
+    -24.18,
+    6.01
+   ],
+   [
+    44.76,
+    -22.36,
+    6.48
+   ]
+  ],
+  "contiguous_pairs": [
+   [
+    "bankssts-lh",
+    "inferiorparietal-lh"
+   ],
+   [
+    "bankssts-lh",
+    "middletemporal-lh"
+   ],
+   [
+    "bankssts-lh",
+    "superiortemporal-lh"
+   ],
+   [
+    "bankssts-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "bankssts-rh",
+    "inferiorparietal-rh"
+   ],
+   [
+    "bankssts-rh",
+    "middletemporal-rh"
+   ],
+   [
+    "bankssts-rh",
+    "superiortemporal-rh"
+   ],
+   [
+    "bankssts-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "caudalanteriorcingulate-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "caudalanteriorcingulate-lh",
+    "rostralanteriorcingulate-lh"
+   ],
+   [
+    "caudalanteriorcingulate-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "caudalanteriorcingulate-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "caudalanteriorcingulate-rh",
+    "rostralanteriorcingulate-rh"
+   ],
+   [
+    "caudalanteriorcingulate-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "caudalmiddlefrontal-lh",
+    "parsopercularis-lh"
+   ],
+   [
+    "caudalmiddlefrontal-lh",
+    "precentral-lh"
+   ],
+   [
+    "caudalmiddlefrontal-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "caudalmiddlefrontal-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "caudalmiddlefrontal-rh",
+    "parsopercularis-rh"
+   ],
+   [
+    "caudalmiddlefrontal-rh",
+    "precentral-rh"
+   ],
+   [
+    "caudalmiddlefrontal-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "caudalmiddlefrontal-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "cuneus-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "cuneus-lh",
+    "pericalcarine-lh"
+   ],
+   [
+    "cuneus-lh",
+    "precuneus-lh"
+   ],
+   [
+    "cuneus-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "cuneus-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "cuneus-rh",
+    "pericalcarine-rh"
+   ],
+   [
+    "cuneus-rh",
+    "precuneus-rh"
+   ],
+   [
+    "cuneus-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "entorhinal-lh",
+    "fusiform-lh"
+   ],
+   [
+    "entorhinal-lh",
+    "insula-lh"
+   ],
+   [
+    "entorhinal-lh",
+    "parahippocampal-lh"
+   ],
+   [
+    "entorhinal-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "entorhinal-rh",
+    "fusiform-rh"
+   ],
+   [
+    "entorhinal-rh",
+    "parahippocampal-rh"
+   ],
+   [
+    "entorhinal-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "frontalpole-lh",
+    "lateralorbitofrontal-lh"
+   ],
+   [
+    "frontalpole-lh",
+    "medialorbitofrontal-lh"
+   ],
+   [
+    "frontalpole-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "frontalpole-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "frontalpole-rh",
+    "lateralorbitofrontal-rh"
+   ],
+   [
+    "frontalpole-rh",
+    "medialorbitofrontal-rh"
+   ],
+   [
+    "frontalpole-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "frontalpole-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "fusiform-lh",
+    "inferiortemporal-lh"
+   ],
+   [
+    "fusiform-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "fusiform-lh",
+    "lingual-lh"
+   ],
+   [
+    "fusiform-lh",
+    "parahippocampal-lh"
+   ],
+   [
+    "fusiform-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "fusiform-rh",
+    "inferiortemporal-rh"
+   ],
+   [
+    "fusiform-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "fusiform-rh",
+    "lingual-rh"
+   ],
+   [
+    "fusiform-rh",
+    "parahippocampal-rh"
+   ],
+   [
+    "fusiform-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "middletemporal-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "middletemporal-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "inferiortemporal-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "inferiortemporal-lh",
+    "middletemporal-lh"
+   ],
+   [
+    "inferiortemporal-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "inferiortemporal-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "inferiortemporal-rh",
+    "middletemporal-rh"
+   ],
+   [
+    "inferiortemporal-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "insula-lh",
+    "lateralorbitofrontal-lh"
+   ],
+   [
+    "insula-lh",
+    "parsopercularis-lh"
+   ],
+   [
+    "insula-lh",
+    "parstriangularis-lh"
+   ],
+   [
+    "insula-lh",
+    "postcentral-lh"
+   ],
+   [
+    "insula-lh",
+    "precentral-lh"
+   ],
+   [
+    "insula-lh",
+    "superiortemporal-lh"
+   ],
+   [
+    "insula-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "insula-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "insula-lh",
+    "transversetemporal-lh"
+   ],
+   [
+    "insula-rh",
+    "lateralorbitofrontal-rh"
+   ],
+   [
+    "insula-rh",
+    "parsopercularis-rh"
+   ],
+   [
+    "insula-rh",
+    "parstriangularis-rh"
+   ],
+   [
+    "insula-rh",
+    "postcentral-rh"
+   ],
+   [
+    "insula-rh",
+    "precentral-rh"
+   ],
+   [
+    "insula-rh",
+    "superiortemporal-rh"
+   ],
+   [
+    "insula-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "insula-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "insula-rh",
+    "transversetemporal-rh"
+   ],
+   [
+    "isthmuscingulate-lh",
+    "lingual-lh"
+   ],
+   [
+    "isthmuscingulate-lh",
+    "parahippocampal-lh"
+   ],
+   [
+    "isthmuscingulate-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "isthmuscingulate-lh",
+    "precuneus-lh"
+   ],
+   [
+    "isthmuscingulate-rh",
+    "lingual-rh"
+   ],
+   [
+    "isthmuscingulate-rh",
+    "parahippocampal-rh"
+   ],
+   [
+    "isthmuscingulate-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "isthmuscingulate-rh",
+    "precuneus-rh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "lingual-lh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "middletemporal-lh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "pericalcarine-lh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "lingual-rh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "middletemporal-rh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "pericalcarine-rh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "lateralorbitofrontal-lh",
+    "medialorbitofrontal-lh"
+   ],
+   [
+    "lateralorbitofrontal-lh",
+    "parsorbitalis-lh"
+   ],
+   [
+    "lateralorbitofrontal-lh",
+    "parstriangularis-lh"
+   ],
+   [
+    "lateralorbitofrontal-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "lateralorbitofrontal-rh",
+    "medialorbitofrontal-rh"
+   ],
+   [
+    "lateralorbitofrontal-rh",
+    "parsorbitalis-rh"
+   ],
+   [
+    "lateralorbitofrontal-rh",
+    "parstriangularis-rh"
+   ],
+   [
+    "lateralorbitofrontal-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "lingual-lh",
+    "parahippocampal-lh"
+   ],
+   [
+    "lingual-lh",
+    "pericalcarine-lh"
+   ],
+   [
+    "lingual-lh",
+    "precuneus-lh"
+   ],
+   [
+    "lingual-rh",
+    "parahippocampal-rh"
+   ],
+   [
+    "lingual-rh",
+    "pericalcarine-rh"
+   ],
+   [
+    "lingual-rh",
+    "precuneus-rh"
+   ],
+   [
+    "medialorbitofrontal-lh",
+    "rostralanteriorcingulate-lh"
+   ],
+   [
+    "medialorbitofrontal-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "medialorbitofrontal-rh",
+    "rostralanteriorcingulate-rh"
+   ],
+   [
+    "medialorbitofrontal-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "middletemporal-lh",
+    "superiortemporal-lh"
+   ],
+   [
+    "middletemporal-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "middletemporal-rh",
+    "superiortemporal-rh"
+   ],
+   [
+    "middletemporal-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "paracentral-lh",
+    "postcentral-lh"
+   ],
+   [
+    "paracentral-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "paracentral-lh",
+    "precentral-lh"
+   ],
+   [
+    "paracentral-lh",
+    "precuneus-lh"
+   ],
+   [
+    "paracentral-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "paracentral-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "paracentral-rh",
+    "postcentral-rh"
+   ],
+   [
+    "paracentral-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "paracentral-rh",
+    "precentral-rh"
+   ],
+   [
+    "paracentral-rh",
+    "precuneus-rh"
+   ],
+   [
+    "paracentral-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "parsopercularis-lh",
+    "parstriangularis-lh"
+   ],
+   [
+    "parsopercularis-lh",
+    "precentral-lh"
+   ],
+   [
+    "parsopercularis-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "parsopercularis-rh",
+    "parstriangularis-rh"
+   ],
+   [
+    "parsopercularis-rh",
+    "precentral-rh"
+   ],
+   [
+    "parsopercularis-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "parsorbitalis-lh",
+    "parstriangularis-lh"
+   ],
+   [
+    "parsorbitalis-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "parsorbitalis-rh",
+    "parstriangularis-rh"
+   ],
+   [
+    "parsorbitalis-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "parstriangularis-lh",
+    "rostralmiddlefrontal-lh"
+   ],
+   [
+    "parstriangularis-rh",
+    "rostralmiddlefrontal-rh"
+   ],
+   [
+    "pericalcarine-lh",
+    "precuneus-lh"
+   ],
+   [
+    "pericalcarine-rh",
+    "precuneus-rh"
+   ],
+   [
+    "postcentral-lh",
+    "precentral-lh"
+   ],
+   [
+    "postcentral-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "postcentral-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "postcentral-rh",
+    "precentral-rh"
+   ],
+   [
+    "postcentral-rh",
+    "precuneus-rh"
+   ],
+   [
+    "postcentral-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "postcentral-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "posteriorcingulate-lh",
+    "precuneus-lh"
+   ],
+   [
+    "posteriorcingulate-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "posteriorcingulate-rh",
+    "precuneus-rh"
+   ],
+   [
+    "posteriorcingulate-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "precentral-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "precentral-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "precuneus-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "precuneus-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "rostralanteriorcingulate-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "rostralanteriorcingulate-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "rostralmiddlefrontal-lh",
+    "superiorfrontal-lh"
+   ],
+   [
+    "rostralmiddlefrontal-rh",
+    "superiorfrontal-rh"
+   ],
+   [
+    "superiorparietal-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "superiorparietal-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "superiortemporal-lh",
+    "supramarginal-lh"
+   ],
+   [
+    "superiortemporal-lh",
+    "temporalpole-lh"
+   ],
+   [
+    "superiortemporal-lh",
+    "transversetemporal-lh"
+   ],
+   [
+    "superiortemporal-rh",
+    "supramarginal-rh"
+   ],
+   [
+    "superiortemporal-rh",
+    "temporalpole-rh"
+   ],
+   [
+    "superiortemporal-rh",
+    "transversetemporal-rh"
+   ],
+   [
+    "supramarginal-rh",
+    "transversetemporal-rh"
+   ]
+  ]
+ },
+ "dk34_gyral": {
+  "regions": [
+   "anteriorcingulate-lh",
+   "anteriorcingulate-rh",
+   "inferiorfrontalgyrus-lh",
+   "inferiorfrontalgyrus-rh",
+   "inferiorparietal-lh",
+   "inferiorparietal-rh",
+   "inferiortemporalgyrus-lh",
+   "inferiortemporalgyrus-rh",
+   "insula-lh",
+   "insula-rh",
+   "lateraloccipital-lh",
+   "lateraloccipital-rh",
+   "medialoccipital-lh",
+   "medialoccipital-rh",
+   "medialtemporal-lh",
+   "medialtemporal-rh",
+   "middlefrontalgyrus-lh",
+   "middlefrontalgyrus-rh",
+   "middletemporalgyrus-lh",
+   "middletemporalgyrus-rh",
+   "orbitofrontal-lh",
+   "orbitofrontal-rh",
+   "posteriorcingulate-lh",
+   "posteriorcingulate-rh",
+   "precuneus-lh",
+   "precuneus-rh",
+   "sensorimotor-lh",
+   "sensorimotor-rh",
+   "superiorfrontalgyrus-lh",
+   "superiorfrontalgyrus-rh",
+   "superiorparietal-lh",
+   "superiorparietal-rh",
+   "superiortemporalgyrus-lh",
+   "superiortemporalgyrus-rh"
+  ],
+  "members": {
+   "anteriorcingulate-lh": [
+    "rostralanteriorcingulate-lh",
+    "caudalanteriorcingulate-lh"
+   ],
+   "anteriorcingulate-rh": [
+    "rostralanteriorcingulate-rh",
+    "caudalanteriorcingulate-rh"
+   ],
+   "inferiorfrontalgyrus-lh": [
+    "parsopercularis-lh",
+    "parstriangularis-lh",
+    "parsorbitalis-lh"
+   ],
+   "inferiorfrontalgyrus-rh": [
+    "parsopercularis-rh",
+    "parstriangularis-rh",
+    "parsorbitalis-rh"
+   ],
+   "inferiorparietal-lh": [
+    "inferiorparietal-lh",
+    "supramarginal-lh"
+   ],
+   "inferiorparietal-rh": [
+    "inferiorparietal-rh",
+    "supramarginal-rh"
+   ],
+   "inferiortemporalgyrus-lh": [
+    "inferiortemporal-lh",
+    "fusiform-lh"
+   ],
+   "inferiortemporalgyrus-rh": [
+    "inferiortemporal-rh",
+    "fusiform-rh"
+   ],
+   "insula-lh": [
+    "insula-lh"
+   ],
+   "insula-rh": [
+    "insula-rh"
+   ],
+   "lateraloccipital-lh": [
+    "lateraloccipital-lh"
+   ],
+   "lateraloccipital-rh": [
+    "lateraloccipital-rh"
+   ],
+   "medialoccipital-lh": [
+    "lingual-lh",
+    "cuneus-lh",
+    "pericalcarine-lh"
+   ],
+   "medialoccipital-rh": [
+    "lingual-rh",
+    "cuneus-rh",
+    "pericalcarine-rh"
+   ],
+   "medialtemporal-lh": [
+    "entorhinal-lh",
+    "parahippocampal-lh",
+    "temporalpole-lh"
+   ],
+   "medialtemporal-rh": [
+    "entorhinal-rh",
+    "parahippocampal-rh",
+    "temporalpole-rh"
+   ],
+   "middlefrontalgyrus-lh": [
+    "rostralmiddlefrontal-lh",
+    "caudalmiddlefrontal-lh"
+   ],
+   "middlefrontalgyrus-rh": [
+    "rostralmiddlefrontal-rh",
+    "caudalmiddlefrontal-rh"
+   ],
+   "middletemporalgyrus-lh": [
+    "middletemporal-lh"
+   ],
+   "middletemporalgyrus-rh": [
+    "middletemporal-rh"
+   ],
+   "orbitofrontal-lh": [
+    "lateralorbitofrontal-lh",
+    "medialorbitofrontal-lh"
+   ],
+   "orbitofrontal-rh": [
+    "lateralorbitofrontal-rh",
+    "medialorbitofrontal-rh"
+   ],
+   "posteriorcingulate-lh": [
+    "posteriorcingulate-lh",
+    "isthmuscingulate-lh"
+   ],
+   "posteriorcingulate-rh": [
+    "posteriorcingulate-rh",
+    "isthmuscingulate-rh"
+   ],
+   "precuneus-lh": [
+    "precuneus-lh"
+   ],
+   "precuneus-rh": [
+    "precuneus-rh"
+   ],
+   "sensorimotor-lh": [
+    "precentral-lh",
+    "postcentral-lh",
+    "paracentral-lh"
+   ],
+   "sensorimotor-rh": [
+    "precentral-rh",
+    "postcentral-rh",
+    "paracentral-rh"
+   ],
+   "superiorfrontalgyrus-lh": [
+    "superiorfrontal-lh",
+    "frontalpole-lh"
+   ],
+   "superiorfrontalgyrus-rh": [
+    "superiorfrontal-rh",
+    "frontalpole-rh"
+   ],
+   "superiorparietal-lh": [
+    "superiorparietal-lh"
+   ],
+   "superiorparietal-rh": [
+    "superiorparietal-rh"
+   ],
+   "superiortemporalgyrus-lh": [
+    "superiortemporal-lh",
+    "transversetemporal-lh",
+    "bankssts-lh"
+   ],
+   "superiortemporalgyrus-rh": [
+    "superiortemporal-rh",
+    "transversetemporal-rh",
+    "bankssts-rh"
+   ]
+  },
+  "lobes": {
+   "anteriorcingulate-lh": "cingulate",
+   "anteriorcingulate-rh": "cingulate",
+   "inferiorfrontalgyrus-lh": "frontal",
+   "inferiorfrontalgyrus-rh": "frontal",
+   "inferiorparietal-lh": "parietal",
+   "inferiorparietal-rh": "parietal",
+   "inferiortemporalgyrus-lh": "temporal",
+   "inferiortemporalgyrus-rh": "temporal",
+   "insula-lh": "insula",
+   "insula-rh": "insula",
+   "lateraloccipital-lh": "occipital",
+   "lateraloccipital-rh": "occipital",
+   "medialoccipital-lh": "occipital",
+   "medialoccipital-rh": "occipital",
+   "medialtemporal-lh": "temporal",
+   "medialtemporal-rh": "temporal",
+   "middlefrontalgyrus-lh": "frontal",
+   "middlefrontalgyrus-rh": "frontal",
+   "middletemporalgyrus-lh": "temporal",
+   "middletemporalgyrus-rh": "temporal",
+   "orbitofrontal-lh": "frontal",
+   "orbitofrontal-rh": "frontal",
+   "posteriorcingulate-lh": "cingulate",
+   "posteriorcingulate-rh": "cingulate",
+   "precuneus-lh": "parietal",
+   "precuneus-rh": "parietal",
+   "sensorimotor-lh": "frontal",
+   "sensorimotor-rh": "frontal",
+   "superiorfrontalgyrus-lh": "frontal",
+   "superiorfrontalgyrus-rh": "frontal",
+   "superiorparietal-lh": "parietal",
+   "superiorparietal-rh": "parietal",
+   "superiortemporalgyrus-lh": "temporal",
+   "superiortemporalgyrus-rh": "temporal"
+  },
+  "n_vertices": {
+   "anteriorcingulate-lh": 2789,
+   "anteriorcingulate-rh": 2659,
+   "inferiorfrontalgyrus-lh": 6121,
+   "inferiorfrontalgyrus-rh": 5798,
+   "inferiorparietal-lh": 16471,
+   "inferiorparietal-rh": 17826,
+   "inferiortemporalgyrus-lh": 9129,
+   "inferiortemporalgyrus-rh": 8859,
+   "insula-lh": 5229,
+   "insula-rh": 5090,
+   "lateraloccipital-lh": 6379,
+   "lateraloccipital-rh": 5963,
+   "medialoccipital-lh": 7747,
+   "medialoccipital-rh": 7355,
+   "medialtemporal-lh": 3779,
+   "medialtemporal-rh": 3461,
+   "middlefrontalgyrus-lh": 10979,
+   "middlefrontalgyrus-rh": 11358,
+   "middletemporalgyrus-lh": 4452,
+   "middletemporalgyrus-rh": 5057,
+   "orbitofrontal-lh": 6841,
+   "orbitofrontal-rh": 7155,
+   "posteriorcingulate-lh": 5797,
+   "posteriorcingulate-rh": 5382,
+   "precuneus-lh": 7308,
+   "precuneus-rh": 7975,
+   "sensorimotor-lh": 23553,
+   "sensorimotor-rh": 23674,
+   "superiorfrontalgyrus-lh": 12451,
+   "superiorfrontalgyrus-rh": 12247,
+   "superiorparietal-lh": 10456,
+   "superiorparietal-rh": 10222,
+   "superiortemporalgyrus-lh": 10472,
+   "superiortemporalgyrus-rh": 9845
+  },
+  "n_source_vertices": {
+   "anteriorcingulate-lh": 173,
+   "anteriorcingulate-rh": 164,
+   "inferiorfrontalgyrus-lh": 379,
+   "inferiorfrontalgyrus-rh": 363,
+   "inferiorparietal-lh": 1027,
+   "inferiorparietal-rh": 1116,
+   "inferiortemporalgyrus-lh": 570,
+   "inferiortemporalgyrus-rh": 557,
+   "insula-lh": 327,
+   "insula-rh": 321,
+   "lateraloccipital-lh": 403,
+   "lateraloccipital-rh": 369,
+   "medialoccipital-lh": 483,
+   "medialoccipital-rh": 459,
+   "medialtemporal-lh": 234,
+   "medialtemporal-rh": 212,
+   "middlefrontalgyrus-lh": 685,
+   "middlefrontalgyrus-rh": 711,
+   "middletemporalgyrus-lh": 281,
+   "middletemporalgyrus-rh": 315,
+   "orbitofrontal-lh": 431,
+   "orbitofrontal-rh": 445,
+   "posteriorcingulate-lh": 360,
+   "posteriorcingulate-rh": 335,
+   "precuneus-lh": 452,
+   "precuneus-rh": 501,
+   "sensorimotor-lh": 1478,
+   "sensorimotor-rh": 1482,
+   "superiorfrontalgyrus-lh": 780,
+   "superiorfrontalgyrus-rh": 762,
+   "superiorparietal-lh": 658,
+   "superiorparietal-rh": 642,
+   "superiortemporalgyrus-lh": 651,
+   "superiortemporalgyrus-rh": 616
+  },
+  "centroids_mm": [
+   [
+    -6.7,
+    25.68,
+    14.24
+   ],
+   [
+    7.56,
+    24.39,
+    16.69
+   ],
+   [
+    -43.31,
+    23.72,
+    5.74
+   ],
+   [
+    44.46,
+    24.72,
+    6.27
+   ],
+   [
+    -45.44,
+    -51.98,
+    29.23
+   ],
+   [
+    46.36,
+    -48.27,
+    29.29
+   ],
+   [
+    -42.09,
+    -39.0,
+    -20.94
+   ],
+   [
+    42.26,
+    -37.64,
+    -20.99
+   ],
+   [
+    -34.21,
+    -4.31,
+    2.21
+   ],
+   [
+    35.09,
+    -3.91,
+    2.2
+   ],
+   [
+    -29.67,
+    -86.86,
+    -1.04
+   ],
+   [
+    30.3,
+    -86.28,
+    0.5
+   ],
+   [
+    -14.2,
+    -72.88,
+    2.94
+   ],
+   [
+    14.32,
+    -72.7,
+    3.99
+   ],
+   [
+    -26.8,
+    -15.55,
+    -25.38
+   ],
+   [
+    27.91,
+    -15.54,
+    -24.27
+   ],
+   [
+    -32.45,
+    30.63,
+    25.46
+   ],
+   [
+    33.08,
+    31.99,
+    25.24
+   ],
+   [
+    -55.64,
+    -31.09,
+    -12.85
+   ],
+   [
+    55.92,
+    -29.5,
+    -12.94
+   ],
+   [
+    -17.79,
+    30.97,
+    -14.59
+   ],
+   [
+    17.79,
+    31.28,
+    -14.85
+   ],
+   [
+    -8.05,
+    -29.65,
+    27.74
+   ],
+   [
+    8.59,
+    -29.34,
+    27.63
+   ],
+   [
+    -11.64,
+    -57.47,
+    36.73
+   ],
+   [
+    11.73,
+    -56.47,
+    37.73
+   ],
+   [
+    -35.75,
+    -18.5,
+    44.67
+   ],
+   [
+    34.3,
+    -17.57,
+    45.58
+   ],
+   [
+    -12.49,
+    23.76,
+    41.26
+   ],
+   [
+    13.29,
+    25.8,
+    40.4
+   ],
+   [
+    -22.78,
+    -60.88,
+    46.28
+   ],
+   [
+    22.64,
+    -59.51,
+    48.11
+   ],
+   [
+    -51.38,
+    -23.89,
+    -1.5
+   ],
+   [
+    52.09,
+    -20.59,
+    -2.04
+   ]
+  ],
+  "contiguous_pairs": [
+   [
+    "anteriorcingulate-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "anteriorcingulate-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "anteriorcingulate-lh",
+    "superiorfrontalgyrus-lh"
+   ],
+   [
+    "anteriorcingulate-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "anteriorcingulate-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "anteriorcingulate-rh",
+    "superiorfrontalgyrus-rh"
+   ],
+   [
+    "inferiorfrontalgyrus-lh",
+    "insula-lh"
+   ],
+   [
+    "inferiorfrontalgyrus-lh",
+    "middlefrontalgyrus-lh"
+   ],
+   [
+    "inferiorfrontalgyrus-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "inferiorfrontalgyrus-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "inferiorfrontalgyrus-rh",
+    "insula-rh"
+   ],
+   [
+    "inferiorfrontalgyrus-rh",
+    "middlefrontalgyrus-rh"
+   ],
+   [
+    "inferiorfrontalgyrus-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "inferiorfrontalgyrus-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "insula-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "middletemporalgyrus-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "inferiorparietal-lh",
+    "superiortemporalgyrus-lh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "insula-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "middletemporalgyrus-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "inferiorparietal-rh",
+    "superiortemporalgyrus-rh"
+   ],
+   [
+    "inferiortemporalgyrus-lh",
+    "lateraloccipital-lh"
+   ],
+   [
+    "inferiortemporalgyrus-lh",
+    "medialoccipital-lh"
+   ],
+   [
+    "inferiortemporalgyrus-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "inferiortemporalgyrus-lh",
+    "middletemporalgyrus-lh"
+   ],
+   [
+    "inferiortemporalgyrus-rh",
+    "lateraloccipital-rh"
+   ],
+   [
+    "inferiortemporalgyrus-rh",
+    "medialoccipital-rh"
+   ],
+   [
+    "inferiortemporalgyrus-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "inferiortemporalgyrus-rh",
+    "middletemporalgyrus-rh"
+   ],
+   [
+    "insula-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "insula-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "insula-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "insula-lh",
+    "superiortemporalgyrus-lh"
+   ],
+   [
+    "insula-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "insula-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "insula-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "insula-rh",
+    "superiortemporalgyrus-rh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "medialoccipital-lh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "middletemporalgyrus-lh"
+   ],
+   [
+    "lateraloccipital-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "medialoccipital-rh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "middletemporalgyrus-rh"
+   ],
+   [
+    "lateraloccipital-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "medialoccipital-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "medialoccipital-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "medialoccipital-lh",
+    "precuneus-lh"
+   ],
+   [
+    "medialoccipital-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "medialoccipital-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "medialoccipital-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "medialoccipital-rh",
+    "precuneus-rh"
+   ],
+   [
+    "medialoccipital-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "medialtemporal-lh",
+    "middletemporalgyrus-lh"
+   ],
+   [
+    "medialtemporal-lh",
+    "posteriorcingulate-lh"
+   ],
+   [
+    "medialtemporal-lh",
+    "superiortemporalgyrus-lh"
+   ],
+   [
+    "medialtemporal-rh",
+    "middletemporalgyrus-rh"
+   ],
+   [
+    "medialtemporal-rh",
+    "posteriorcingulate-rh"
+   ],
+   [
+    "medialtemporal-rh",
+    "superiortemporalgyrus-rh"
+   ],
+   [
+    "middlefrontalgyrus-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "middlefrontalgyrus-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "middlefrontalgyrus-lh",
+    "superiorfrontalgyrus-lh"
+   ],
+   [
+    "middlefrontalgyrus-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "middlefrontalgyrus-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "middlefrontalgyrus-rh",
+    "superiorfrontalgyrus-rh"
+   ],
+   [
+    "middletemporalgyrus-lh",
+    "superiortemporalgyrus-lh"
+   ],
+   [
+    "middletemporalgyrus-rh",
+    "superiortemporalgyrus-rh"
+   ],
+   [
+    "orbitofrontal-lh",
+    "superiorfrontalgyrus-lh"
+   ],
+   [
+    "orbitofrontal-rh",
+    "superiorfrontalgyrus-rh"
+   ],
+   [
+    "posteriorcingulate-lh",
+    "precuneus-lh"
+   ],
+   [
+    "posteriorcingulate-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "posteriorcingulate-lh",
+    "superiorfrontalgyrus-lh"
+   ],
+   [
+    "posteriorcingulate-rh",
+    "precuneus-rh"
+   ],
+   [
+    "posteriorcingulate-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "posteriorcingulate-rh",
+    "superiorfrontalgyrus-rh"
+   ],
+   [
+    "precuneus-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "precuneus-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "precuneus-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "precuneus-rh",
+    "superiorparietal-rh"
+   ],
+   [
+    "sensorimotor-lh",
+    "superiorfrontalgyrus-lh"
+   ],
+   [
+    "sensorimotor-lh",
+    "superiorparietal-lh"
+   ],
+   [
+    "sensorimotor-rh",
+    "superiorfrontalgyrus-rh"
+   ],
+   [
+    "sensorimotor-rh",
+    "superiorparietal-rh"
+   ]
+  ]
+ },
+ "r18": {
+  "regions": [
+   "cingulate-lh",
+   "cingulate-rh",
+   "insula-lh",
+   "insula-rh",
+   "lateraltemporal-lh",
+   "lateraltemporal-rh",
+   "medialtemporal-lh",
+   "medialtemporal-rh",
+   "occipital-lh",
+   "occipital-rh",
+   "orbitofrontal-lh",
+   "orbitofrontal-rh",
+   "parietal-lh",
+   "parietal-rh",
+   "prefrontal-lh",
+   "prefrontal-rh",
+   "sensorimotor-lh",
+   "sensorimotor-rh"
+  ],
+  "members": {
+   "cingulate-lh": [
+    "rostralanteriorcingulate-lh",
+    "caudalanteriorcingulate-lh",
+    "posteriorcingulate-lh",
+    "isthmuscingulate-lh"
+   ],
+   "cingulate-rh": [
+    "rostralanteriorcingulate-rh",
+    "caudalanteriorcingulate-rh",
+    "posteriorcingulate-rh",
+    "isthmuscingulate-rh"
+   ],
+   "insula-lh": [
+    "insula-lh"
+   ],
+   "insula-rh": [
+    "insula-rh"
+   ],
+   "lateraltemporal-lh": [
+    "superiortemporal-lh",
+    "transversetemporal-lh",
+    "bankssts-lh",
+    "middletemporal-lh",
+    "inferiortemporal-lh"
+   ],
+   "lateraltemporal-rh": [
+    "superiortemporal-rh",
+    "transversetemporal-rh",
+    "bankssts-rh",
+    "middletemporal-rh",
+    "inferiortemporal-rh"
+   ],
+   "medialtemporal-lh": [
+    "entorhinal-lh",
+    "parahippocampal-lh",
+    "temporalpole-lh",
+    "fusiform-lh"
+   ],
+   "medialtemporal-rh": [
+    "entorhinal-rh",
+    "parahippocampal-rh",
+    "temporalpole-rh",
+    "fusiform-rh"
+   ],
+   "occipital-lh": [
+    "lateraloccipital-lh",
+    "lingual-lh",
+    "cuneus-lh",
+    "pericalcarine-lh"
+   ],
+   "occipital-rh": [
+    "lateraloccipital-rh",
+    "lingual-rh",
+    "cuneus-rh",
+    "pericalcarine-rh"
+   ],
+   "orbitofrontal-lh": [
+    "lateralorbitofrontal-lh",
+    "medialorbitofrontal-lh"
+   ],
+   "orbitofrontal-rh": [
+    "lateralorbitofrontal-rh",
+    "medialorbitofrontal-rh"
+   ],
+   "parietal-lh": [
+    "superiorparietal-lh",
+    "inferiorparietal-lh",
+    "supramarginal-lh",
+    "precuneus-lh"
+   ],
+   "parietal-rh": [
+    "superiorparietal-rh",
+    "inferiorparietal-rh",
+    "supramarginal-rh",
+    "precuneus-rh"
+   ],
+   "prefrontal-lh": [
+    "superiorfrontal-lh",
+    "frontalpole-lh",
+    "rostralmiddlefrontal-lh",
+    "caudalmiddlefrontal-lh",
+    "parsopercularis-lh",
+    "parstriangularis-lh",
+    "parsorbitalis-lh"
+   ],
+   "prefrontal-rh": [
+    "superiorfrontal-rh",
+    "frontalpole-rh",
+    "rostralmiddlefrontal-rh",
+    "caudalmiddlefrontal-rh",
+    "parsopercularis-rh",
+    "parstriangularis-rh",
+    "parsorbitalis-rh"
+   ],
+   "sensorimotor-lh": [
+    "precentral-lh",
+    "postcentral-lh",
+    "paracentral-lh"
+   ],
+   "sensorimotor-rh": [
+    "precentral-rh",
+    "postcentral-rh",
+    "paracentral-rh"
+   ]
+  },
+  "lobes": {
+   "cingulate-lh": "cingulate",
+   "cingulate-rh": "cingulate",
+   "insula-lh": "insula",
+   "insula-rh": "insula",
+   "lateraltemporal-lh": "temporal",
+   "lateraltemporal-rh": "temporal",
+   "medialtemporal-lh": "temporal",
+   "medialtemporal-rh": "temporal",
+   "occipital-lh": "occipital",
+   "occipital-rh": "occipital",
+   "orbitofrontal-lh": "frontal",
+   "orbitofrontal-rh": "frontal",
+   "parietal-lh": "parietal",
+   "parietal-rh": "parietal",
+   "prefrontal-lh": "frontal",
+   "prefrontal-rh": "frontal",
+   "sensorimotor-lh": "frontal",
+   "sensorimotor-rh": "frontal"
+  },
+  "n_vertices": {
+   "cingulate-lh": 8586,
+   "cingulate-rh": 8041,
+   "insula-lh": 5229,
+   "insula-rh": 5090,
+   "lateraltemporal-lh": 19339,
+   "lateraltemporal-rh": 19100,
+   "medialtemporal-lh": 8493,
+   "medialtemporal-rh": 8122,
+   "occipital-lh": 14126,
+   "occipital-rh": 13318,
+   "orbitofrontal-lh": 6841,
+   "orbitofrontal-rh": 7155,
+   "parietal-lh": 34235,
+   "parietal-rh": 36023,
+   "prefrontal-lh": 29551,
+   "prefrontal-rh": 29403,
+   "sensorimotor-lh": 23553,
+   "sensorimotor-rh": 23674
+  },
+  "n_source_vertices": {
+   "cingulate-lh": 533,
+   "cingulate-rh": 499,
+   "insula-lh": 327,
+   "insula-rh": 321,
+   "lateraltemporal-lh": 1206,
+   "lateraltemporal-rh": 1194,
+   "medialtemporal-lh": 530,
+   "medialtemporal-rh": 506,
+   "occipital-lh": 886,
+   "occipital-rh": 828,
+   "orbitofrontal-lh": 431,
+   "orbitofrontal-rh": 445,
+   "parietal-lh": 2137,
+   "parietal-rh": 2259,
+   "prefrontal-lh": 1844,
+   "prefrontal-rh": 1836,
+   "sensorimotor-lh": 1478,
+   "sensorimotor-rh": 1482
+  },
+  "centroids_mm": [
+   [
+    -7.61,
+    -11.68,
+    23.36
+   ],
+   [
+    8.25,
+    -11.57,
+    24.01
+   ],
+   [
+    -34.21,
+    -4.31,
+    2.21
+   ],
+   [
+    35.09,
+    -3.91,
+    2.2
+   ],
+   [
+    -51.8,
+    -27.95,
+    -8.85
+   ],
+   [
+    52.49,
+    -25.39,
+    -9.53
+   ],
+   [
+    -31.73,
+    -30.94,
+    -22.24
+   ],
+   [
+    32.51,
+    -31.31,
+    -21.35
+   ],
+   [
+    -21.19,
+    -79.2,
+    1.14
+   ],
+   [
+    21.47,
+    -78.78,
+    2.43
+   ],
+   [
+    -17.79,
+    30.97,
+    -14.59
+   ],
+   [
+    17.79,
+    31.28,
+    -14.85
+   ],
+   [
+    -31.31,
+    -55.87,
+    36.04
+   ],
+   [
+    31.96,
+    -53.27,
+    36.5
+   ],
+   [
+    -26.29,
+    26.31,
+    28.03
+   ],
+   [
+    27.08,
+    27.98,
+    27.81
+   ],
+   [
+    -35.75,
+    -18.5,
+    44.67
+   ],
+   [
+    34.3,
+    -17.57,
+    45.58
+   ]
+  ],
+  "contiguous_pairs": [
+   [
+    "cingulate-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "occipital-lh"
+   ],
+   [
+    "cingulate-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "parietal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "prefrontal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "cingulate-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "occipital-rh"
+   ],
+   [
+    "cingulate-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "parietal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "prefrontal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "insula-lh",
+    "lateraltemporal-lh"
+   ],
+   [
+    "insula-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "insula-lh",
+    "orbitofrontal-lh"
+   ],
+   [
+    "insula-lh",
+    "parietal-lh"
+   ],
+   [
+    "insula-lh",
+    "prefrontal-lh"
+   ],
+   [
+    "insula-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "insula-rh",
+    "lateraltemporal-rh"
+   ],
+   [
+    "insula-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "insula-rh",
+    "orbitofrontal-rh"
+   ],
+   [
+    "insula-rh",
+    "parietal-rh"
+   ],
+   [
+    "insula-rh",
+    "prefrontal-rh"
+   ],
+   [
+    "insula-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "lateraltemporal-lh",
+    "medialtemporal-lh"
+   ],
+   [
+    "lateraltemporal-lh",
+    "occipital-lh"
+   ],
+   [
+    "lateraltemporal-lh",
+    "parietal-lh"
+   ],
+   [
+    "lateraltemporal-rh",
+    "medialtemporal-rh"
+   ],
+   [
+    "lateraltemporal-rh",
+    "occipital-rh"
+   ],
+   [
+    "lateraltemporal-rh",
+    "parietal-rh"
+   ],
+   [
+    "medialtemporal-lh",
+    "occipital-lh"
+   ],
+   [
+    "medialtemporal-rh",
+    "occipital-rh"
+   ],
+   [
+    "occipital-lh",
+    "parietal-lh"
+   ],
+   [
+    "occipital-rh",
+    "parietal-rh"
+   ],
+   [
+    "orbitofrontal-lh",
+    "prefrontal-lh"
+   ],
+   [
+    "orbitofrontal-rh",
+    "prefrontal-rh"
+   ],
+   [
+    "parietal-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "parietal-rh",
+    "sensorimotor-rh"
+   ],
+   [
+    "prefrontal-lh",
+    "sensorimotor-lh"
+   ],
+   [
+    "prefrontal-rh",
+    "sensorimotor-rh"
+   ]
+  ]
+ },
+ "lobes12": {
+  "regions": [
+   "cingulate-lh",
+   "cingulate-rh",
+   "frontal-lh",
+   "frontal-rh",
+   "insula-lh",
+   "insula-rh",
+   "occipital-lh",
+   "occipital-rh",
+   "parietal-lh",
+   "parietal-rh",
+   "temporal-lh",
+   "temporal-rh"
+  ],
+  "members": {
+   "cingulate-lh": [
+    "caudalanteriorcingulate-lh",
+    "isthmuscingulate-lh",
+    "posteriorcingulate-lh",
+    "rostralanteriorcingulate-lh"
+   ],
+   "cingulate-rh": [
+    "caudalanteriorcingulate-rh",
+    "isthmuscingulate-rh",
+    "posteriorcingulate-rh",
+    "rostralanteriorcingulate-rh"
+   ],
+   "frontal-lh": [
+    "caudalmiddlefrontal-lh",
+    "frontalpole-lh",
+    "lateralorbitofrontal-lh",
+    "medialorbitofrontal-lh",
+    "paracentral-lh",
+    "parsopercularis-lh",
+    "parsorbitalis-lh",
+    "parstriangularis-lh",
+    "precentral-lh",
+    "rostralmiddlefrontal-lh",
+    "superiorfrontal-lh"
+   ],
+   "frontal-rh": [
+    "caudalmiddlefrontal-rh",
+    "frontalpole-rh",
+    "lateralorbitofrontal-rh",
+    "medialorbitofrontal-rh",
+    "paracentral-rh",
+    "parsopercularis-rh",
+    "parsorbitalis-rh",
+    "parstriangularis-rh",
+    "precentral-rh",
+    "rostralmiddlefrontal-rh",
+    "superiorfrontal-rh"
+   ],
+   "insula-lh": [
+    "insula-lh"
+   ],
+   "insula-rh": [
+    "insula-rh"
+   ],
+   "occipital-lh": [
+    "cuneus-lh",
+    "lateraloccipital-lh",
+    "lingual-lh",
+    "pericalcarine-lh"
+   ],
+   "occipital-rh": [
+    "cuneus-rh",
+    "lateraloccipital-rh",
+    "lingual-rh",
+    "pericalcarine-rh"
+   ],
+   "parietal-lh": [
+    "inferiorparietal-lh",
+    "postcentral-lh",
+    "precuneus-lh",
+    "superiorparietal-lh",
+    "supramarginal-lh"
+   ],
+   "parietal-rh": [
+    "inferiorparietal-rh",
+    "postcentral-rh",
+    "precuneus-rh",
+    "superiorparietal-rh",
+    "supramarginal-rh"
+   ],
+   "temporal-lh": [
+    "bankssts-lh",
+    "entorhinal-lh",
+    "fusiform-lh",
+    "inferiortemporal-lh",
+    "middletemporal-lh",
+    "parahippocampal-lh",
+    "superiortemporal-lh",
+    "temporalpole-lh",
+    "transversetemporal-lh"
+   ],
+   "temporal-rh": [
+    "bankssts-rh",
+    "entorhinal-rh",
+    "fusiform-rh",
+    "inferiortemporal-rh",
+    "middletemporal-rh",
+    "parahippocampal-rh",
+    "superiortemporal-rh",
+    "temporalpole-rh",
+    "transversetemporal-rh"
+   ]
+  },
+  "lobes": {
+   "cingulate-lh": "cingulate",
+   "cingulate-rh": "cingulate",
+   "frontal-lh": "frontal",
+   "frontal-rh": "frontal",
+   "insula-lh": "insula",
+   "insula-rh": "insula",
+   "occipital-lh": "occipital",
+   "occipital-rh": "occipital",
+   "parietal-lh": "parietal",
+   "parietal-rh": "parietal",
+   "temporal-lh": "temporal",
+   "temporal-rh": "temporal"
+  },
+  "n_vertices": {
+   "cingulate-lh": 8586,
+   "cingulate-rh": 8041,
+   "frontal-lh": 50426,
+   "frontal-rh": 51094,
+   "insula-lh": 5229,
+   "insula-rh": 5090,
+   "occipital-lh": 14126,
+   "occipital-rh": 13318,
+   "parietal-lh": 43754,
+   "parietal-rh": 45161,
+   "temporal-lh": 27832,
+   "temporal-rh": 27222
+  },
+  "n_source_vertices": {
+   "cingulate-lh": 533,
+   "cingulate-rh": 499,
+   "frontal-lh": 3160,
+   "frontal-rh": 3191,
+   "insula-lh": 327,
+   "insula-rh": 321,
+   "occipital-lh": 886,
+   "occipital-rh": 828,
+   "parietal-lh": 2730,
+   "parietal-rh": 2831,
+   "temporal-lh": 1736,
+   "temporal-rh": 1700
+  },
+  "centroids_mm": [
+   [
+    -7.61,
+    -11.68,
+    23.36
+   ],
+   [
+    8.25,
+    -11.57,
+    24.01
+   ],
+   [
+    -26.54,
+    15.47,
+    27.08
+   ],
+   [
+    26.53,
+    16.35,
+    27.2
+   ],
+   [
+    -34.21,
+    -4.31,
+    2.21
+   ],
+   [
+    35.09,
+    -3.91,
+    2.2
+   ],
+   [
+    -21.19,
+    -79.2,
+    1.14
+   ],
+   [
+    21.47,
+    -78.78,
+    2.43
+   ],
+   [
+    -33.7,
+    -48.89,
+    37.69
+   ],
+   [
+    33.9,
+    -47.03,
+    37.98
+   ],
+   [
+    -45.68,
+    -28.86,
+    -12.93
+   ],
+   [
+    46.53,
+    -27.15,
+    -13.06
+   ]
+  ],
+  "contiguous_pairs": [
+   [
+    "cingulate-lh",
+    "frontal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "occipital-lh"
+   ],
+   [
+    "cingulate-lh",
+    "parietal-lh"
+   ],
+   [
+    "cingulate-lh",
+    "temporal-lh"
+   ],
+   [
+    "cingulate-rh",
+    "frontal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "occipital-rh"
+   ],
+   [
+    "cingulate-rh",
+    "parietal-rh"
+   ],
+   [
+    "cingulate-rh",
+    "temporal-rh"
+   ],
+   [
+    "frontal-lh",
+    "insula-lh"
+   ],
+   [
+    "frontal-lh",
+    "parietal-lh"
+   ],
+   [
+    "frontal-rh",
+    "insula-rh"
+   ],
+   [
+    "frontal-rh",
+    "parietal-rh"
+   ],
+   [
+    "insula-lh",
+    "parietal-lh"
+   ],
+   [
+    "insula-lh",
+    "temporal-lh"
+   ],
+   [
+    "insula-rh",
+    "parietal-rh"
+   ],
+   [
+    "insula-rh",
+    "temporal-rh"
+   ],
+   [
+    "occipital-lh",
+    "parietal-lh"
+   ],
+   [
+    "occipital-lh",
+    "temporal-lh"
+   ],
+   [
+    "occipital-rh",
+    "parietal-rh"
+   ],
+   [
+    "occipital-rh",
+    "temporal-rh"
+   ],
+   [
+    "parietal-lh",
+    "temporal-lh"
+   ],
+   [
+    "parietal-rh",
+    "temporal-rh"
+   ]
+  ]
+ }
+}

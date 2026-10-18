@@ -48,16 +48,21 @@ GROUPINGS = ("lobe_hemisphere", "lobe_bilateral")
 
 
 def roi_groups(roi_names: list[str], grouping: str = "lobe_hemisphere") -> list[str]:
-    """Group label of every ROI (``<lobe>-<hemi>`` or ``<lobe>``); raises for an unknown name."""
+    """Group label of every ROI (``<lobe>-<hemi>`` or ``<lobe>``) for Desikan-Killiany names or the regions of any
+    coarser atlas of ``source.atlas`` (their lobe is defined there); raises for an unknown name."""
     if grouping not in GROUPINGS:
         raise ValueError(f"anatomical grouping must be one of {GROUPINGS}")
-    lobe_of = {r: lobe for lobe, regions in DK_LOBES.items() for r in regions}
+    from ..source import atlas
+
+    lobe_of = {f"{r}-{h}": lobe for lobe, regions in DK_LOBES.items() for r in regions for h in ("lh", "rh")}
+    for a in atlas.ATLASES:
+        lobe_of.update(atlas.lobe_of(a))
     out = []
     for name in roi_names:
-        base, _, hemi = name.rpartition("-")
-        if base not in lobe_of or hemi not in ("lh", "rh"):
-            raise ValueError(f"ROI {name!r} is not a Desikan-Killiany cortical label '<region>-<lh|rh>'")
-        out.append(f"{lobe_of[base]}-{hemi}" if grouping == "lobe_hemisphere" else lobe_of[base])
+        hemi = name.rpartition("-")[2]
+        if name not in lobe_of or hemi not in ("lh", "rh"):
+            raise ValueError(f"ROI {name!r} is not a cortical region '<region>-<lh|rh>' of a known atlas")
+        out.append(f"{lobe_of[name]}-{hemi}" if grouping == "lobe_hemisphere" else lobe_of[name])
     return out
 
 
@@ -68,6 +73,9 @@ def anatomical_adjacency(roi_names: list[str], grouping: str = "lobe_hemisphere"
     g = np.array(roi_groups(roi_names, grouping))
     a = (g[:, None] == g[None, :]).astype(np.float32)
     np.fill_diagonal(a, 0.0)
+    if not a.any():
+        raise ValueError(f"anatomical grouping {grouping!r} puts every ROI in its own group (e.g. the 12-lobe atlas "
+                         "with lobe_hemisphere): the anatomical layer would carry no information")
     return a
 
 
@@ -99,8 +107,7 @@ class BandGCN(nn.Module):
 class XuDualGCN(nn.Module):
     def __init__(self, in_dim: int, n_bands: int, n_rois: int, roi_names: list[str], hidden: int = 32,
                  node_out: int = 2, fc1: int = 32, fc2: int = 32, dropout: float = 0.3, band_specific: bool = True,
-                 layer1: str = "functional", layer2: str = "anatomical", anatomical_grouping: str = "lobe_hemisphere",
-                 n_covariates: int = 0):
+                 layer1: str = "functional", layer2: str = "anatomical", anatomical_grouping: str = "lobe_hemisphere"):
         super().__init__()
         for name, val in (("layer1", layer1), ("layer2", layer2)):
             if val not in ("functional", "anatomical"):
@@ -112,7 +119,7 @@ class XuDualGCN(nn.Module):
         self.gcn1 = BandGCN(n_bands, in_dim, hidden, band_specific)
         self.gcn2 = BandGCN(n_bands, hidden, node_out, band_specific)
         self.drop = nn.Dropout(dropout)
-        self.fc1 = nn.Linear(n_bands * n_rois * node_out + n_covariates, fc1)
+        self.fc1 = nn.Linear(n_bands * n_rois * node_out, fc1)
         self.fc2 = nn.Linear(fc1, fc2)
         self.out = nn.Linear(fc2, 1)
         for lin in (self.fc1, self.fc2, self.out):          # as Xu's code: Kaiming-normal weights, zero bias
@@ -124,19 +131,17 @@ class XuDualGCN(nn.Module):
             return normalize(adj)                            # (B, K, R, R): the window's own band connectivity
         return normalize(self.a_anat)[None, None]           # (1, 1, R, R): fixed atlas matrix
 
-    def fused_embedding(self, x: torch.Tensor, adj: torch.Tensor, cov: torch.Tensor | None = None) -> torch.Tensor:
+    def fused_embedding(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         b, k, r, _ = x.shape
         if k != self.n_bands or r != self.n_rois:
             raise ValueError(f"model built for {self.n_bands} bands x {self.n_rois} ROIs, got {k} x {r}")
         h = F.relu(self.gcn1(x, self._operator(self.layer1, adj)))
         h = F.relu(self.gcn2(h, self._operator(self.layer2, adj)))
         z = self.drop(h.reshape(b, -1))
-        if cov is not None:
-            z = torch.cat([z, cov], dim=1)
         return F.relu(self.fc2(F.relu(self.fc1(z))))
 
-    def forward(self, x, adj, cov=None, return_band_weights: bool = False):
-        logits = self.out(self.fused_embedding(x, adj, cov)).squeeze(-1)
+    def forward(self, x, adj, return_band_weights: bool = False):
+        logits = self.out(self.fused_embedding(x, adj)).squeeze(-1)
         if return_band_weights:                              # no band attention: uniform (bands are concatenated)
             return logits, torch.full((x.shape[0], self.n_bands), 1.0 / self.n_bands, device=x.device)
         return logits

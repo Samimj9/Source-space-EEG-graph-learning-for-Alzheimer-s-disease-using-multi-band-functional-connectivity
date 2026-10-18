@@ -24,9 +24,6 @@ also removes each band's typical level). ``band_identity: onehot`` appends a con
 (K extra node-feature columns, identical for every ROI of band k) to every band's node features before the encoder,
 so the shared weights can act band-specifically. Default ``none`` keeps the original architecture unchanged.
 
-Covariates (EEG + age models): ``cov`` (B, n_covariates), already standardized with
-training statistics, is concatenated to the fused graph embedding immediately before
-the final MLP classifier; it never enters the GNN encoders or the fusion.
 """
 
 from __future__ import annotations
@@ -86,7 +83,7 @@ class MultiBandGNN(nn.Module):
     def __init__(self, encoder: str, in_dim: int, n_bands: int, hidden: int = 64, n_layers: int = 2,
                  dropout: float = 0.2, shared_encoder: bool = True, fusion: str = "attention",
                  readout: str = "mean_max", mlp_hidden: int = 32, encoder_kwargs: dict | None = None,
-                 n_covariates: int = 0, band_identity: str = "none"):
+                 band_identity: str = "none"):
         super().__init__()
         kw = encoder_kwargs or {}
         if band_identity not in BAND_IDENTITY:
@@ -99,9 +96,8 @@ class MultiBandGNN(nn.Module):
                                        for _ in range(n_enc)])
         emb = hidden * (2 if readout == "mean_max" else 1)
         self.fusion = BandFusion(fusion, emb, n_bands)
-        self.n_covariates = n_covariates
         self.embed_dropout = nn.Dropout(dropout)
-        self.head = nn.Sequential(nn.Linear(self.fusion.out_dim + n_covariates, mlp_hidden), nn.ReLU(),
+        self.head = nn.Sequential(nn.Linear(self.fusion.out_dim, mlp_hidden), nn.ReLU(),
                                   nn.Dropout(dropout), nn.Linear(mlp_hidden, 1))
 
     def embed(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
@@ -119,18 +115,10 @@ class MultiBandGNN(nn.Module):
         return torch.stack([readout(self.encoders[i](x[:, i], adj[:, i]), self.readout_kind) for i in range(k)], 1)
 
     def fused_embedding(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        """Fused graph embedding (B, D_fused): after band fusion, before covariates and the classifier."""
+        """Fused graph embedding (B, D_fused): after band fusion, before the classifier."""
         return self.fusion(self.embed(x, adj))[0]
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor, cov: torch.Tensor | None = None,
-                return_band_weights: bool = False):
+    def forward(self, x: torch.Tensor, adj: torch.Tensor, return_band_weights: bool = False):
         fused, w = self.fusion(self.embed(x, adj))
-        fused = self.embed_dropout(fused)
-        if self.n_covariates:
-            if cov is None or cov.shape != (fused.shape[0], self.n_covariates):
-                raise ValueError(f"model expects covariates of shape (B, {self.n_covariates})")
-            fused = torch.cat([fused, cov], dim=-1)
-        elif cov is not None:
-            raise ValueError("covariates given to a model built without them")
-        logits = self.head(fused).squeeze(-1)
+        logits = self.head(self.embed_dropout(fused)).squeeze(-1)
         return (logits, w) if return_band_weights else logits

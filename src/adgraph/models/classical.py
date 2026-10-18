@@ -1,13 +1,8 @@
-"""Logistic regression / SVM on flat features (Experiments 0, 1, baselines, EEG + age).
+"""Logistic regression / SVM on flat features (Experiments 0 and 1).
 
 Every fitted step is owned by the model and fitted on the training view only:
 
-    X (EEG features) -> [StandardScaler -> SelectKBest -> PCA]   (``features``)
-    cov (e.g. age)   -> CovariateScaler (subject-level, training subjects)
-    [features(X), cov] -> classifier
-
-Covariates are appended *after* the EEG transforms, so they are never selected away or
-mixed into PCA components.
+    X (EEG features) -> [StandardScaler -> SelectKBest -> PCA]   (``features``) -> classifier
 
 Scores (``predict_score``):
 * logreg: P(class 1) (``score_type = "probability"``, threshold 0.5);
@@ -35,7 +30,6 @@ from sklearn.preprocessing import FunctionTransformer, StandardScaler
 from sklearn.svm import SVC
 
 from ..graphs.dataset import DataView, require_train, training_weights
-from .covariates import CovariateScaler
 
 CLASSIFIERS = ("logreg", "svm")
 CALIBRATIONS = ("none", "grouped_platt")
@@ -138,19 +132,15 @@ class ClassicalModel:
         self.name, self.params, self.preprocessing, self.seed = name, params or {}, preprocessing or {}, seed
         self.calibration, self.calibration_folds = calibration, calibration_folds
         self.score_type = score_type(name, calibration)
-        self.features = self.cov_scaler = self.clf = None
+        self.features = self.clf = None
 
     def _design(self, view: DataView) -> np.ndarray:
-        Z = self.features.transform(view.payload["X"])
-        if self.cov_scaler is not None:
-            Z = np.hstack([Z, self.cov_scaler.transform(view.payload["cov"])])
-        return Z
+        return self.features.transform(view.payload["X"])
 
     def fit(self, view: DataView) -> "ClassicalModel":
         require_train(view)
         X, y = view.payload["X"], view.y
         self.features = make_feature_pipeline(self.preprocessing, X.shape[1], self.seed).fit(X, y)
-        self.cov_scaler = CovariateScaler().fit(view) if "cov" in view.payload else None
         Z = self._design(view)
         self.clf = make_classifier(self.name, self.params, self.seed, self.calibration, self.calibration_folds)
         w = training_weights(view.meta, view.target)

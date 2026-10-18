@@ -1,0 +1,20 @@
+# Classical baselines (Exp 0, Exp 1): logistic regression and linear SVM on flattened band x node features.
+# Established fitting procedure: standardization fitted on the training windows, C selected by participant-level
+# inner CV (5 folds, ROC-AUC) inside each outer training set, refit on the whole outer training set.
+extends: protocol.yaml
+input: classical
+features:
+  source: source                 # sensor (19 electrodes) | source (atlas ROIs)
+  psd_kinds: [log, rel]          # abs | log | rel | de
+  bands: [delta, theta, alpha, beta, gamma]
+preprocessing:
+  standardize: true
+  select_k_best: null
+  pca_components: null
+model:
+  name: logreg                   # logreg | svm
+  params: {C: 1.0, kernel: linear}
+  calibration: none              # SVM score = decision_function margin (threshold 0)
+  calibration_folds: 3
+hparams:
+  model.params.C: [0.001, 0.01, 0.1, 1.0, 10.0]

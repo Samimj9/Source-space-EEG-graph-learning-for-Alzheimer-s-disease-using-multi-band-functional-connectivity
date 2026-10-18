@@ -149,7 +149,7 @@ def preprocess(raw, cfg: dict, segments: list | None = None, offset_new: int = 0
     if not glo <= gross <= ghi:
         raise ValueError(f"unit safeguard failed: robust median channel std {gross:.3g} V outside [{glo}, {ghi}] V "
                          "(whole 0.1-45 Hz recording): the EDF unit scale is wrong by orders of magnitude; "
-                         "run scripts/diagnose_amplitude.py")
+                         "run scripts/legacy/diagnose_amplitude.py")
 
     hp1 = lambda r: r.filter(1.0, None, fir_design="firwin", verbose="error", **filter_pad(cfg))  # noqa: E731
     if seg_info is not None:                     # QC high-pass per segment: never across a discontinuity
@@ -189,7 +189,7 @@ def preprocess(raw, cfg: dict, segments: list | None = None, offset_new: int = 0
     lo, hi = cfg["units"]["plausible_std_v"]
     if not lo <= med_std <= hi:
         raise ValueError(f"median channel std {med_std:.3g} V outside plausible range [{lo}, {hi}] (analysed "
-                         "interval, 0.1-45 Hz, average reference): run scripts/diagnose_amplitude.py")
+                         "interval, 0.1-45 Hz, average reference): run scripts/legacy/diagnose_amplitude.py")
 
     channels = pd.DataFrame({
         "channel": raw.ch_names,

@@ -5,7 +5,7 @@ import pytest
 
 from adgraph.config import common_channels, load_yaml
 from adgraph.io.eeg import load_raw
-from adgraph.pipeline import process_recording
+from adgraph.legacy.pipeline import process_recording
 from adgraph.preprocessing.boundary import crop_edges, expected_valid_windows
 from adgraph.preprocessing.clean import preprocess
 
@@ -71,7 +71,7 @@ def test_run_writes_outputs(tmp_path, monkeypatch):
 
     import pandas as pd
 
-    import adgraph.pipeline as pl
+    import adgraph.legacy.pipeline as pl
 
     d1, d2 = tmp_path / "d1", tmp_path / "d2"
     d1.mkdir(), d2.mkdir()
