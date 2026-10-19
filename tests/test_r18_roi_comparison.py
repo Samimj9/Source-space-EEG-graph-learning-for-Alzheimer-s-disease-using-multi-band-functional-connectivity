@@ -183,7 +183,8 @@ def test_roi_comparison_is_paired_development_only_and_never_forces_a_winner(bot
     from adgraph.experiments import roi_comparison as rc
     from adgraph.experiments.report import collect
 
-    cfg = {**rc.config(), "inverses": ["lcmv"], "models": {"exp1_source_psd_de": ["logreg__psd"]}, "n_bootstrap": 200}
+    cfg = {**rc.config(), "atlases": ["dk68", "r18"], "comparisons": [["r18", "dk68"]], "inverses": ["lcmv"],
+           "models": {"exp1_source_psd_de": ["logreg__psd"]}, "n_bootstrap": 200}
     for r in rc.runs(cfg):
         run_experiment(experiment_configs()[r["exp"]], both_atlases, r["inverse"], "B", r["atlas"], None,
                        [r["variant"]], ["xu_dev_cv"])
@@ -191,33 +192,36 @@ def test_roi_comparison_is_paired_development_only_and_never_forces_a_winner(bot
     cls, missing = rc.classification(table, cfg)
     assert not missing and len(cls) == 1
     row = cls.iloc[0]
-    assert row["same_participants"] and row["n_participants"] == 52
-    assert row["auc_diff_boot_low"] <= row["auc_diff_r18_minus_dk68"] <= row["auc_diff_boot_high"]
-    assert row["auc_diff_r18_minus_dk68"] == pytest.approx(row["auc_r18"] - row["auc_dk68"], abs=1e-9)
+    assert row["comparison"] == "r18 - dk68" and row["same_participants"] and row["n_participants"] == 52
+    assert row["auc_diff_boot_low"] <= row["auc_diff"] <= row["auc_diff_boot_high"]
+    assert row["auc_diff"] == pytest.approx(row["auc_a"] - row["auc_b"], abs=1e-9)
     summ = rc.summary(cls, missing, cfg)
-    assert summ["complete"] and "superior" not in summ["statement"]
+    assert summ["complete"] and "superior" not in summ["comparisons"]["r18 - dk68"]["statement"]
     fake = table.assign(setting="xu_holdout", auc=0.99)                              # holdout rows are never read
-    assert rc.classification(pd.concat([table, fake]), cfg)[0]["auc_r18"].iloc[0] == row["auc_r18"]
-    incomplete = rc.summary(*rc.classification(table, {**cfg, "inverses": ["lcmv", "wmne"]}),
-                            {**cfg, "inverses": ["lcmv", "wmne"]})
-    assert not incomplete["complete"] and "incomplete" in incomplete["statement"]
-    md = rc.report_markdown(cls, summ, {}, cfg)
-    assert "Source localization" in md and "Classification" in md and "holdout not evaluated" in md
+    assert rc.classification(pd.concat([table, fake]), cfg)[0]["auc_a"].iloc[0] == row["auc_a"]
+    wide = {**cfg, "inverses": ["lcmv", "wmne"]}
+    incomplete = rc.summary(rc.classification(table, wide)[0], rc.per_atlas(table, wide)[1], wide)
+    assert not incomplete["complete"] and "incomplete" in incomplete["comparisons"]["r18 - dk68"]["statement"]
+    md = rc.report_markdown(rc.per_atlas(table, cfg)[0], cls, summ, {}, cfg)
+    assert "Source localization" in md and "Classification per atlas" in md and "holdout not evaluated" in md
 
 
 def test_descriptive_summary_wording():
     from adgraph.experiments import roi_comparison as rc
 
-    cfg = rc.config()
+    cfg = {**rc.config(), "atlases": ["dk68", "r18"], "comparisons": [["r18", "dk68"]]}
     cells = [(e, v, i) for e, vs in cfg["models"].items() for v in vs for i in cfg["inverses"]]
 
     def table(diffs):
-        return pd.DataFrame([{"experiment": e, "variant": v, "inverse": i, "auc_diff_r18_minus_dk68": d,
-                              "auc_diff_boot_low": d - 0.1, "auc_diff_boot_high": d + 0.1}
+        return pd.DataFrame([{"comparison": "r18 - dk68", "experiment": e, "variant": v, "inverse": i,
+                              "auc_diff": d, "auc_diff_boot_low": d - 0.1, "auc_diff_boot_high": d + 0.1}
                              for (e, v, i), d in zip(cells, diffs)])
-    assert "no material" in rc.summary(table([0.01] * len(cells)), [], cfg)["statement"]
-    assert "tendency towards r18" in rc.summary(table([0.05] * len(cells)), [], cfg)["statement"]
-    assert "inconsistent" in rc.summary(table([0.2, -0.1] * (len(cells) // 2)), [], cfg)["statement"]
+
+    def st(diffs):
+        return rc.summary(table(diffs), [], cfg)["comparisons"]["r18 - dk68"]["statement"]
+    assert "no material" in st([0.01] * len(cells))
+    assert "tendency towards r18" in st([0.05] * len(cells))
+    assert "inconsistent" in st([0.2, -0.1] * (len(cells) // 2))
 
 
 # ------------------------------------------------------------------------------------------- decisions

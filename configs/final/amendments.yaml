@@ -1,0 +1,28 @@
+# Protocol amendments of the final framework, recorded by the author (methodology log entries 59a, 59b).
+# An amendment is NOT applied by being listed here: an exploratory atlas is authorized for reconstruction only once
+# `scripts/final.py approve-exploratory --atlas <atlas> --amendment <id>` has written the release decision record
+# FINAL_v1/decisions/exploratory_<atlas>.json, which this file validates (experiments.decisions). Nothing here changes
+# configs/final/selection.yaml, its thresholds or any eligibility verdict.
+A1:
+  date: "2026-10-19"
+  approved_by: author (project author, written authorization of 2026-10-19)
+  atlas: r18
+  status: exploratory, approved after the result (post-result)
+  scope:
+    - build the r18 stores (LCMV, wMNE; window modes B and A) from the original recordings with the unchanged pipeline
+    - include r18 in the controlled development-only atlas comparison (notebook 04)
+  reason: >-
+    To assess whether the additional cortical granularity of 18 regions provides useful, reproducible information
+    despite not meeting every pre-specified source-resolution criterion. Exploratory, not confirmatory.
+  evidence_at_approval:     # the exact fsaverage-BEM result of notebook 02 (authoritative; not altered)
+    r18:     {wmne: {median_crosstalk: 0.511, own_region_dominance: 0.889},
+              lcmv: {median_crosstalk: 0.536, own_region_dominance: 0.778}}
+    lobes12: {wmne: {median_crosstalk: 0.377, own_region_dominance: 1.000},
+              lcmv: {median_crosstalk: 0.415, own_region_dominance: 0.833}}
+  rule_verdict: >-
+    r18 fails own-region dominance >= 0.80 for LCMV and is NOT eligible under configs/final/selection.yaml
+    (atlas_resolution); lobes12 is the rule-recommended atlas. Unchanged by this amendment.
+  does_not:
+    - change the atlas_resolution rule, its thresholds or its recommendation
+    - make r18 rule-eligible or the rule-recommended atlas
+    - select an analysis atlas (FINAL_v1/decisions/atlas.json is not written)

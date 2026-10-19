@@ -1,14 +1,15 @@
 # Execution order of the final framework (FINAL_RUN_GUIDE.md). One notebook at a time, in this order; each is resumable.
 # Tested (tests/test_final_framework.py): every final experiment config appears exactly once, every notebook exists,
 # and every experiment runs in every context of its kind. 04 (ROI comparison) runs BEFORE 03 (graph construction):
-# the author records the analysis atlas in 04, and 03 compares graph constructions once, on that atlas. Experiments
+# the author records the analysis atlas after reviewing 04 (04 selects nothing), and 03 compares graph constructions
+# once, on that atlas. Experiments
 # read both decisions (--atlas selected, --graph selected) and run development CV only; notebook 99 freezes the final
 # analysis and evaluates the holdout once, descriptively (configs/final/holdout.yaml).
 steps:
   - {notebook: 00_setup_and_stores.ipynb, runtime: CPU, purpose: verify and lock the four validated stores}
   - {notebook: 01_participant_qc.ipynb, runtime: CPU, purpose: participant QC; category A decisions}
-  - {notebook: 02_parcellation.ipynb, runtime: CPU, purpose: source resolution; r18 stores from the recordings; their QC}
-  - {notebook: 04_roi_68_vs_18.ipynb, runtime: GPU, purpose: controlled dk68 vs r18 comparison; the atlas decision}
+  - {notebook: 02_parcellation.ipynb, runtime: CPU, purpose: source resolution; authorized lobes12 / r18 stores; their QC}
+  - {notebook: 04_roi_68_vs_18.ipynb, runtime: GPU, purpose: dk68 vs lobes12 vs r18 comparison; stops for the decision}
   - {notebook: 03_graph_construction.ipynb, runtime: GPU, purpose: graph comparison on the recorded atlas; selection}
   - {notebook: Exp0_sensor_psd_de.ipynb, experiment: exp0, runtime: CPU}
   - {notebook: Exp1_source_psd_de.ipynb, experiment: exp1, runtime: CPU}

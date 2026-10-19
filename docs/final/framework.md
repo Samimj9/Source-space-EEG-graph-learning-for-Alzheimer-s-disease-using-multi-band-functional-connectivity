@@ -11,8 +11,8 @@ design) in source space:
 
 ```
 validated store (inverse x window mode x atlas) --verify + lock--> participant QC gate
-   --> [02] r18 stores from the recordings (validated, matched to LCMV and to dk68) + their QC
-   --> [04] dk68 vs r18 comparison (development CV) --> the author records the atlas
+   --> [02] authorized lobes12 / r18 stores from the recordings (validated, matched to LCMV and to dk68) + QC
+   --> [04] dk68 vs lobes12 vs r18 comparison (development CV; selects nothing) --> the author records the atlas
    --> [03] graph-construction comparison on that atlas (development CV) --> recorded selection
    --> Exp 0-8 (one config each; development CV) --> [99] freeze the final analysis --> holdout once (descriptive)
    --> combined tables / comparisons
@@ -130,8 +130,9 @@ Every final multiband variant is tested to be sensitive to the band order (`test
   test.
 * **Atlas:** never chosen by classification performance alone. Recommendation by source resolution: the finest
   atlas whose ROI estimates (both inverses) have no forced linear redundancy, median cross-talk <= 0.60 and own-region
-  dominance >= 0.80 ([parcellation.md](parcellation.md)); r18 stores approved and built in notebook 02; the
-  development-only dk68 vs r18 comparison of notebook 04 reports resolution / reliability and classification
+  dominance >= 0.80 ([parcellation.md](parcellation.md)): lobes12 with the exact BEM; lobes12 (rule) and r18
+  (exploratory, amendment A1) stores built in notebook 02 under `decisions.atlas_authorization`; the
+  development-only dk68 vs lobes12 vs r18 comparison of notebook 04 reports resolution / reliability and classification
   evidence separately; the AUTHOR records the atlas (`FINAL_v1/decisions/atlas.json`). dk68 stays the reference.
 
 ## 8. Leakage rules (enforced in code, tested)

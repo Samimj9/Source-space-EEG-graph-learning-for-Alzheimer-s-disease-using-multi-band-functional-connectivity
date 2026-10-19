@@ -315,4 +315,5 @@ def test_notebooks_run_development_cv_until_the_frozen_final_analysis():
             assert "xu_holdout" not in src and "final.py holdout" not in src and "final.py freeze" not in src, name
     assert "final.py freeze" in nbs["99_results_report.ipynb"] and "final.py holdout" in nbs["99_results_report.ipynb"]
     assert "--atlas selected" in nbs["03_graph_construction.ipynb"] and "ATLAS = 'selected'" in nbs["Exp5_multibranch.ipynb"]
-    assert "build_stores.py match-atlas" in nbs["02_parcellation.ipynb"] and "choose-atlas" in nbs["04_roi_68_vs_18.ipynb"]
+    assert "build_stores.py match-atlas" in nbs["02_parcellation.ipynb"]
+    assert "choose-atlas" not in nbs["04_roi_68_vs_18.ipynb"]                # 04 selects nothing

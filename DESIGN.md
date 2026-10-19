@@ -9,6 +9,13 @@ Status: **v2.0 (2026-10-18), the final framework** (`docs/final/framework.md`, m
 
 Changelog:
 
+- **v2.2 (2026-10-19, after the exact-BEM resolution result; author authorization):** two additional atlas arms,
+  dk68 the reference: **lobes12** (recommended by the unchanged `atlas_resolution` rule) and **r18** (exploratory,
+  post-result approval, amendment A1; fails the LCMV own-region dominance criterion). Their stores are built from the
+  original recordings only under `experiments.decisions.atlas_authorization`; notebook 04 compares the three atlases
+  on the pre-specified models (development CV only; exploratory, uncorrected) and selects nothing. Methodology log
+  entry 59b.
+
 - **v2.1 (2026-10-18, before any final-framework result; author approval of the 18-region investigation):**
   - **Atlas:** r18 stores (LCMV, wMNE; modes B, A) built from the original recordings by the unchanged pipeline,
     conditional on the anatomical checks and the exact-BEM resolution; validated, matched and QC'd. A controlled,

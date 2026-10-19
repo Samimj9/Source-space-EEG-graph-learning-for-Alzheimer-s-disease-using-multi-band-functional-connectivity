@@ -11,8 +11,8 @@ Colab disconnects, open it again and *Run all* again; finished work is kept on D
 |---|---|---|---|---|---|
 | 1 | `00_setup_and_stores` | CPU | reads stores | verifies the 4 validated 68-ROI stores, writes the release lock, runs the test suite once | 15-25 min |
 | 2 | `01_participant_qc` | CPU | reads stores (diagnostics) | QC of the 4 dk68 stores; **stops if a category A finding needs your decision** | 10-20 min |
-| 3 | `02_parcellation` | CPU | diagnostics, then **reconstruction** | r18 atlas checks; analytic resolution with the stores' BEM; resolution of the stores' own operators; reliability; then (approved, conditional) the **r18 stores from the original recordings** for LCMV and wMNE, modes B and A, validated, matched to each other and window by window to dk68; QC of the 4 r18 stores | 2.5-3.5 h |
-| 4 | `04_roi_68_vs_18` | GPU | **training** (development CV) | dk68 vs r18: Exp 1 (4 variants), Exp 4 `plv__psd`, Exp 5 `plv__separate__mean`, both inverses, mode B, dense PLV; report; **you record the atlas** | ≈ 3-4 h CPU equiv. |
+| 3 | `02_parcellation` | CPU | diagnostics, then **reconstruction** | lobes12 / r18 atlas checks; analytic resolution with the stores' BEM (rule verdict unchanged); resolution of the dk68 stores' own operators; reliability; then the authorization gate and the **lobes12 (rule-eligible) and r18 (exploratory, only with `EXPLORATORY_R18_APPROVAL = 'A1'`) stores from the original recordings**, LCMV and wMNE, modes B and A, validated, matched to each other and window by window to dk68; QC, resolution and reliability of every new store | 3.5-5 h |
+| 4 | `04_roi_68_vs_18` | GPU | **training** (development CV) | dk68 vs lobes12 vs r18: Exp 1 (4 variants), Exp 4 `plv__psd`, Exp 5 `plv__separate__mean`, both inverses, mode B, dense PLV; per-atlas metrics and paired differences; **stops; selects nothing** | ≈ 4-6 h CPU equiv. |
 | 5 | `03_graph_construction` | GPU | **training** (development CV) | graph diagnostics and the 11-construction comparison on the recorded atlas; the recorded selection | dk68 ≈ 24 h CPU equiv.; r18 less (not measured) |
 | 6-14 | `Exp0` … `Exp8` | CPU (0, 1) / GPU | **training** (development CV) | one experiment each; LCMV B, wMNE B, LCMV A, wMNE A (Exp 0: sensor B, A) on the recorded atlas and graph | see below |
 | 15 | `99_results_report` | GPU | **training** (holdout fits) | development-CV report, difficult participants; **freeze** the final analysis; holdout of the frozen units only; final tables | ≈ 13 h CPU equiv. for dk68 (GPU less) |
@@ -33,9 +33,10 @@ the experiment notebooks if dk68 is recorded (and by notebook 03 for its `dense`
 
 **Storage** (Drive): the r18 stores need ≈ 1-2 GB in total for both inverses and both modes (mode B assembled arrays
 ≈ 0.26 GB per inverse for 16,420 windows: PLV and |ciPLV| 5 x 18 x 18 float32 per window plus PSD / DE; participant
-checkpoints of the same size; continuous 18-ROI signals ≈ 0.35 GB per inverse; mode A ≈ 0.01 GB). Notebook 02 prints
-the real sizes (`build_stores.py size`). Results of all notebooks: a few hundred MB (predictions, metrics, figures).
-Keep ≥ 5 GB free on Drive.
+checkpoints of the same size; continuous 18-ROI signals ≈ 0.35 GB per inverse; mode A ≈ 0.01 GB); the lobes12 stores
+≈ 0.7-1 GB (5 x 12 x 12 per window ≈ 0.1 GB per inverse, checkpoints alike, 12-ROI signals ≈ 0.23 GB per inverse).
+Notebook 02 prints the real sizes (`build_stores.py size`). Results of all notebooks: a few hundred MB (predictions,
+metrics, figures). Keep ≥ 6 GB free on Drive.
 
 ## 2. Configurations
 
@@ -105,6 +106,16 @@ threshold-free criterion "no more regions than the operator rank" alone gives th
 cross-talk 0.536 / 0.511), so r18 does not meet the pre-specified rule, which recommends **lobes12**. Notebook 02 stops
 before the r18 build, as designed; nothing was changed in response (methodology log entry 59a). The text below
 describes the r18 plan as approved before this result; it needs your new decision.
+
+**Authorized arms (2026-10-19, methodology log entry 59b):** **lobes12** (rule-recommended; reconstructed because the
+exact-BEM rule finds it eligible) and **r18** (exploratory, post-result author approval, amendment A1 in
+`configs/final/amendments.yaml`; reconstructed only once `final.py approve-exploratory --atlas r18 --amendment A1` has
+written `FINAL_v1/decisions/exploratory_r18.json`; `build_stores.py build` refuses it otherwise). The rule, its
+thresholds and its verdict are unchanged; r18 stays labelled exploratory in every output. Notebook 04 compares dk68,
+lobes12 and r18 (`lobes12 - dk68`, `r18 - dk68`, descriptive `r18 - lobes12`) and selects nothing. Open
+compatibility question (not addressed now): Exp 8's anatomical layer groups regions by lobe and hemisphere; with
+lobes12 every group holds one region, so the layer is empty and Exp 8 refuses lobes12 (`models.xu_dual`); this needs a
+decision only if lobes12 becomes the analysis atlas.
 
 **Recommended default (before the exact-BEM result).** **r18** as the analysis atlas for both inverses, with **dk68** kept as the reference /
 sensitivity analysis (and the link to all earlier results), **conditional on** notebook 02 (exact BEM, the stores'
@@ -216,11 +227,13 @@ Inside the release folder (everything the notebooks compute except the r18 store
 <processed>/FINAL_v1/parcellation/atlas_r18_<time>/, resolution_<time>/, store_resolution_<inverse>_<atlas>_<time>/,
                                   reliability_<inverse>_<mode>_<atlas>_<time>/, reconstruction_<inverse>_<mode>_<atlas>_<time>.csv
 <processed>/FINAL_v1/stores/        dated re-checks of store records (never overwrite a store's own record)
-<processed>/FINAL_v1/roi_comparison/compare_<time>/   classification.csv, *_resolution.csv, feature_reliability.csv,
-                                                      summary.json, report.md
+<processed>/FINAL_v1/roi_comparison/compare_<time>/   per_atlas.csv, paired_differences.csv, *_resolution.csv,
+                                                      feature_reliability.csv, summary.json, report.md
 <processed>/FINAL_v1/graphs/<inverse>_<mode>_<atlas>/diagnostics_<time>/
-<processed>/FINAL_v1/decisions/atlas.json (yours, notebook 04), graph_construction.json (notebook 03),
+<processed>/FINAL_v1/decisions/exploratory_r18.json (your recorded approval, notebook 02),
+                               atlas.json (yours, after 04), graph_construction.json (notebook 03),
                                final_analysis.json (notebook 99)
+<processed>/FINAL_v1/stores/authorization_<inverse>_<atlas>_<time>.json   why each new store was allowed
 <processed>/FINAL_v1/results/<lcmv|wmne|sensor>/mode_<B|A>/<atlas>/<graph|none>/<experiment>/<variant>/<setting>/
 <processed>/FINAL_v1/reports/tables_<time>/
 ```
@@ -228,8 +241,8 @@ Inside the release folder (everything the notebooks compute except the r18 store
 Outside the release folder, next to the 68-ROI stores (new, versioned by configuration hash; written by notebook 02):
 
 ```
-<processed>/D3_LCMV_XU/graphsLX-r18_v1_<hash>/, graphsLX10-r18_v1_<hash>/     LCMV r18, modes B / A
-<processed>/D3_WMNE_XU/graphsWX-r18_v1_<hash>/, graphsWX10-r18_v1_<hash>/     wMNE r18, modes B / A
+<processed>/D3_LCMV_XU/graphsLX-<atlas>_v1_<hash>/, graphsLX10-<atlas>_v1_<hash>/   LCMV lobes12 / r18, modes B / A
+<processed>/D3_WMNE_XU/graphsWX-<atlas>_v1_<hash>/, graphsWX10-<atlas>_v1_<hash>/   wMNE lobes12 / r18, modes B / A
 <processed>/D3_LCMV_XU/cache/, D3_WMNE_XU/cache/                               the existing forward-model / input-hash
                                                                                caches (reused; the forward model does
                                                                                not depend on the atlas)
@@ -243,11 +256,12 @@ SHA-256s, timestamps), `status.csv`, per-participant checkpoints, `validation.js
 ## 5. Needs your decision
 
 1. Category A QC findings, if notebook 01 or 02 reports any (`qc/decisions.yaml`; §3.3).
-2. After notebook 04: the analysis atlas (`ATLAS_DECISION` in its last cell; §3.1). Notebook 03 and the experiment
-   notebooks stop until it is recorded.
-3. After notebook 99 §1 (development CV complete): nothing; the freeze and the holdout follow the pre-specified plan.
+2. In notebook 02 §4: whether to record the exploratory r18 approval (`EXPLORATORY_R18_APPROVAL = 'A1'`).
+3. After notebook 04: the next stage, including the analysis atlas (§3.1). Notebook 04 records nothing; notebook 03
+   and the experiment notebooks stop until an atlas is recorded (`final.py choose-atlas`, on your instruction).
+4. After notebook 99 §1 (development CV complete): nothing; the freeze and the holdout follow the pre-specified plan.
    Review the holdout as descriptive only.
-4. The deletion proposals of `docs/final/inventory.md` (nothing is deleted otherwise).
+5. The deletion proposals of `docs/final/inventory.md` (nothing is deleted otherwise).
 
 ## 6. Begin here (notebook 00)
 
@@ -260,4 +274,4 @@ SHA-256s, timestamps), `status.csv`, per-participant checkpoints, `validation.js
 4. Expected result: a table with the four dk68 stores all `passed = True`, four "locked" lines, then the test suite
    (passes once per commit). If a store fails, stop and send the table.
 5. Then open `01_participant_qc`, and continue in the order of §1, one notebook at a time. Stop points: a category A
-   finding (01, 02 §5), 02 not building r18 (it says why), and the atlas decision at the end of 04.
+   finding (01, 02 §5), an atlas 02 does not authorize (it says why), and the end of 04 (your decision).

@@ -173,3 +173,99 @@ def require_frozen(processed, variants: list[dict], commit: str | None) -> dict:
     if d.get("git_commit") and commit and d["git_commit"] != commit:
         raise HoldoutNotFrozen(f"the final analysis was frozen at commit {d['git_commit']}, the code is {commit}")
     return d
+
+
+# ------------------------------------------------------------------------------------------------ atlas authorization
+class AtlasNotAuthorized(RuntimeError):
+    """A coarser atlas may not be reconstructed: neither rule-eligible nor covered by a recorded approval."""
+
+
+def _approximate(forward_model: str) -> bool:
+    return any(w in (forward_model or "") for w in ("approx", "sphere"))
+
+
+def rule_verdict(processed, atlas: str) -> dict:
+    """The verdict of the pre-specified ``atlas_resolution`` rule for ``atlas`` from the latest notebook 02 run with
+    the stores' exact BEM (``FINAL_v1/parcellation/resolution_*/recommendation.json``). Read only; never altered."""
+    found = sorted((release.root(processed) / "parcellation").glob("resolution_*/recommendation.json"))
+    for f in reversed(found):
+        rec = _read(f)
+        if _approximate(rec.get("forward_model", "")):
+            continue
+        v = next((x for x in rec["verdicts"] if x["atlas"] == atlas), None)
+        if v is None:
+            break
+        return {**v, "recommended": rec["recommended"], "forward_model": rec["forward_model"], "source": str(f.parent)}
+    raise DecisionMissing(f"no exact-BEM source-resolution result for {atlas} (run notebook 02 §2: final.py "
+                          "parcellation with the stores' BEM)")
+
+
+def atlas_check_passed(processed, atlas: str) -> dict:
+    found = sorted((release.root(processed) / "parcellation").glob(f"atlas_{atlas}_*/checks.json"))
+    if not found:
+        raise DecisionMissing(f"no anatomical check of {atlas} (final.py atlas-check --atlas {atlas})")
+    checks = _read(found[-1])
+    return {"passed": all(c["passed"] for c in checks.values()), "source": str(found[-1].parent)}
+
+
+def amendments(root: str | Path | None = None) -> dict:
+    return yaml.safe_load((Path(root or CONFIG_ROOT) / "amendments.yaml").read_text()) or {}
+
+
+REQUIRED_AMENDMENT = ("date", "approved_by", "atlas", "status", "scope", "reason", "rule_verdict", "does_not")
+
+
+def exploratory_path(processed, atlas: str) -> Path:
+    return decisions_dir(processed) / f"exploratory_{atlas}.json"
+
+
+def record_exploratory_approval(processed, atlas: str, amendment: str, root=None) -> dict:
+    """The release decision record of the author's post-result approval of an exploratory atlas (once). Valid only
+    for a complete committed amendment of this atlas, and only for an atlas the exact-BEM rule does NOT find
+    eligible (a rule-eligible atlas needs no approval). The rule verdict is copied into the record, unchanged."""
+    a = amendments(root).get(amendment)
+    if not a:
+        raise AtlasNotAuthorized(f"amendment {amendment!r} is not in configs/final/amendments.yaml")
+    missing = [k for k in REQUIRED_AMENDMENT if not a.get(k)]
+    if missing or a["atlas"] != atlas or "exploratory" not in str(a["status"]):
+        raise AtlasNotAuthorized(f"amendment {amendment} does not authorize exploratory {atlas} "
+                                 f"(atlas {a.get('atlas')!r}, status {a.get('status')!r}, missing {missing})")
+    verdict = rule_verdict(processed, atlas)
+    if verdict["eligible"]:
+        raise AtlasNotAuthorized(f"{atlas} meets the rule; it needs no exploratory approval")
+    prev = _read(exploratory_path(processed, atlas))
+    if prev:
+        if prev["amendment"] != amendment:
+            raise RuntimeError(f"another approval is recorded for {atlas} ({exploratory_path(processed, atlas)})")
+        return prev
+    d = {"atlas": atlas, "amendment": amendment, "amendment_record": a, "basis": "exploratory (post-result approval)",
+         "rule_verdict_at_recording": verdict, "rule_eligible": False,
+         "recorded_at": datetime.now(timezone.utc).isoformat(), "release": release.release_manifest()}
+    atomic_write_json(exploratory_path(processed, atlas), d)
+    return d
+
+
+def atlas_authorization(processed, atlas: str, root=None) -> dict:
+    """Why ``atlas`` may be reconstructed: ``rule`` (eligible under the exact-BEM rule) or ``exploratory`` (a valid
+    recorded approval matching its committed amendment); its anatomical check must have passed. Raises
+    ``AtlasNotAuthorized`` otherwise. dk68 (the validated reference stores) is never reconstructed."""
+    if atlas == "dk68":
+        raise AtlasNotAuthorized("dk68 is the validated reference; its stores are never rebuilt")
+    chk = atlas_check_passed(processed, atlas)
+    if not chk["passed"]:
+        raise AtlasNotAuthorized(f"{atlas}: the anatomical checks failed ({chk['source']})")
+    verdict = rule_verdict(processed, atlas)
+    if verdict["eligible"]:
+        return {"atlas": atlas, "basis": "rule", "label": "rule-eligible (exact-BEM atlas_resolution rule)",
+                "rule_verdict": verdict, "atlas_check": chk}
+    rec = _read(exploratory_path(processed, atlas))
+    if not rec:
+        raise AtlasNotAuthorized(f"{atlas} does not meet the atlas_resolution rule ({'; '.join(verdict['reasons'])}) "
+                                 "and no exploratory approval is recorded (final.py approve-exploratory)")
+    a = amendments(root).get(rec["amendment"])
+    if a is None or a != rec["amendment_record"] or a.get("atlas") != atlas:
+        raise AtlasNotAuthorized(f"the recorded approval of {atlas} does not match its committed amendment "
+                                 f"{rec['amendment']}")
+    return {"atlas": atlas, "basis": "exploratory", "label": f"exploratory (post-result approval, amendment "
+            f"{rec['amendment']}, {a['date']}); not rule-eligible", "rule_verdict": verdict, "approval": rec,
+            "atlas_check": chk}

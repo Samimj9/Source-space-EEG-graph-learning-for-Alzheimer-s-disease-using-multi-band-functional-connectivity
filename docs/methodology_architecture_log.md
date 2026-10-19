@@ -3403,6 +3403,51 @@ eligible under the rule; no atlas is changed automatically (dk68 stays the analy
 decision); notebook 02 stopped before building r18, as designed. Any r18 analysis now needs the author's explicit
 approval as an exploratory analysis outside the rule.
 
+### 59b. Protocol amendment A1 and the lobes12 arm: a three-atlas, development-only comparison (2026-10-19)
+
+**Author's authorization (2026-10-19, after the exact-BEM result of 59a):** two additional parcellation arms; dk68
+stays the reference.
+
+- **lobes12**: the atlas the pre-specified `atlas_resolution` rule recommends with the stores' exact BEM (wMNE median
+  cross-talk 0.377, own-region dominance 1.000; LCMV 0.415, 0.833). Reconstructed because it is rule-eligible.
+- **r18**: exploratory, approved after the result (**amendment A1**, `configs/final/amendments.yaml`). Reason (the
+  author's): to assess whether the additional cortical granularity of 18 regions provides useful, reproducible
+  information despite not meeting every source-resolution criterion. Exploratory, not confirmatory. r18 fails the
+  LCMV own-region dominance criterion (0.778 < 0.80; wMNE 0.889; median cross-talk 0.536 / 0.511) and is NOT
+  rule-eligible.
+
+**What did not change:** `configs/final/selection.yaml`, its thresholds (median cross-talk <= 0.60, own-region
+dominance >= 0.80, no forced redundancy, both inverses) and the rule's verdict and recommendation. No analysis atlas
+is selected; `FINAL_v1/decisions/atlas.json`, `graph_construction.json` and `final_analysis.json` are not written.
+
+**Implementation (`experiments.decisions`):** `atlas_authorization` allows a reconstruction only if the atlas's
+anatomical checks passed and it is either eligible under the latest exact-BEM rule result (an approximate head model
+never authorizes) or covered by a recorded exploratory approval. `record_exploratory_approval` (`final.py
+approve-exploratory --atlas r18 --amendment A1`) writes `FINAL_v1/decisions/exploratory_r18.json` once, only for a
+complete committed amendment of that atlas, only if the rule finds the atlas NOT eligible, and copies the unchanged
+rule verdict into the record; a record that no longer matches its committed amendment is refused. Listing r18 in a
+configuration is never an approval. `build_stores.py build` enforces the authorization before any processing and
+saves it (`FINAL_v1/stores/authorization_*.json`). Notebook 02 records the approval only when the author sets
+`EXPLORATORY_R18_APPROVAL = 'A1'` (default `None`).
+
+**Comparison (`configs/final/roi_comparison.yaml`, `experiments.roi_comparison`, notebook 04):** the same pre-specified
+models (Exp 1 LR / SVM x PSD / DE, Exp 4 `plv__psd`, Exp 5 `plv__separate__mean`), both inverses, mode B, dense PLV,
+same folds and seeds, 60 epochs, development CV only. Generalized from two atlases to the configured list: per-atlas
+participant-level metrics, and paired differences `lobes12 - dk68`, `r18 - dk68` and (descriptive) `r18 - lobes12`
+on the same participants (paired DeLong; participant-bootstrap CIs). Every atlas carries its role and authorization;
+source-resolution, per-atlas classification and paired differences are separate sections; all comparisons are
+exploratory and not corrected for multiplicity; a comparison with a missing unit is reported as incomplete. The dk68
+units keep their identities (reused). Notebook 04 stops after the report.
+
+**Future compatibility question (not addressed now):** Exp 8's anatomical layer connects regions of the same lobe and
+hemisphere; in lobes12 every such group holds a single region, so the layer would be empty and `models.xu_dual`
+refuses it. Graph construction `lobe_hemisphere` masks are affected the same way. This needs a decision (e.g. a
+bilateral grouping, or excluding the anatomical layer for lobes12) only if lobes12 becomes the analysis atlas.
+
+**Tests:** `tests/test_atlas_arms.py` (unchanged rule and verdict, authorization, approval validation, builder gate,
+matching / QC gates, three-atlas comparison with missing results, CLI selects nothing and never touches the holdout,
+notebook gates, QC reused under a new code pin), updated `tests/test_r18_roi_comparison.py`.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

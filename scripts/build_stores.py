@@ -12,8 +12,10 @@ The 68-ROI stores of both inverses already exist, are validated and are only REA
 ``build`` refuses atlas dk68 (the stores would be recomputed at this commit) and ``correct`` is not offered (the
 corr1 correction of the LCMV stores is done). A coarser atlas (``--atlas dk34_gyral | r18 | lobes12``) is built into
 its own new store directories by the unchanged pipeline (merged Desikan-Killiany labels, ``mean_flip`` over their own
-sources; never averages of 68-ROI signals). Building one needs the author's approval (docs/final/parcellation.md;
-CPU, about 40 min for LCMV and 30-45 min for wMNE per atlas).
+sources; never averages of 68-ROI signals). ``build`` refuses an atlas unless its anatomical checks passed and it is
+either eligible under the exact-BEM ``atlas_resolution`` rule or covered by the author's recorded exploratory approval
+(``experiments.decisions.atlas_authorization``; ``final.py approve-exploratory``). CPU, about 40 min for LCMV and
+30-45 min for wMNE per atlas.
 
 ``validate`` / ``match`` / ``match-atlas`` write ``validation.json`` / ``match.json`` / ``atlas_match.json`` into a
 store only if the store has none yet; an existing record is never overwritten (a re-check is printed and saved under
@@ -104,6 +106,16 @@ if args.action == "build":
     if args.atlas == "dk68":
         sys.exit("the 68-ROI stores exist and are validated; the final framework only reads them (building them at "
                  "this commit would recompute every participant). Coarser atlases: --atlas dk34_gyral | r18 | lobes12")
+    from adgraph.experiments.decisions import AtlasNotAuthorized, DecisionMissing, atlas_authorization
+
+    try:                                             # rule-eligible (exact BEM) or a recorded exploratory approval
+        auth = atlas_authorization(P, args.atlas)
+    except (AtlasNotAuthorized, DecisionMissing) as exc:
+        sys.exit(f"{args.atlas} is not authorized for reconstruction: {exc}")
+    print(f"authorization: {auth['label']}", flush=True)
+    rec = release.root(P) / "stores" / f"authorization_{args.inverse}_{args.atlas}_{stamp()}.json"
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps(auth, indent=1, default=str))
     verify_environment()
     run_b, run_a = build.run_dirs(P, cfg, args.limit)
     b, a = build.run(paths, cfg, P, f"{paths['cache_dir']}/subjects", args.limit,

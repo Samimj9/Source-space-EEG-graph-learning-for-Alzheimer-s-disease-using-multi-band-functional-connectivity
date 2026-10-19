@@ -12,7 +12,9 @@
                                                                     # the recorded atlas
     python scripts/final.py atlas-check --atlas r18                 # anatomical checks of an atlas (no EEG)
     python scripts/final.py store-resolution --inverse lcmv --atlas r18   # resolution of the stores' own operators
-    python scripts/final.py roi-compare                             # dk68 vs r18 (development CV; notebook 04)
+    python scripts/final.py authorize --atlas lobes12               # may this atlas be reconstructed, and why?
+    python scripts/final.py approve-exploratory --atlas r18 --amendment A1   # record the author's approval (once)
+    python scripts/final.py roi-compare                             # dk68 vs lobes12 vs r18 (development CV; nb 04)
     python scripts/final.py choose-atlas --atlas r18 --reason "..." # the AUTHOR records the analysis atlas (once)
     python scripts/final.py freeze                                  # freeze the final analysis (configs/final/
                                                                     # holdout.yaml) once development CV is complete
@@ -49,13 +51,15 @@ from adgraph.config import load_paths
 parser = argparse.ArgumentParser()
 parser.add_argument("action", choices=["stores", "qc", "graphs", "status", "run", "report", "select", "difficult",
                                        "parcellation", "reliability", "reconstruct-check", "smoke", "atlas-check",
-                                       "store-resolution", "roi-compare", "choose-atlas", "freeze", "holdout"])
+                                       "store-resolution", "roi-compare", "choose-atlas", "freeze", "holdout",
+                                       "approve-exploratory", "authorize"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--exp", help="exp0 ... exp8")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
 parser.add_argument("--mode", default="B", choices=["B", "A"])
 parser.add_argument("--atlas", default="dk68", help="dk68 | r18 | ... | selected (the recorded decision)")
 parser.add_argument("--reason", default=None, help="choose-atlas: the scientific reason (recorded)")
+parser.add_argument("--amendment", default=None, help="approve-exploratory: id in configs/final/amendments.yaml")
 parser.add_argument("--graph", default=None, help="graph construction of configs/final/graphs.yaml (GNNs; default "
                                                   "dense); 'selected' = the recorded development-only decision")
 parser.add_argument("--variants", nargs="*", default=None)
@@ -110,21 +114,25 @@ if args.action == "smoke":
             rows.append(t)
             print(t[["experiment", "variant", "setting", "inverse", "state", "participant_auc", "seconds",
                      "message"]].to_string(index=False), flush=True)
-    # r18 stores (matched to the dk68 ones) and the dk68 vs r18 comparison of notebook 04, development CV only
+    # lobes12 and r18 stores (matched to the dk68 ones) and the three-atlas comparison of notebook 04 (development CV)
     from adgraph.experiments import roi_comparison as rc
     from adgraph.experiments.report import collect
 
-    write_release_stores(root, n_windows=3, psd_effect=0.8, conn_effect=0.8, band_direction=0.5, atlas="r18")
+    for atlas in rc.config()["atlases"]:
+        if atlas != rc.config()["reference"]:
+            write_release_stores(root, n_windows=3, psd_effect=0.8, conn_effect=0.8, band_direction=0.5, atlas=atlas)
     cfg = experiment_configs()
     for r in rc.runs():                                    # dk68 units run above are resumed, not recomputed
         t = run_experiment(cfg[r["exp"]], root, r["inverse"], "B", r["atlas"],
                            None if r["graph"] == "none" else r["graph"], [r["variant"]], ["xu_dev_cv"])
         rows.append(t)
-    cls, missing = rc.classification(collect(release.results_dir(root)))
-    summ = rc.summary(cls, missing)
-    print(cls[["experiment", "variant", "inverse", "auc_dk68", "auc_r18", "auc_diff_r18_minus_dk68",
-               "auc_diff_boot_low", "auc_diff_boot_high"]].round(3).to_string(index=False) if len(cls) else missing)
-    print(f"ROI comparison (synthetic): {summ['statement']}")
+    table = collect(release.results_dir(root))
+    cls, _ = rc.classification(table)
+    summ = rc.summary(cls, rc.per_atlas(table)[1])
+    print(cls[["comparison", "experiment", "variant", "inverse", "auc_a", "auc_b", "auc_diff", "auc_diff_boot_low",
+               "auc_diff_boot_high"]].round(3).to_string(index=False) if len(cls) else "no paired results")
+    for name, v in summ["comparisons"].items():
+        print(f"atlas comparison (synthetic) {name}: {v['statement']}")
     res = pd.concat(rows, ignore_index=True)
     bad = res[res["state"] != "completed"]
     print(f"\nsmoke run: {len(res)} units, {len(bad)} not completed; ROI comparison complete: {summ['complete']}; "
@@ -401,21 +409,40 @@ if args.action == "roi-compare":
     from adgraph.experiments.report import collect
 
     cfg = rc.config()
-    cls, missing = rc.classification(collect(release.results_dir(P)), cfg)
+    table = collect(release.results_dir(P))
+    atlas_t, missing = rc.per_atlas(table, cfg)
+    cls, _ = rc.classification(table, cfg)
     summ = rc.summary(cls, missing, cfg)
     ev = rc.source_evidence(release.root(P), cfg)
+    auth = {}
+    for atlas in cfg["atlases"]:
+        if atlas == cfg["reference"]:
+            auth[atlas] = "validated reference stores"
+            continue
+        try:
+            auth[atlas] = decisions.atlas_authorization(P, atlas)["label"]
+        except (decisions.AtlasNotAuthorized, decisions.DecisionMissing) as exc:
+            auth[atlas] = f"NOT authorized: {exc}"
     out = release.root(P) / "roi_comparison" / f"compare_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    atomic_write_csv(out / "classification.csv", cls)
+    atomic_write_csv(out / "per_atlas.csv", atlas_t)
+    atomic_write_csv(out / "paired_differences.csv", cls)
     for name, t in ev.items():
         atomic_write_csv(out / f"{name}.csv", t)
-    write_json(out / "summary.json", {**summ, "config": cfg, "release": release.release_manifest(),
-                                      "holdout": "not evaluated"})
-    atomic_write_text(out / "report.md", rc.report_markdown(cls, summ, ev, cfg))
+    write_json(out / "summary.json", {**summ, "missing": missing, "authorization": auth, "config": cfg,
+                                      "release": release.release_manifest(), "holdout": "not evaluated",
+                                      "atlas_selected": None})
+    atomic_write_text(out / "report.md", rc.report_markdown(atlas_t, cls, summ, ev, cfg, auth))
+    for atlas in cfg["atlases"]:
+        print(f"{atlas}: {cfg['roles'].get(atlas, '')} | {auth[atlas]}")
     for name, t in ev.items():
         print(f"==== {name}\n{t.round(3).to_string(index=False)}")
-    if len(cls):
-        print(cls.drop(columns=["graph"]).round(3).to_string(index=False))
-    print(f"\n{summ['statement']}\n-> {out}")
+    if len(atlas_t):
+        print(atlas_t.drop(columns=["role"]).round(3).to_string(index=False))
+    for name, v in summ["comparisons"].items():
+        print(f"{name}: {v['statement']}")
+    if missing:
+        print(f"missing units: {missing}")
+    print(f"{summ['caveat']}\n-> {out}")
     sys.exit(0 if summ["complete"] else 1)
 
 if args.action == "choose-atlas":
@@ -465,3 +492,22 @@ if args.action == "holdout":
         failed += int((t["state"] != "completed").sum())
     print("holdout results are descriptive only (release.HOLDOUT_POLICY)")
     sys.exit(1 if failed else 0)
+
+if args.action == "approve-exploratory":
+    if not args.amendment:
+        sys.exit("pass --amendment <id> (configs/final/amendments.yaml)")
+    try:
+        d = decisions.record_exploratory_approval(P, args.atlas, args.amendment)
+    except (decisions.AtlasNotAuthorized, decisions.DecisionMissing) as exc:
+        sys.exit(str(exc))
+    v = d["rule_verdict_at_recording"]
+    print(f"recorded: exploratory {d['atlas']} (amendment {d['amendment']}, {d['amendment_record']['date']}); rule "
+          f"verdict unchanged: eligible={v['eligible']} ({'; '.join(v['reasons'])}) -> "
+          f"{decisions.exploratory_path(P, args.atlas)}")
+
+if args.action == "authorize":
+    try:
+        a = decisions.atlas_authorization(P, args.atlas)
+    except (decisions.AtlasNotAuthorized, decisions.DecisionMissing) as exc:
+        sys.exit(f"{args.atlas}: NOT authorized: {exc}")
+    print(f"{args.atlas}: authorized, {a['label']}")

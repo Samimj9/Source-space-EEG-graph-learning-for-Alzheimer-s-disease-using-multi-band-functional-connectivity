@@ -105,10 +105,12 @@ e.g. `D1-3`, `D2-3`.
 - **Stores (read only, locked):** LCMV `D3_LCMV_XU/graphsLX{,10}_v1_811690218bfa_corr1`, wMNE
   `D3_WMNE_XU/graphsWX{,10}_v1_c32bc6c67f0e` (mode B / A; 68 DK ROIs, 5 Xu bands). One store configuration
   `configs/source_graphs.yaml`; `sourcegraphs.config.resolve(inverse, atlas)` reproduces both stores' configurations
-  exactly (tested). Never rebuild or modify them. Coarser atlases get new stores (`scripts/build_stores.py`): the r18
-  stores (approved 2026-10-18) are built by notebook 02 from the original recordings into
-  `D3_LCMV_XU/graphsLX{,10}-r18_v1_<hash>` and `D3_WMNE_XU/graphsWX{,10}-r18_v1_<hash>`, validated, matched (wMNE to
-  LCMV; each window by window to its dk68 store, `atlas_match.json`) and QC'd before use.
+  exactly (tested). Never rebuild or modify them. Coarser atlases get new stores (`scripts/build_stores.py`), built by
+  notebook 02 from the original recordings into `D3_LCMV_XU/graphsLX{,10}-<atlas>_v1_<hash>` and
+  `D3_WMNE_XU/graphsWX{,10}-<atlas>_v1_<hash>`, validated, matched (wMNE to LCMV; each window by window to its dk68
+  store, `atlas_match.json`) and QC'd before use. A build needs `experiments.decisions.atlas_authorization`: lobes12
+  is rule-eligible (exact BEM); r18 is exploratory and needs the author's recorded approval (amendment A1,
+  `configs/final/amendments.yaml`, `final.py approve-exploratory`). Never alter the rule, its thresholds or a verdict.
 - **One version system:** `adgraph.release`, outputs under `<processed>/FINAL_v1/` (except the coarser-atlas stores,
   next to the 68-ROI stores), one code pin
   `FINAL_v1/CODE_COMMIT.txt`. The earlier pins (`CODE_COMMIT.txt`, `D3_CODE_COMMIT.txt`, LX / WX / ES200 / R1 pins) are
@@ -125,8 +127,9 @@ e.g. `D1-3`, `D2-3`.
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by
-  the author (`final.py choose-atlas`) after the source-resolution evidence and the development-only dk68 vs r18
-  comparison (notebook 04, `configs/final/roi_comparison.yaml`), never by classification results alone; the graph
+  the author (`final.py choose-atlas`) after the source-resolution evidence and the development-only dk68 vs lobes12
+  vs r18 comparison (notebook 04, `configs/final/roi_comparison.yaml`; 04 itself selects nothing), never by
+  classification results alone; the graph
   construction is then chosen on that atlas by the pre-specified development-CV rule only (notebook 03).
 
 ## Repository layout

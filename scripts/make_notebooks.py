@@ -4,8 +4,9 @@
 
     notebooks/00_setup_and_stores.ipynb        verify and lock the four validated stores (CPU)
     notebooks/01_participant_qc.ipynb          participant QC of every store; category A decisions (CPU)
-    notebooks/02_parcellation.ipynb            source resolution, r18 atlas checks, r18 stores (validated, matched), QC
-    notebooks/04_roi_68_vs_18.ipynb            controlled dk68 vs r18 comparison (development CV); atlas decision
+    notebooks/02_parcellation.ipynb            source resolution, atlas checks, lobes12 / r18 stores (authorized, validated,
+                                               matched), QC
+    notebooks/04_roi_68_vs_18.ipynb            controlled dk68 vs lobes12 vs r18 comparison (development CV); stops
     notebooks/03_graph_construction.ipynb      graph diagnostics + the development-CV comparison on that atlas (GPU)
     notebooks/Exp<k>_*.ipynb                   ONE experiment each, Exp 0-8, development CV (GPU for 2-8)
     notebooks/99_results_report.ipynb          freeze the final analysis, descriptive holdout, final tables (GPU)
@@ -163,96 +164,115 @@ if UNRESOLVED:
     ])
 
 
-QC_GATE = """UNRESOLVED = []
-for inverse in ('lcmv', 'wmne'):
+QC_BODY = """for inverse in ('lcmv', 'wmne'):
     for mode in ('B', 'A'):
         try:
             sh(f"python scripts/final.py qc --inverse {inverse} --mode {mode} --atlas {ATLAS}")
         except RuntimeError:
-            UNRESOLVED.append((inverse, mode))
-from IPython.display import Markdown
+            UNRESOLVED.append((ATLAS, inverse, mode))
 for d in sorted(glob.glob(FINAL + f'/qc/*_*_{ATLAS}/')):
     if os.path.exists(d + 'qc_report.md'):
-        display(Markdown(open(d + 'qc_report.md').read()))
-if UNRESOLVED:
-    raise RuntimeError(f'category A findings need a decision for {ATLAS} {UNRESOLVED}: see the reports above and '
-                       'docs/final/qc.md; experiments refuse to start until then')"""
+        display(Markdown(open(d + 'qc_report.md').read()))"""
 
 
 def parcellation_notebook() -> dict:
+    from adgraph.experiments import roi_comparison as rc
+
+    new = [a for a in rc.config()["atlases"] if a != rc.config()["reference"]]
     return notebook([
-        md("""# 02 · Parcellation: source resolution, then the 18-region (r18) stores (CPU)
+        md(f"""# 02 · Parcellation: source resolution, then the {' and '.join(new)} stores (CPU)
 
-1. **Anatomy of the r18 atlas** (no EEG): each hemisphere's 34 Desikan-Killiany labels partitioned into 9 regions,
-   no cross-hemisphere region, identical left / right definitions, every region one contiguous piece of cortex,
-   correct hemispheric placement, non-empty source sets.
-2. **Analytic source resolution** per atlas (68 / 34 / 18 / 12 regions), both inverses, with the stores' fsaverage
-   BEM and inverse settings: leadfield rank, forced redundancy, cross-talk, own-region dominance, leakage.
-3. **The stores' own operators** (real data, no labels): every development participant's saved 68-ROI operator
-   (LCMV from the participant's own data covariance; wMNE) against the stores' cached forward model; feature
-   reliability; whether coarse signals could be rebuilt from saved intermediates (they are not: §4 rebuilds).
-4. **r18 stores** (approved by the author, 2026-10-18, conditional on steps 1-2): built from the ORIGINAL recordings
-   by the unchanged store pipeline (merged Desikan-Killiany labels, `mean_flip` over their own sources; never averages
-   of 68-ROI signals or PLV), LCMV and wMNE, window modes B and A; validated, wMNE matched to LCMV, and each matched
-   window by window to its 68-ROI store (participants, labels, windows, split, sampling, sensor features).
-5. **QC** of the four r18 stores, then the resolution of the r18 operators actually built and their reliability.
+1. **Anatomy** of {' and '.join(new)} (no EEG): each hemisphere's 34 Desikan-Killiany labels partitioned, no
+   cross-hemisphere region, identical left / right definitions, every region one contiguous piece of cortex, correct
+   hemispheric placement, non-empty source sets.
+2. **Analytic source resolution** per atlas, both inverses, with the stores' exact fsaverage BEM and inverse settings,
+   and the pre-specified `atlas_resolution` rule (`configs/final/selection.yaml`, unchanged). Its verdict is
+   authoritative and is never altered: with the exact BEM, lobes12 is rule-recommended and r18 fails the LCMV
+   own-region dominance criterion (0.778 < 0.80).
+3. **The 68-ROI stores' own operators** (real data, no labels; the corrected LCMV store reads the verified original
+   checkpoints), feature reliability, reconstruction check.
+4. **Authorization, then the new stores.** An atlas is reconstructed only if its anatomical checks passed AND it is
+   rule-eligible (lobes12) OR the author's post-result approval of an exploratory atlas is recorded (r18: amendment
+   A1, `configs/final/amendments.yaml`; set `EXPLORATORY_R18_APPROVAL = 'A1'` below to record it). The build refuses
+   otherwise (`build_stores.py build`). Each store is built from the ORIGINAL recordings by the unchanged pipeline
+   (merged Desikan-Killiany labels, `mean_flip` over their own sources; never averages of 68-ROI signals or PLV),
+   LCMV and wMNE, window modes B and A; validated, wMNE matched to LCMV, and each matched window by window to its
+   68-ROI store (participants, labels, windows, split, bands, sampling, sensor features).
+5. **QC** of every new store (category A stops here), then the resolution and reliability of the operators built.
 
-The 68-ROI stores are only read. r18 is NOT made the analysis atlas here: that is recorded by the author after
-notebook 04. A rank-18 sensor space does not prove that 18 regions are independently or accurately localized; the
-cross-talk and dominance numbers quantify how far they are. Resumable (participant checkpoints). CPU, about 2-3 h
-in total (store builds ≈ 40 min LCMV + 30-45 min wMNE).
+The 68-ROI stores are only read. No analysis atlas is selected here. Resumable (participant checkpoints). CPU,
+about 1.5 h per atlas for the builds plus 30-60 min of diagnostics.
 """ + HOWTO),
         code(SETUP),
-        code(SHOW_LATEST + '''
-import json'''),
-        md("## 1. Anatomical checks of the r18 atlas"),
-        code('''ATLAS_OK = True
-try:
-    sh("python scripts/final.py atlas-check --atlas r18")
-except RuntimeError:
-    ATLAS_OK = False'''),
-        md("## 2. Analytic source resolution and the atlas recommendation (stores' BEM)"),
+        code(SHOW_LATEST),
+        md("## 1. Anatomical checks"),
+        code(f'''NEW_ATLASES = {json.dumps(new)}
+ATLAS_OK = {{}}
+for atlas in NEW_ATLASES:
+    try:
+        sh(f"python scripts/final.py atlas-check --atlas {{atlas}}")
+        ATLAS_OK[atlas] = True
+    except RuntimeError:
+        ATLAS_OK[atlas] = False
+print(ATLAS_OK)'''),
+        md("## 2. Analytic source resolution and the rule's recommendation (stores' BEM; unchanged)"),
         code('sh("python scripts/final.py parcellation")'),
         code('''d = latest(FINAL + '/parcellation/resolution_*')
 display(pd.read_csv(d + '/resolution_by_atlas.csv').round(3))
 rec = json.load(open(d + '/recommendation.json'))
-print('recommended atlas:', rec['recommended'], '|', rec['forward_model'])
+print('rule-recommended atlas:', rec['recommended'], '|', rec['forward_model'])
 for v in rec['verdicts']:
-    print(v['atlas'], 'eligible' if v['eligible'] else 'not eligible', '; '.join(v['reasons']))
-R18_ELIGIBLE = any(v['atlas'] == 'r18' and v['eligible'] for v in rec['verdicts'])
+    print(v['atlas'], 'eligible' if v['eligible'] else 'NOT eligible', '; '.join(v['reasons']))
 if 'approx' in rec['forward_model'] or 'sphere' in rec['forward_model']:
-    print("NOTE: the stores' BEM was not found; this is an approximate head model (docs/final/parcellation.md)")'''),
+    raise RuntimeError("the stores' BEM was not found: an approximate head model cannot authorize a reconstruction")'''),
         md("## 3. The 68-ROI stores' own operators, feature reliability, reconstruction check (read-only)"),
         code('''for inverse in ('lcmv', 'wmne'):
     sh(f"python scripts/final.py store-resolution --inverse {inverse} --atlas dk68")
     sh(f"python scripts/final.py reliability --inverse {inverse} --mode B")
     sh(f"python scripts/final.py reconstruct-check --inverse {inverse} --mode B")'''),
-        md("""## 4. r18 stores from the original recordings (approved; runs only if steps 1-2 passed)
+        md("""## 4. Authorization, then the new stores from the original recordings
 
-Each step is resumable: completed participants are skipped, and `validation.json`, `match.json` and
-`atlas_match.json` are written once. New directories next to the 68-ROI stores (outside `FINAL_v1/`):
-`D3_LCMV_XU/graphsLX-r18_v1_<hash>`, `graphsLX10-r18_v1_<hash>`, `D3_WMNE_XU/graphsWX-r18_v1_<hash>`,
-`graphsWX10-r18_v1_<hash>`; their sizes are printed below."""),
-        code('''BUILD_R18 = True   # approved by the author (2026-10-18), conditional on the checks above
-if not (ATLAS_OK and R18_ELIGIBLE):
-    raise RuntimeError(f"r18 not built: atlas checks passed = {ATLAS_OK}, r18 meets the resolution rule with the "
-                       f"stores' BEM = {R18_ELIGIBLE}. The 68-ROI stores remain the analysis; report to the author.")
-if BUILD_R18:
+`EXPLORATORY_R18_APPROVAL`: the author's post-result approval of the exploratory r18 arm. Leave `None` to build only
+the rule-eligible atlas; set `'A1'` to record amendment A1 (once, in `FINAL_v1/decisions/exploratory_r18.json`; the
+rule verdict is copied into it unchanged). Builds are resumable; `validation.json`, `match.json` and
+`atlas_match.json` are written once. New directories next to the 68-ROI stores (outside `FINAL_v1/`), e.g.
+`D3_LCMV_XU/graphsLX-lobes12_v1_<hash>`, `graphsLX10-lobes12_v1_<hash>`, `D3_WMNE_XU/graphsWX-r18_v1_<hash>`."""),
+        code('''EXPLORATORY_R18_APPROVAL = None   # set to 'A1' to record the author's approval (amendment A1, 2026-10-19)
+import shlex
+if EXPLORATORY_R18_APPROVAL:
+    sh(f"python scripts/final.py approve-exploratory --atlas r18 --amendment {shlex.quote(EXPLORATORY_R18_APPROVAL)}")
+BUILD = []
+for atlas in NEW_ATLASES:
+    try:
+        sh(f"python scripts/final.py authorize --atlas {atlas}")
+        BUILD.append(atlas)
+    except RuntimeError:
+        print(f'{atlas}: not built (not authorized; see above)')
+if not BUILD:
+    raise RuntimeError('no atlas is authorized for reconstruction; see the messages above')
+for atlas in BUILD:
     for inverse in ('lcmv', 'wmne'):
-        sh(f"python scripts/build_stores.py build --inverse {inverse} --atlas r18")
-        sh(f"python scripts/build_stores.py validate --inverse {inverse} --atlas r18")
-    sh("python scripts/build_stores.py match --atlas r18")
+        sh(f"python scripts/build_stores.py build --inverse {inverse} --atlas {atlas}")
+        sh(f"python scripts/build_stores.py validate --inverse {inverse} --atlas {atlas}")
+    sh(f"python scripts/build_stores.py match --atlas {atlas}")
     for inverse in ('lcmv', 'wmne'):
-        sh(f"python scripts/build_stores.py match-atlas --inverse {inverse} --atlas r18")
-        sh(f"python scripts/build_stores.py size --inverse {inverse} --atlas r18")
-    sh("python scripts/final.py stores --atlas r18")      # verification of the four r18 stores (locked when QC opens them)'''),
-        md("## 5. QC of the r18 stores, then the resolution and reliability of the r18 operators actually built"),
-        code("ATLAS = 'r18'\n" + QC_GATE),
-        code('''for inverse in ('lcmv', 'wmne'):
-    sh(f"python scripts/final.py store-resolution --inverse {inverse} --atlas r18")
-    sh(f"python scripts/final.py reliability --inverse {inverse} --mode B --atlas r18")
+        sh(f"python scripts/build_stores.py match-atlas --inverse {inverse} --atlas {atlas}")
+        sh(f"python scripts/build_stores.py size --inverse {inverse} --atlas {atlas}")
+    sh(f"python scripts/final.py stores --atlas {atlas}")   # all four stores verify (locked when QC opens them)'''),
+        md("## 5. QC of the new stores, then the resolution and reliability of the operators actually built"),
+        code('''UNRESOLVED = []
+from IPython.display import Markdown
+for ATLAS in BUILD:
+''' + "\n".join("    " + ln for ln in QC_BODY.splitlines()) + '''
+if UNRESOLVED:
+    raise RuntimeError(f'category A findings need a decision for {UNRESOLVED}: see the reports above and '
+                       'docs/final/qc.md; nothing proceeds until then')'''),
+        code('''for atlas in BUILD:
+    for inverse in ('lcmv', 'wmne'):
+        sh(f"python scripts/final.py store-resolution --inverse {inverse} --atlas {atlas}")
+        sh(f"python scripts/final.py reliability --inverse {inverse} --mode B --atlas {atlas}")
 for inverse in ('lcmv', 'wmne'):
-    for atlas in ('dk68', 'r18'):
+    for atlas in ['dk68'] + BUILD:
         d = latest(f"{FINAL}/parcellation/store_resolution_{inverse}_{atlas}_*")
         t = pd.read_csv(d + '/per_participant.csv')
         print(inverse, atlas, t[['operator_rank', 'redundant_signals', 'crosstalk_fraction_median',
@@ -266,36 +286,53 @@ def roi_notebook() -> dict:
     cfg = rc.config()
     runs = [(r["exp"], r["variant"], r["atlas"], r["inverse"], r["graph"]) for r in rc.runs(cfg)]
     models = "\n".join(f"- `{e}`: " + ", ".join(f"`{v}`" for v in vs) for e, vs in cfg["models"].items())
+    roles = "\n".join(f"- **{a}**: {cfg['roles'][a]}" for a in cfg["atlases"])
+    comps = ", ".join(f"`{a} - {b}`" for a, b in cfg["comparisons"])
     return notebook([
-        md(f"""# 04 · Controlled ROI comparison: 68 vs 18 regions (development CV only)
+        md(f"""# 04 · Controlled atlas comparison: {' vs '.join(cfg['atlases'])} (development CV only; exploratory)
 
-`configs/final/roi_comparison.yaml`. The same 52 development participants, the same five participant-disjoint
-folds (`xu_dev_cv`), window mode {cfg['mode']}, the same training procedures and seeds, LCMV and wMNE, for:
+`configs/final/roi_comparison.yaml`.
+
+{roles}
+
+The same 52 development participants, the same five participant-disjoint folds (`xu_dev_cv`), window mode
+{cfg['mode']}, the same training procedures and seeds, LCMV and wMNE, for:
 
 {models}
 
-GNNs on dense weighted PLV, exactly 60 epochs. **The holdout is not evaluated** (and is refused by the code until
-the final analysis is frozen in notebook 99).
+GNNs on dense weighted PLV, exactly 60 epochs. **The holdout is not evaluated** (the code refuses it until the final
+analysis is frozen). Paired differences on the same participants: {comps}.
 
-The report keeps two kinds of evidence apart: **source localization / spatial resolution** (label-free: forced
-redundancy, cross-talk, own-region dominance of the operators actually built, feature reliability; notebook 02) and
-**classification** (participant-level pooled out-of-fold ROC-AUC with DeLong CI, balanced accuracy, F1, sensitivity,
-specificity, paired r18 - dk68 differences with paired DeLong and participant-bootstrap CIs). A higher AUC alone
-does not make an atlas better, and the summary never forces a winner. You then record the analysis atlas (§4).
+The report keeps **source localization / spatial resolution** (label-free; notebook 02), **classification per
+atlas** (participant-level pooled out-of-fold ROC-AUC with DeLong CI, balanced accuracy, F1, sensitivity,
+specificity) and **paired differences** (paired DeLong, participant-bootstrap CIs) in separate sections. All
+comparisons are exploratory and not corrected for multiplicity; a higher AUC alone does not make an atlas better,
+and the summary never forces a winner. **This notebook stops after the report: no atlas is selected** (no
+`decisions/atlas.json` is written); the next stage is your decision.
 
-The dk68 runs are the same units the experiment notebooks reuse (nothing is computed twice). GPU runtime (T4).
-Resumable.
+The dk68 runs are the same units the experiment notebooks reuse (nothing is computed twice). An atlas whose stores
+are not authorized / built (e.g. r18 without the recorded approval) is skipped and its comparisons are reported as
+incomplete. GPU runtime (T4). Resumable.
 """ + HOWTO),
         code(SETUP),
-        code(SHOW_LATEST + '''
-import json'''),
-        md("## 1. Both atlases' stores verify (read-only)"),
-        code('''for atlas in ('dk68', 'r18'):
-    sh(f"python scripts/final.py stores --atlas {atlas}")'''),
+        code(SHOW_LATEST),
+        md("## 1. Stores that take part (read-only verification)"),
+        code(f'''ATLASES = []
+for atlas in {json.dumps(cfg['atlases'])}:
+    try:
+        sh(f"python scripts/final.py stores --atlas {{atlas}}")
+        ATLASES.append(atlas)
+    except RuntimeError:
+        if atlas == '{cfg['reference']}':
+            raise
+        print(f'{{atlas}}: stores missing or not verified: skipped (its comparisons will be incomplete)')
+print('atlases compared:', ATLASES)'''),
         md("## 2. Runs (development CV only; each unit is checkpointed)"),
         code(f'''RUNS = {json.dumps(runs)}      # (experiment, variant, atlas, inverse, graph)
 ERRORS = []
 for exp, variant, atlas, inverse, graph in RUNS:
+    if atlas not in ATLASES:
+        continue
     g = '' if graph == 'none' else f' --graph {{graph}}'
     try:
         sh(f"python scripts/final.py run --exp {{exp}} --inverse {{inverse}} --mode {cfg['mode']} --atlas {{atlas}}{{g}} "
@@ -307,23 +344,16 @@ if ERRORS:
         md("## 3. The comparison (saved outputs only)"),
         code('''try:
     sh("python scripts/final.py roi-compare")
-finally:
-    d = latest(FINAL + '/roi_comparison/compare_*')
-    from IPython.display import Markdown
-    if d:
-        display(Markdown(open(d + '/report.md').read()))'''),
-        md("""## 4. Your decision: the analysis atlas (recorded once)
+except RuntimeError:
+    print('some comparisons are incomplete (see above); the complete ones are reported')
+d = latest(FINAL + '/roi_comparison/compare_*')
+from IPython.display import Markdown
+if d:
+    display(Markdown(open(d + '/report.md').read()))'''),
+        md("""## Stop here
 
-Review §3 (source-resolution evidence first, classification second). Then set `ATLAS_DECISION` to `'dk68'` or
-`'r18'` with the scientific reason and run this cell. Nothing is recorded while it is `None`; notebook 03 and the
-experiment notebooks stop until a decision exists. The atlas not chosen stays a sensitivity / reference analysis."""),
-        code('''ATLAS_DECISION = None   # 'dk68' or 'r18'
-REASON = ''             # e.g. 'r18: no forced redundancy, cross-talk 0.5 vs 0.85, reliability ...; AUC difference ...'
-if ATLAS_DECISION:
-    import shlex
-    sh(f"python scripts/final.py choose-atlas --atlas {ATLAS_DECISION} --reason {shlex.quote(REASON)}")
-else:
-    print('no atlas recorded yet: set ATLAS_DECISION and REASON above after reviewing section 3')'''),
+The comparison is complete for review. Nothing has been selected: no analysis atlas is recorded, notebook 03 and the
+experiment notebooks are not started. The next stage is the author's explicit decision (FINAL_RUN_GUIDE.md §3.1)."""),
     ], gpu=True)
 
 
@@ -530,13 +560,14 @@ Generated by `scripts/make_notebooks.py`; never edit by hand. Run them **in this
 |---|---|---|---|
 {rows}
 
-Notebook 04 comes before 03 on purpose: the graph-construction comparison runs once, on the atlas you record in 04.
+Notebook 04 comes before 03 on purpose: the graph-construction comparison runs once, on the atlas you record after
+reviewing 04. Notebook 04 itself selects nothing and stops after the comparison.
 Development CV only until notebook 99, which freezes the final analysis and then evaluates the holdout once,
 descriptively, for the frozen units.
 
-Outputs go to `<outputs>/{release.ROOT}/` on Google Drive, except the new 18-region stores of notebook 02, which are
-written next to the 68-ROI stores (`<outputs>/D3_LCMV_XU/graphsLX-r18_*`, `graphsLX10-r18_*`,
-`<outputs>/D3_WMNE_XU/graphsWX-r18_*`, `graphsWX10-r18_*`; layout in `FINAL_RUN_GUIDE.md`). The validated 68-ROI
+Outputs go to `<outputs>/{release.ROOT}/` on Google Drive, except the new lobes12 / r18 stores of notebook 02, which
+are written next to the 68-ROI stores (`<outputs>/D3_LCMV_XU/graphsLX{{,10}}-<atlas>_*`,
+`<outputs>/D3_WMNE_XU/graphsWX{{,10}}-<atlas>_*`; layout in `FINAL_RUN_GUIDE.md`). The validated 68-ROI
 stores (`D3_LCMV_XU/graphsLX*_corr1`, `D3_WMNE_XU/graphsWX*`) and every earlier result are only read. The notebooks
 of the earlier suites are archived in `legacy/notebooks/` and are not part of this release.
 """
@@ -547,11 +578,11 @@ def main() -> None:
     out.mkdir(exist_ok=True)
     nbs = {"00_setup_and_stores.ipynb": (setup_notebook(), "verify and lock the four stores; test suite", "CPU"),
            "01_participant_qc.ipynb": (qc_notebook(), "participant QC; category A decisions", "CPU"),
-           "02_parcellation.ipynb": (parcellation_notebook(), "source resolution; r18 atlas checks; r18 stores "
-                                                              "from the recordings, validated and matched; their QC",
-                                     "CPU"),
-           "04_roi_68_vs_18.ipynb": (roi_notebook(), "controlled dk68 vs r18 comparison (development CV); "
-                                                     "you record the analysis atlas", "GPU"),
+           "02_parcellation.ipynb": (parcellation_notebook(), "source resolution; lobes12 / r18 atlas checks; "
+                                                              "authorized stores from the recordings, validated and "
+                                                              "matched; their QC", "CPU"),
+           "04_roi_68_vs_18.ipynb": (roi_notebook(), "controlled dk68 vs lobes12 vs r18 comparison (development CV; "
+                                                     "exploratory); stops for your decision", "GPU"),
            "03_graph_construction.ipynb": (graph_notebook(), "graph diagnostics and development-CV comparison on the "
                                                              "recorded atlas; selection", "GPU")}
     for exp, cfg in experiment_configs().items():

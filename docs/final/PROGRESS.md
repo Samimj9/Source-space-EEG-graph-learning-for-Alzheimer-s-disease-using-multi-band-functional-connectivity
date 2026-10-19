@@ -37,6 +37,12 @@ r18 investigation approved: atlas checks, real-operator resolution, r18 stores f
 to LCMV and to dk68), r18 QC, the controlled dk68 vs r18 comparison (notebook 04), atlas decision by the author, graph
 comparison on that atlas, development CV only until the frozen final analysis (notebook 99).
 
+## Atlas arms (2026-10-19; methodology log entries 59a, 59b)
+
+Checkpoint diagnostics fixed for the corrected LCMV store; exact-BEM rule: lobes12 recommended, r18 not eligible
+(unchanged). Authorized: lobes12 (rule) and r18 (exploratory, amendment A1); notebook 04 compares dk68, lobes12, r18
+and selects nothing.
+
 ## Pending (author)
 
 1. Category A QC decisions, if any (notebook 01).

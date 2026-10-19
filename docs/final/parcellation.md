@@ -153,6 +153,9 @@ shows that the coarse stores need no new data, only recomputation.
    Status (2026-10-19): with the stores' exact BEM, r18 LCMV own-region dominance is 0.778 < 0.80, so r18 does not
    meet the rule and notebook 02 stops before this step; the rule recommends lobes12 (methodology log entry 59a).
    No store is built and no atlas is changed without the author's decision.
+   Then (2026-10-19, entry 59b): the author authorized **lobes12** (rule-eligible) and **r18** (exploratory, amendment
+   A1). Notebook 02 builds every atlas `final.py authorize` accepts: lobes12 by the rule, r18 only after
+   `EXPLORATORY_R18_APPROVAL = 'A1'` records the approval; the rule's verdict is unchanged.
 4. **QC** of the four r18 stores (`final.py qc --atlas r18`), then the resolution and reliability of the r18
    operators actually built.
 5. **Controlled comparison** (notebook 04, `configs/final/roi_comparison.yaml`), development CV only; the author
