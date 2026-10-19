@@ -345,61 +345,76 @@ def sensor_signals(W: np.ndarray, roi: np.ndarray) -> np.ndarray:
     return np.linalg.pinv(W.astype(np.float64)) @ roi.astype(np.float64)
 
 
+class EmptyDiagnostic(RuntimeError):
+    """A diagnostic found no participant to analyse; never reported as a result."""
+
+
+def _require(rows: list, what: str, prov: dict) -> pd.DataFrame:
+    if not rows:
+        raise EmptyDiagnostic(f"{what}: 0 participants analysed in {prov['store']} (checkpoints {prov['checkpoint_dir']}, "
+                              f"missing {prov['missing'][:5]}{'...' if len(prov['missing']) > 5 else ''})")
+    return pd.DataFrame(rows)
+
+
 def reconstruction_check(store_root: str | Path, keys: list[str] | None = None, margin: int = 825,
-                         window: int = 2500) -> pd.DataFrame:
+                         window: int = 2500) -> tuple[pd.DataFrame, dict]:
     """Can coarser-atlas ROI signals be rebuilt from a store's saved intermediates (no recordings)? Read-only.
 
-    Per participant (``subjects/<key>/operator.npz`` W, ``roi_timeseries.npz`` pieces, ``windows.csv``):
-    ``rank`` of W and its constant-vector response (average reference); ``rel_residual`` = |W pinv(W) roi - roi| /
-    |roi| (0 up to float32: the sensor signals are exactly recoverable); and the fraction of the participant's windows
-    whose filter support [start - margin, stop + margin) lies inside the saved piece (the store saved each piece
-    without the analytic-filter margins, so windows within one margin of a piece end cannot be recomputed exactly).
-    ``margin`` = ``sourcegraphs.recording.margin_samples`` (825 at 250 Hz), ``window`` = 10 s."""
+    Per participant: the verified checkpoint (``sourcegraphs.checkpoints.locate``; for a corrected store the original
+    build's checkpoints) gives W (``operator.npz``) and the saved pieces (``roi_timeseries.npz``); the windows are the
+    STORE's own (``windows.csv``; for ``_corr1`` the corrected selection). ``rank`` of W and its constant-vector
+    response (average reference); ``rel_residual`` = |W pinv(W) roi - roi| / |roi| (0 up to float32: the sensor
+    signals are exactly recoverable); and the fraction of the store's windows whose filter support
+    [start - margin, stop + margin) lies inside the saved piece (pieces were saved without the analytic-filter
+    margins). ``margin`` = ``sourcegraphs.recording.margin_samples`` (825 at 250 Hz), ``window`` = 10 s.
+    Returns (one row per participant, provenance); raises ``EmptyDiagnostic`` when no participant was analysed."""
+    from ..sourcegraphs.checkpoints import locate
+
+    prov = locate(store_root, keys, files=("operator.npz", "roi_timeseries.npz"))
+    src = Path(prov["checkpoint_dir"])
+    win = pd.read_csv(Path(store_root) / "windows.csv", usecols=["key", "piece", "start_sample"])
     rows = []
-    for unit in sorted(Path(store_root).glob("subjects/*")):
-        k = unit.name
-        if keys is not None and k not in set(keys):
-            continue
-        if not (unit / "operator.npz").exists() or not (unit / "roi_timeseries.npz").exists():
-            rows.append({"key": k, "available": False})
-            continue
+    for k in prov["participants"]:
+        unit = src / "subjects" / k
         with np.load(unit / "operator.npz") as z:
             W = z["W"]
         s = np.linalg.svd(W, compute_uv=False)
         res, tot, ok, n = 0.0, 0.0, 0, 0
-        win = pd.read_csv(unit / "windows.csv") if (unit / "windows.csv").exists() else pd.DataFrame()
+        mine = win[win["key"] == k]
         with np.load(unit / "roi_timeseries.npz") as z:
             for name in [f for f in z.files if not f.endswith("_start_sample")]:
                 roi = z[name]
                 x = sensor_signals(W, roi)
                 res += float(np.linalg.norm(W @ x - roi) ** 2)
                 tot += float(np.linalg.norm(roi) ** 2)
-                if len(win) and "piece" in win:
-                    start = int(z[f"{name}_start_sample"])
-                    w = win[win["piece"] == int(name.replace("piece", ""))]
-                    off = w["start_sample"].to_numpy() - start
-                    ok += int(((off >= margin) & (off + window + margin <= roi.shape[1])).sum())
-                    n += len(w)
-        rows.append({"key": k, "available": True, "n_rois": W.shape[0], "rank": int((s > s[0] * 1e-8).sum()),
+                w = mine[mine["piece"] == int(name.replace("piece", ""))]
+                off = w["start_sample"].to_numpy() - int(z[f"{name}_start_sample"])
+                ok += int(((off >= margin) & (off + window + margin <= roi.shape[1])).sum())
+                n += len(w)
+        rows.append({"key": k, "n_rois": W.shape[0], "rank": int((s > s[0] * 1e-8).sum()),
                      "constant_response": float(np.abs(W.sum(1)).max() / np.abs(W).max()),
                      "rel_residual": float(np.sqrt(res / tot)) if tot else float("nan"), "n_windows": n,
-                     "windows_reconstructable": ok, "fraction_reconstructable": ok / n if n else float("nan")})
-    return pd.DataFrame(rows)
+                     "n_windows_store": int(len(mine)), "windows_reconstructable": ok,
+                     "fraction_reconstructable": ok / n if n else float("nan"),
+                     "covariance_caveat": k in prov["covariance_caveat"]})
+    return _require(rows, "reconstruction check", prov), prov
 
 
-def operator_ranks(store_root: str | Path, keys: list[str] | None = None) -> pd.DataFrame:
-    """Rank and singular-value spread of each participant's saved ROI operator (``subjects/<key>/operator.npz``)."""
+def operator_ranks(store_root: str | Path, keys: list[str] | None = None) -> tuple[pd.DataFrame, dict]:
+    """Rank and singular-value spread of each participant's saved ROI operator (verified checkpoints, as in
+    ``reconstruction_check``). Raises ``EmptyDiagnostic`` when no participant was analysed."""
+    from ..sourcegraphs.checkpoints import locate
+
+    prov = locate(store_root, keys)
     rows = []
-    for f in sorted(Path(store_root).glob("subjects/*/operator.npz")):
-        k = f.parent.name
-        if keys is not None and k not in set(keys):
-            continue
-        with np.load(f) as z:
+    for k in prov["participants"]:
+        with np.load(Path(prov["checkpoint_dir"]) / "subjects" / k / "operator.npz") as z:
             W = z["W"]
         s = np.linalg.svd(W, compute_uv=False)
         rows.append({"key": k, "n_rois": W.shape[0], "rank": int((s > s.max() * 1e-8).sum()),
-                     "sv_ratio_10": float(s[min(9, len(s) - 1)] / s[0])})
-    return pd.DataFrame(rows)
+                     "sv_ratio_10": float(s[min(9, len(s) - 1)] / s[0]),
+                     "covariance_caveat": k in prov["covariance_caveat"]})
+    return _require(rows, "operator ranks", prov), prov
 
 
 # ------------------------------------------------------------------------- the stores' own operators (real data)
@@ -411,22 +426,27 @@ def operator_resolution(operators: dict[str, np.ndarray], g_regions: np.ndarray)
 
 def store_resolution(store_root: str | Path, subjects_dir: str | Path, atlas: str,
                      keys: list[str] | None = None) -> tuple[pd.DataFrame, dict]:
-    """Resolution of the ROI operators a store ACTUALLY used (read-only): each participant's saved W
-    (``subjects/<key>/operator.npz``; LCMV from that participant's own data covariance, wMNE the data-independent
-    operator of the electrode geometry) against the region leadfield of the store's OWN cached forward model
-    (``<store parent>/cache/lx_forward_<montage_hash>_<spacing>-fwd.fif``: the stores' fsaverage BEM and electrode
-    geometry). Returns (one row per participant, description). Remaining approximations: fsaverage template anatomy,
-    template (Colin27 lookup) electrode positions, independent equal-variance region activity for the cross-talk."""
+    """Resolution of the ROI operators a store ACTUALLY used (read-only): each participant's saved W from the
+    verified checkpoints (``sourcegraphs.checkpoints.locate``; for the corrected LCMV store the original build's
+    checkpoints, whose operators the correction did not change), LCMV from that participant's own data covariance,
+    wMNE the data-independent operator of the electrode geometry, against the region leadfield of the store's OWN
+    cached forward model (``<store parent>/cache/lx_forward_<montage_hash>_<spacing>-fwd.fif``: the stores' fsaverage
+    BEM and electrode geometry). Returns (one row per participant, description); raises ``EmptyDiagnostic`` when no
+    participant was analysed. Remaining approximations: fsaverage template anatomy, template (Colin27 lookup)
+    electrode positions, independent equal-variance region activity for the cross-talk."""
     import mne
 
+    from ..sourcegraphs.checkpoints import locate
+
     root = Path(store_root)
-    subj = pd.read_csv(root / "subjects.csv")
-    if keys is not None:
-        subj = subj[subj["key"].isin(set(keys))]
+    prov = locate(root, keys)
+    _require(prov["participants"], "store resolution", prov)            # before any forward model is read
+    src = Path(prov["checkpoint_dir"])
+    subj = pd.read_csv(root / "subjects.csv", dtype={"key": str, "montage_hash": str})
+    subj = subj[subj["key"].isin(set(prov["participants"]))]
     labs = labels(subjects_dir, atlas)
     by_geom, used = {}, {}
-    for geom, g in subj.groupby(subj["montage_hash"].astype(str) if "montage_hash" in subj else
-                                pd.Series("", index=subj.index)):
+    for geom, g in subj.groupby(subj["montage_hash"] if "montage_hash" in subj else pd.Series("", index=subj.index)):
         files = sorted((root.parent / "cache").glob(f"lx_forward_{geom}_*-fwd.fif" if geom else "lx_forward_*-fwd.fif"))
         if len(files) != 1:
             raise FileNotFoundError(f"forward model of geometry {geom!r} not found uniquely in {root.parent / 'cache'}")
@@ -435,17 +455,17 @@ def store_resolution(store_root: str | Path, subjects_dir: str | Path, atlas: st
         gr = region_leadfield(gl, labs, fwd["src"])
         ops = {}
         for k in g["key"]:
-            f = root / "subjects" / k / "operator.npz"
-            if f.exists():
-                with np.load(f) as z:
-                    ops[k] = z["W"]
-        if ops and next(iter(ops.values())).shape != (len(labs), gl.shape[0]):
+            with np.load(src / "subjects" / k / "operator.npz") as z:
+                ops[k] = z["W"]
+        if next(iter(ops.values())).shape != (len(labs), gl.shape[0]):
             raise ValueError(f"saved operators {next(iter(ops.values())).shape} do not fit atlas {atlas} "
                              f"({len(labs)} regions x {gl.shape[0]} channels)")
         by_geom[geom] = operator_resolution(ops, gr).assign(montage_hash=geom)
         used[geom] = files[0].name
-    t = pd.concat(by_geom.values(), ignore_index=True) if by_geom else pd.DataFrame()
+    t = _require([r for d in by_geom.values() for r in d.to_dict("records")], "store resolution", prov)
+    t["covariance_caveat"] = t["key"].isin(set(prov["covariance_caveat"]))
     return t, {"store": root.name, "atlas": atlas, "forward_models": used, "n_participants": int(len(t)),
+               "checkpoints": prov,
                "head_model": "the store's cached fsaverage BEM forward (as used to build the store)",
                "approximations": ["fsaverage template anatomy", "template (Colin27 lookup) electrode positions",
                                   "cross-talk under independent equal-variance region activity"]}

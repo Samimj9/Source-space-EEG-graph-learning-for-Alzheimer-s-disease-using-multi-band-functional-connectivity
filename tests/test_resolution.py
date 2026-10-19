@@ -79,8 +79,8 @@ def test_atlases_partition_the_desikan_killiany_labels_per_hemisphere():
             assert all(names[j].endswith(r[-3:]) for j in np.flatnonzero(m[i]))    # never across hemispheres
 
 
-def test_sensor_signals_are_exactly_recoverable_from_saved_roi_signals(tmp_path):
-    from adgraph.source.resolution import reconstruction_check, sensor_signals
+def test_sensor_signals_are_exactly_recoverable_from_saved_roi_signals():
+    from adgraph.source.resolution import sensor_signals
 
     rng = np.random.default_rng(4)
     c = _avg_ref(19)
@@ -88,16 +88,7 @@ def test_sensor_signals_are_exactly_recoverable_from_saved_roi_signals(tmp_path)
     x = c @ rng.standard_normal((19, 6000))                               # average-referenced sensor signals
     roi = (W @ x).astype(np.float32)
     assert np.abs(sensor_signals(W, roi) - x).max() / np.abs(x).max() < 1e-4   # float32 storage only
-    unit = tmp_path / "subjects" / "D3-1"
-    unit.mkdir(parents=True)
-    np.savez(unit / "operator.npz", W=W)
-    np.savez(unit / "roi_timeseries.npz", piece0=roi, piece0_start_sample=np.array(1000))
-    starts = 1000 + np.arange(0, 6000 - 2500 + 1, 250)
-    pd.DataFrame({"piece": 0, "start_sample": starts}).to_csv(unit / "windows.csv", index=False)
-    t = reconstruction_check(tmp_path, margin=825, window=2500).iloc[0]
-    assert t["rank"] == 18 and t["constant_response"] < 1e-10 and t["rel_residual"] < 1e-6
-    inside = ((starts - 1000 >= 825) & (starts - 1000 + 2500 + 825 <= 6000)).sum()
-    assert t["windows_reconstructable"] == inside < t["n_windows"]       # edge windows need the unsaved margins
+    # the reconstruction check on saved checkpoints (both store layouts): tests/test_store_checkpoints.py
 
 
 def test_store_operators_are_scored_like_the_analytic_operators():

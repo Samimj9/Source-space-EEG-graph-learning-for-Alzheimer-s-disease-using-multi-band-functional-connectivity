@@ -101,7 +101,12 @@ participant's data covariance; resolution under independent region activity. The
 (median cross-talk ≤ 0.60, own-region dominance ≥ 0.80) were set after these provisional numbers were seen; the
 threshold-free criterion "no more regions than the operator rank" alone gives the same choice.
 
-**Recommended default.** **r18** as the analysis atlas for both inverses, with **dk68** kept as the reference /
+**Exact-BEM result (notebook 02, 2026-10-19):** r18 LCMV own-region dominance 0.778 < 0.80 (wMNE 0.889; median
+cross-talk 0.536 / 0.511), so r18 does not meet the pre-specified rule, which recommends **lobes12**. Notebook 02 stops
+before the r18 build, as designed; nothing was changed in response (methodology log entry 59a). The text below
+describes the r18 plan as approved before this result; it needs your new decision.
+
+**Recommended default (before the exact-BEM result).** **r18** as the analysis atlas for both inverses, with **dk68** kept as the reference /
 sensitivity analysis (and the link to all earlier results), **conditional on** notebook 02 (exact BEM, the stores'
 own operators, validated r18 stores) and the development-only comparison of notebook 04. Code never makes r18 the
 analysis atlas: you record it (`final.py choose-atlas`). A rank-18 sensor space does not prove that 18 regions are

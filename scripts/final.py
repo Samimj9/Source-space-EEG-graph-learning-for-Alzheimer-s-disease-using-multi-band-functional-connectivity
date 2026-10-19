@@ -313,14 +313,16 @@ if args.action == "reliability":
     store, rec = open_store(P, args.inverse, args.mode, args.atlas)
     dev = development_keys(store)
     rel = store_reliability(store, dev)
-    ops = operator_ranks(store.root, dev) if args.inverse == "lcmv" else pd.DataFrame()
+    ops, prov = operator_ranks(store.root, dev) if args.inverse == "lcmv" else (pd.DataFrame(), None)
     out = release.root(P) / "parcellation" / f"reliability_{args.inverse}_{args.mode}_{args.atlas}_" \
                                              f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     out.mkdir(parents=True, exist_ok=True)
     rel.to_csv(out / "split_half_reliability.csv", index=False)
     if len(ops):
         ops.to_csv(out / "operator_ranks.csv", index=False)
-        print(f"ROI operator rank: {ops['rank'].value_counts().to_dict()} (participants)")
+        write_json(out / "operator_checkpoints.json", prov)
+        print(f"ROI operator rank: {ops['rank'].value_counts().to_dict()} ({len(ops)} participants; checkpoints: "
+              f"{prov['relation']}, verified)")
     print(rel.round(3).to_string(index=False))
     print(f"-> {out}")
 
@@ -334,19 +336,23 @@ if args.action == "reconstruct-check":
     store, rec = open_store(P, args.inverse, args.mode, args.atlas)
     cfg = resolve(args.inverse, args.atlas)
     win = int(round(cfg["windowing"]["window_s"] * cfg["preprocessing"]["sfreq"]))
-    t = reconstruction_check(store.root, development_keys(store), recording.margin_samples(cfg), win)
-    out = release.root(P) / "parcellation" / f"reconstruction_{args.inverse}_{args.mode}_{args.atlas}_" \
-                                             f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    t, prov = reconstruction_check(store.root, development_keys(store), recording.margin_samples(cfg), win)
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    out = release.root(P) / "parcellation" / f"reconstruction_{args.inverse}_{args.mode}_{args.atlas}_{stamp}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     t.to_csv(out, index=False)
-    a = t[t["available"]]
+    write_json(out.with_suffix(".json"), prov)
     print(t.round(6).to_string(index=False))
-    if len(a):
-        print(f"\n{len(a)} participants: operator rank {sorted(set(a['rank']))}, max constant response "
-              f"{a['constant_response'].max():.1e}, max relative residual {a['rel_residual'].max():.1e}; windows "
-              f"reconstructable exactly from the saved pieces: {a['windows_reconstructable'].sum()} / "
-              f"{a['n_windows'].sum()} ({a['windows_reconstructable'].sum() / max(a['n_windows'].sum(), 1):.1%})")
+    print(f"\n{len(t)} participants (checkpoints: {prov['relation']}, verified): operator rank "
+          f"{sorted(set(t['rank']))}, max constant response {t['constant_response'].max():.1e}, max relative residual "
+          f"{t['rel_residual'].max():.1e}; store windows reconstructable exactly from the saved pieces: "
+          f"{t['windows_reconstructable'].sum()} / {t['n_windows'].sum()} "
+          f"({t['windows_reconstructable'].sum() / max(t['n_windows'].sum(), 1):.1%})")
+    if prov["covariance_caveat"]:
+        print(f"LCMV covariance caveat (methodology log entry 53): {sorted(prov['covariance_caveat'])}")
     print(f"-> {out}")
+    if prov["missing"]:
+        sys.exit(f"INCOMPLETE: no checkpoint for {prov['missing']}")
 
 if args.action == "atlas-check":
     from adgraph.source.atlas import verify_atlas
@@ -379,9 +385,15 @@ if args.action == "store-resolution":
     write_json(out / "description.json", {**desc, "release": release.release_manifest(), "labels_used": False})
     cols = ["operator_rank", "redundant_signals", "crosstalk_fraction_median", "rois_dominated_by_own_region",
             "leakage_corr_abs_median", "participation_ratio"]
-    print(desc)
+    cp = desc["checkpoints"]
+    print({k: v for k, v in desc.items() if k != "checkpoints"})
+    print(f"checkpoints: {cp['checkpoint_dir']} ({cp['relation']}); verified for {cp['n_verified']} participants")
+    if cp["covariance_caveat"]:
+        print(f"LCMV covariance caveat (methodology log entry 53): {sorted(cp['covariance_caveat'])}")
     print(t[cols].describe().loc[["min", "50%", "max"]].round(3).to_string())
     print(f"-> {out}")
+    if cp["missing"]:
+        sys.exit(f"INCOMPLETE: no checkpoint for {cp['missing']}")
 
 if args.action == "roi-compare":
     from adgraph.checkpoint import atomic_write_csv, atomic_write_text

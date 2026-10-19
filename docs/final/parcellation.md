@@ -139,7 +139,10 @@ shows that the coarse stores need no new data, only recomputation.
    parietal by design). Sizes: 321 (insula) to 2259 (parietal) ico-5 sources per region.
 2. **Analytic resolution with the stores' BEM** (`final.py parcellation`; §3-4) and **the stores' own operators**
    (`final.py store-resolution`): every development participant's saved operator against the region leadfield of the
-   store's cached forward model (verified to reproduce the analytic metrics for identical operators). Remaining
+   store's cached forward model (verified to reproduce the analytic metrics for identical operators). The corrected
+   LCMV store has no checkpoints of its own: its operators are read from the original build after provenance
+   verification (`sourcegraphs.checkpoints`; the correction recomputed no operator; D3-23 and D3-58 carry the
+   covariance caveat of methodology log entry 53). Remaining
    approximations: fsaverage anatomy, template (Colin27 lookup) electrode positions, cross-talk under independent
    equal-variance region activity.
 3. **Stores** from the recordings (`build_stores.py build`), `validate`, `match` (wMNE vs LCMV r18), `match-atlas`
@@ -147,6 +150,9 @@ shows that the coarse stores need no new data, only recomputation.
    participants, labels, selections, windows, split, bands, channels, sampling, sensor features; experiments refuse
    an r18 store without it), `size`. The r18 LCMV covariance uses the corrected window selection; the dk68 `_corr1`
    LCMV covariance of D3-23 and D3-58 included one extra clean window (methodology log entry 53).
+   Status (2026-10-19): with the stores' exact BEM, r18 LCMV own-region dominance is 0.778 < 0.80, so r18 does not
+   meet the rule and notebook 02 stops before this step; the rule recommends lobes12 (methodology log entry 59a).
+   No store is built and no atlas is changed without the author's decision.
 4. **QC** of the four r18 stores (`final.py qc --atlas r18`), then the resolution and reliability of the r18
    operators actually built.
 5. **Controlled comparison** (notebook 04, `configs/final/roi_comparison.yaml`), development CV only; the author

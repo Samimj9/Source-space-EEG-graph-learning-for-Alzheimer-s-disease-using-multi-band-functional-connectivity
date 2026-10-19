@@ -3376,6 +3376,33 @@ graph-construction comparison only on the selected atlas; holdout only in a froz
 and seeds identical to dk68, the comparison and its wording, decisions, freeze, holdout gate), updated run-plan,
 notebook and selection tests.
 
+### 59a. Addendum (2026-10-19): checkpoint diagnostics on the corrected store; the exact-BEM atlas result
+
+**Defect (found by the author in notebook 02):** `store-resolution` (and `reconstruct-check`, and the operator ranks
+of `reliability`) read `subjects/<key>/` of the store itself. The corrected LCMV stores (`_corr1`) and every mode A
+store have no `subjects/` (the builder saves checkpoints in the mode B run only; the correction copied assembled
+arrays). The diagnostic found 0 participants and crashed (`KeyError`); `reliability` silently omitted the operator
+ranks. **Fix** (`sourcegraphs.checkpoints.locate`): a store without its own checkpoints reads those of the run it was
+derived from (`_corr1`: the original build recorded in `correction.source.mode_B`; mode A: the mode B run), but only
+after verification: the source's `graph_run_id` equals the one the correction recorded, the build configuration hash
+is identical, and per participant the completion marker carries the same key, configuration hash, recording SHA-256
+(store manifest input list) and electrode geometry (`montage_hash`), the payload files read have the SHA-256 the
+marker recorded, and the store's windows are a subset of the checkpoint's. The store's own `windows.csv` (for
+`_corr1` the corrected selection) stays authoritative. Nothing is copied into `_corr1`; no store is modified; no
+68-ROI graph is recomputed. Participants without a checkpoint are listed and make the CLI exit non-zero; a
+diagnostic with 0 participants raises `EmptyDiagnostic` (never reported as a result). The LCMV covariance caveat of
+entry 53 (D3-23, D3-58: the original covariance included one extra, later removed, clean window; the correction
+recomputed no operator) is carried into every output (`covariance_caveat`). Tests: `tests/test_store_checkpoints.py`.
+
+**Exact-BEM result (notebook 02, the stores' fsaverage 5120 BEM; reported by the author, preserved as is):** r18
+wMNE median cross-talk 0.511, own-region dominance 0.889; r18 LCMV median cross-talk 0.536, own-region dominance
+0.778 < 0.80. r18 therefore does NOT meet the pre-specified `atlas_resolution` rule for LCMV, and the rule recommends
+lobes12 (meets every criterion). The approximate-BEM value of the LCMV dominance (0.889) did not hold with the exact
+head model. Nothing was changed in response: the threshold, the rule and its recommendation stand; r18 is not
+eligible under the rule; no atlas is changed automatically (dk68 stays the analysis atlas until the author records a
+decision); notebook 02 stopped before building r18, as designed. Any r18 analysis now needs the author's explicit
+approval as an exploratory analysis outside the rule.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
