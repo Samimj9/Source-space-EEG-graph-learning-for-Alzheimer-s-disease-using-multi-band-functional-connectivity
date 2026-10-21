@@ -35,7 +35,9 @@ def sh(cmd: str, cwd: str | Path | None = None) -> None:
     import os
 
     print(f"$ {cmd}", flush=True)
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    # MPLBACKEND=Agg: a Colab kernel exports its inline backend (module://matplotlib_inline...), which matplotlib in
+    # a subprocess may reject; the scripts only save figures to files.
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "MPLBACKEND": "Agg"}
     p = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     while True:

@@ -317,3 +317,16 @@ def test_notebooks_run_development_cv_until_the_frozen_final_analysis():
     assert "--atlas selected" in nbs["03_graph_construction.ipynb"] and "ATLAS = 'selected'" in nbs["Exp5_multibranch.ipynb"]
     assert "build_stores.py match-atlas" in nbs["02_parcellation.ipynb"]
     assert "choose-atlas" not in nbs["04_roi_68_vs_18.ipynb"]                # 04 selects nothing
+
+
+def test_scripts_save_figures_with_the_file_backend_under_colab(monkeypatch, capfd):
+    """Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline; subprocesses must not inherit it (the
+    report figures failed with figures_error.txt). Both the notebook setup and adgraph.colab.sh set Agg."""
+    from adgraph.colab import sh
+
+    monkeypatch.setenv("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+    sh('python -c "import os; print(\'backend=\' + os.environ[\'MPLBACKEND\'])"')
+    assert "backend=Agg" in capfd.readouterr().out
+    for nb in (REPO / "notebooks").glob("*.ipynb"):
+        setup = "".join(json.loads(nb.read_text())["cells"][1]["source"])
+        assert "os.environ['MPLBACKEND'] = 'Agg'" in setup, nb.name

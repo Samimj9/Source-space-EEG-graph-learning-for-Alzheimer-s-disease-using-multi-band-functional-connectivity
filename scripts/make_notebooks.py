@@ -54,7 +54,12 @@ os.chdir('/content/repo')
 _run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))
 sys.path.insert(0, '/content/repo/src')   # the package, for this notebook's own cells
 
-from adgraph.colab import sh
+from adgraph.colab import sh as _sh
+
+def sh(cmd, cwd=None):  # every script runs with the file backend: Colab's inline backend breaks figures in scripts
+    os.environ['MPLBACKEND'] = 'Agg'
+    return _sh(cmd, cwd)
+
 from adgraph.config import load_paths
 PATHS = load_paths('configs/paths.yaml')
 OUT = PATHS['processed_dir']
