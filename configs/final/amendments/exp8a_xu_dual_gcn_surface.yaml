@@ -1,0 +1,65 @@
+# Amendment A2 (methodology log entry 60; configs/final/amendments.yaml): Exp 8 with a cortical-surface anatomical
+# layer, for the recorded analysis atlas lobes12. Post-design, pre-result: no Exp 8 result existed on lobes12 (every
+# unit of the original config failed before training). Run in its own namespace FINAL_v1/amendments/A2_exp8_surface/
+# with its own code pin; the original exp8_xu_dual_gcn.yaml, Exp 0-7 and the release pin are unchanged.
+#
+# Why: the original layer 2 (`lobe_hemisphere`: 1 if two regions share lobe AND hemisphere) is the zero matrix for
+# lobes12, whose 12 regions ARE the lobe x hemisphere groups; layer 2 would degenerate to the identity (self-loops
+# only) and the model would refuse to run. `surface_contiguity` keeps the intended meaning of layer 2 (a fixed,
+# atlas-derived anatomical-neighbourhood prior, independent of data and labels) and is informative for lobes12: two
+# regions are linked if they share an edge of the fsaverage cortical mesh (`source.atlas.contiguity`), never across
+# hemispheres (22 edges for lobes12). It is NOT white-matter structural connectivity, and this model is NOT a
+# reproduction of Xu et al. (2025), whose layer 2 groups electrodes into scalp regions.
+#
+# Identical to configs/final/experiments/exp8_xu_dual_gcn.yaml except (tested):
+#   experiment name exp8a_xu_dual_gcn_surface; model.anatomical_grouping surface_contiguity (all variants with an
+#   anatomical layer); the variant `abl_bilateral_lobes` is renamed `alt_bilateral_lobes`: with lobes12 it links each
+#   lobe to its contralateral homologue only (6 edges), an ALTERNATIVE anatomical prior, not an ablation of the
+#   surface prior.
+extends: ../protocol.yaml
+experiment: exp8a_xu_dual_gcn_surface
+amendment: A2
+input: graph
+protocol:
+  name: gnn_fixed60_v1
+  hyperparameter_search: none
+hparams: null
+graph:
+  connectivity: plv
+  bands: [delta, theta, alpha, beta, gamma]
+  band_mode: multi
+  adjacency: connectivity
+node_features:
+  components: [psd, strength]
+  psd_kinds: [log, rel, de]
+  psd_bands: matched
+  scaling: node
+model:
+  architecture: xu_dual_gcn
+  hidden: 32
+  node_out: 2
+  fc1: 32
+  fc2: 32
+  dropout: 0.3
+  band_specific: true
+  layer1: functional
+  layer2: anatomical
+  anatomical_grouping: surface_contiguity
+training:
+  lr: 0.001
+  weight_decay: 0.0001
+  epochs: 60
+  batch_size: 32
+evaluation:
+  save_model_state: true
+variants:
+  plv__psd_de_strength: {graph.connectivity: plv}
+  ciplv__psd_de_strength: {graph.connectivity: ciplv}
+  plv__psd: {graph.connectivity: plv, node_features.components: [psd], node_features.psd_kinds: [log, rel]}
+  ciplv__psd: {graph.connectivity: ciplv, node_features.components: [psd], node_features.psd_kinds: [log, rel]}
+  plv__de: {graph.connectivity: plv, node_features.components: [psd], node_features.psd_kinds: [de]}
+  ciplv__de: {graph.connectivity: ciplv, node_features.components: [psd], node_features.psd_kinds: [de]}
+  plv__psd_de_strength__abl_functional_both: {graph.connectivity: plv, model.layer2: functional}
+  plv__psd_de_strength__abl_anatomical_both: {graph.connectivity: plv, model.layer1: anatomical}
+  plv__psd_de_strength__alt_bilateral_lobes: {graph.connectivity: plv, model.anatomical_grouping: lobe_bilateral}
+  plv__psd_de_strength__abl_shared_weights: {graph.connectivity: plv, model.band_specific: false}

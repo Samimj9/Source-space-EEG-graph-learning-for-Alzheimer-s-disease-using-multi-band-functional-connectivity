@@ -15,6 +15,7 @@ Colab disconnects, open it again and *Run all* again; finished work is kept on D
 | 4 | `04_roi_68_vs_18` | GPU | **training** (development CV) | dk68 vs lobes12 vs r18: Exp 1 (4 variants), Exp 4 `plv__psd`, Exp 5 `plv__separate__mean`, both inverses, mode B, dense PLV; per-atlas metrics and paired differences; **stops; selects nothing** | ≈ 4-6 h CPU equiv. |
 | 5 | `03_graph_construction` | GPU | **training** (development CV) | graph diagnostics and the 11-construction comparison on the recorded atlas; the recorded selection | dk68 ≈ 24 h CPU equiv.; r18 less (not measured) |
 | 6-14 | `Exp0` … `Exp8` | CPU (0, 1) / GPU | **training** (development CV) | one experiment each; LCMV B, wMNE B, LCMV A, wMNE A (Exp 0: sensor B, A) on the recorded atlas and graph | see below |
+| 14a | `Exp8a_xu_dual_gcn_surface` | GPU | **training** (development CV) | amendment A2: Exp 8 with a cortical-surface anatomical layer on lobes12 (the original Exp 8 cannot run there); own code pin and namespace `FINAL_v1/amendments/A2_exp8_surface/` | ≈ 8 h CPU equiv. on dk68 sizes; lobes12 less |
 | 15 | `99_results_report` | GPU | **training** (holdout fits) | development-CV report, difficult participants; **freeze** the final analysis; holdout of the frozen units only; final tables | ≈ 13 h CPU equiv. for dk68 (GPU less) |
 
 Development CV only until notebook 99. The holdout is evaluated once, descriptively, for the units of the frozen final
@@ -262,6 +263,16 @@ SHA-256s, timestamps), `status.csv`, per-participant checkpoints, `validation.js
 4. After notebook 99 §1 (development CV complete): nothing; the freeze and the holdout follow the pre-specified plan.
    Review the holdout as descriptive only.
 5. The deletion proposals of `docs/final/inventory.md` (nothing is deleted otherwise).
+
+## 5a. Amendment A2: Exp 8 on lobes12 (methodology log entry 60)
+
+The original `Exp8_xu_dual_gcn` cannot run on lobes12 (its anatomical layer is empty there). Run
+`Exp8a_xu_dual_gcn_surface` instead: it checks out its own code pin (`FINAL_v1/amendments/A2_exp8_surface/CODE_COMMIT.txt`,
+recorded on its first run), never the release pin, and writes only into that namespace. Its first cell checks the base
+pin (59a9ab7), the numerical environment against a completed Exp 7 unit, the stores and the QC reports (reused, never
+recomputed); a library difference stops it until you set `ACCEPT_ENVIRONMENT_DIFFERENCE = True` (recorded). The failed
+/ partial units of the original Exp 8 stay untouched. Notebook 99 at the release pin cannot freeze while
+`holdout.yaml` lists exp8: the proposed cross-namespace final analysis is in methodology log entry 60.
 
 ## 6. Begin here (notebook 00)
 

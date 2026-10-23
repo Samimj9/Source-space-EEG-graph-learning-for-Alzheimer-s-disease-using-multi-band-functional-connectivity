@@ -3448,6 +3448,74 @@ bilateral grouping, or excluding the anatomical layer for lobes12) only if lobes
 matching / QC gates, three-atlas comparison with missing results, CLI selects nothing and never touches the holdout,
 notebook gates, QC reused under a new code pin), updated `tests/test_r18_roi_comparison.py`.
 
+## 60. Amendment A2: Exp 8 with a cortical-surface anatomical layer, in its own namespace (2026-10-23)
+
+**Status:** post-design (Exp 8 was specified in entry 52, before the final framework; Exp 0-7 results on lobes12
+had been seen when this amendment was made), **pre-result for Exp 8** (no Exp 8 unit on lobes12 ever trained: see the
+audit). The new anatomical prior was chosen on mathematical grounds; no alternative was compared on data.
+
+**Audit of the failure (Drive, `FINAL_v1/results/lcmv/mode_B/lobes12/dense/exp8_xu_dual_gcn/`, code
+59a9ab70a55d107c5ad72acff1fb48f3ef42dff0, torch 2.11.0+cu130, Python 3.13.15):** 8 of 10 variants `failed` after
+0.6-2.1 s with `ValueError: anatomical grouping 'lobe_hemisphere' puts every ROI in its own group`; the constructor
+builds the anatomical matrix for every variant, so even `abl_functional_both` failed. `abl_bilateral_lobes` started
+(fold 0 `running`, no fold saved) when the session ended; `abl_shared_weights` was never reached. No fold, prediction
+or metric of the original Exp 8 exists on lobes12. These directories are kept unchanged as provenance and are never
+read by the amendment (different experiment name and results root).
+
+**Why the original layer is degenerate on lobes12.** Layer 2 uses A_anat(i, j) = 1 if ROIs i != j share lobe and
+hemisphere. The 12 lobes12 regions are exactly the 12 lobe x hemisphere groups, so A_anat = 0, N(A_anat) =
+D^-1/2 (0 + I) D^-1/2 = I, and layer 2 reduces to a per-node linear map without any message passing (for
+`abl_anatomical_both` the model would contain no graph at all). The pre-specified guard refuses this.
+
+**Correction (`anatomical_grouping: surface_contiguity`, `models.xu_dual.anatomical_adjacency`):** A_anat(i, j) = 1
+if regions i and j share an edge of the fsaverage cortical mesh (`source.atlas.contiguity`, precomputed in
+`source/atlas_tables.json`), never across hemispheres, diagonal 0 (self-loops added by the normalization). For
+lobes12: 22 edges, every region 3-5 neighbours (e.g. parietal-lh: cingulate, frontal, insula, occipital, temporal of
+the left hemisphere). Reasons: (1) it keeps the intended role of layer 2, a FIXED, atlas-derived, data- and
+label-independent anatomical-neighbourhood prior; (2) it is informative for every atlas of `source.atlas` (dk68:
+178 edges), unlike group membership, which collapses when regions coincide with groups; (3) it needs no tuning
+parameter (a centroid-distance kNN or threshold would need a k / radius chosen somewhere); (4) it already exists and
+is tested (contiguity graph construction). It is NOT white-matter structural connectivity.
+
+**Alternatives kept / rejected:** `lobe_bilateral` (same lobe, either hemisphere) on lobes12 links each lobe only to
+its contralateral homologue (6 edges, disjoint from the surface edges): an interhemispheric-homologue prior, kept as
+the alternative variant `alt_bilateral_lobes` (renamed from `abl_bilateral_lobes`: it is not an ablation of the
+surface prior). A fully connected anatomical matrix carries no anatomy; a distance kNN needs a tuned k.
+
+**Interpretation.** Layer 1 is unchanged (the window's frequency-specific weighted PLV / |ciPLV|, band-specific
+weights). Layer 2 now propagates information between neighbouring lobes of the same hemisphere, i.e. a coarse
+cortical-surface smoothing of the band-specific functional embeddings; with 12 regions it mixes large cortical
+territories. The model remains an adaptation inspired by Xu et al. (2025), whose second layer groups scalp electrodes
+into regions; it is not a reproduction, and its results are not comparable to Xu's.
+
+**Isolation (`experiments.amendment`, `configs/final/amendments.yaml` A2,
+`configs/final/amendments/exp8a_xu_dual_gcn_surface.yaml`):** experiment `exp8a_xu_dual_gcn_surface`, identical to
+`exp8_xu_dual_gcn` except the experiment name, the anatomical prior and the renamed alternative (tested); namespace
+`FINAL_v1/amendments/A2_exp8_surface/` with its OWN code pin (`scripts/colab_setup.py --amendment A2`), manifest,
+results and reports. The release pin `FINAL_v1/CODE_COMMIT.txt` stays 59a9ab7 for Exp 0-7 and is never moved or
+used by the amendment notebook. Read only: stores (verified against the release lock, never locked again), QC reports
+(used only if complete for this store and QC code; the QC code is unchanged since 59a9ab7, tested, so the release's
+reports are reused, never recomputed), atlas and graph decisions. Same protocol, folds, seeds, features. The manifest
+records the base pin, the amendment commit and the library versions compared with a completed Exp 7 unit (a
+difference must be accepted explicitly and is recorded). Development CV only.
+
+**Final analysis and holdout (proposal; not implemented, needs the author's decision).** At the release pin,
+`configs/final/holdout.yaml` includes exp8, so `final.py freeze` (notebook 99) refuses: Exp 8 has no development
+result in the release namespace. Proposed, keeping each result produced by its own code version: (1) a final-analysis
+amendment (A3, own namespace and pin) whose freeze composes the units of both namespaces (Exp 0-6 from the release,
+each unit's recorded commit = 59a9ab7; Exp 8a from A2, commit = the A2 pin) and records namespace + commit per unit;
+(2) it writes the release-format `FINAL_v1/decisions/final_analysis.json` for the Exp 0-6 units only, with
+`git_commit` 59a9ab7, so `final.py holdout --exp exp0..exp6` runs at the release pin unchanged (its gate checks only
+unit membership and commit); (3) the Exp 8a holdout runs at the A2 pin in the A2 namespace against an A2 frozen
+record; (4) a combined report reads both namespaces and prints each row's commit. Exp 7 and mode A stay development
+only, as pre-specified.
+
+**Tests:** `tests/test_exp8_amendment.py` (degenerate original layer; 12 x 12 surface adjacency: ROI order,
+non-empty, symmetric, zero diagonal, no cross-hemisphere edge; config identical to Exp 8 except as documented; each
+variant's layers; all 10 variants train, predict, resume in the namespace; participant-disjoint folds; release
+results, QC, lock and pin untouched; QC required, never recomputed; base pin, environment and commit checks; QC code
+unchanged since 59a9ab7; separate pin; CLI and notebook stay in the namespace).
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

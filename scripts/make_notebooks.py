@@ -9,6 +9,7 @@
     notebooks/04_roi_68_vs_18.ipynb            controlled dk68 vs lobes12 vs r18 comparison (development CV); stops
     notebooks/03_graph_construction.ipynb      graph diagnostics + the development-CV comparison on that atlas (GPU)
     notebooks/Exp<k>_*.ipynb                   ONE experiment each, Exp 0-8, development CV (GPU for 2-8)
+    notebooks/Exp8a_xu_dual_gcn_surface.ipynb  amendment A2: Exp 8 with a surface anatomical layer (own pin, namespace)
     notebooks/99_results_report.ipynb          freeze the final analysis, descriptive holdout, final tables (GPU)
     notebooks/README.md                        index, Colab links, execution order, Drive layout
 
@@ -430,6 +431,13 @@ EXP_TITLES = {
 }
 
 
+AMENDED = {"exp8": """
+**Amendment A2 (lobes12):** with the 12-lobe atlas this experiment's anatomical layer (`lobe_hemisphere`) is empty
+and every unit stops before training. Use `Exp8a_xu_dual_gcn_surface` instead (cortical-surface anatomical layer, own
+code pin and namespace; methodology log entry 60). This notebook is kept unchanged for the record.
+"""}
+
+
 def experiment_notebook(exp: str, cfg: Path) -> dict:
     name, title, gnn = EXP_TITLES[exp]
     v = expand_variants(load_experiment(cfg))
@@ -464,7 +472,7 @@ Atlas: the analysis atlas recorded in notebook 04 (`--atlas selected`{"; Exp 0 i
 **Contexts:** {"sensor space (identical in the LCMV and wMNE stores), window modes B then A" if sensor else
 "LCMV and wMNE, window mode B (all accepted windows, primary) then A (10 windows per participant, sensitivity)"}.
 Edit `CONTEXTS` below only to run a subset; the order is the recommended order.
-""" + HOWTO + (" Use a **GPU runtime** (T4)." if gnn else " CPU is sufficient.")),
+{AMENDED.get(exp, "")}""" + HOWTO + (" Use a **GPU runtime** (T4)." if gnn else " CPU is sufficient.")),
         code(SETUP),
         md("## 1. Contexts to run (the only cell to edit, if at all)"),
         code(f'''EXP = '{exp}'
@@ -503,6 +511,104 @@ for inverse, mode in CONTEXTS:
 if ERRORS:
     raise RuntimeError(f'units did not complete in {sorted(ERRORS)}; completed units are saved. Run all again.')'''),
     ], gpu=gnn)
+
+
+def amendment_setup(aid: str) -> str:
+    """The setup cell of an amendment notebook: the amendment's own code pin (never the release pin)."""
+    from adgraph.experiments import amendment
+
+    s = SETUP.replace(
+        f"UPDATE_CODE = False   # leave False. True only to move the release code pin deliberately to the newest commit\n"
+        f"                      # (<outputs>/{release.PIN_FILE}; unfinished work is then recomputed).",
+        f"UPDATE_CODE = False   # leave False. True only to move THIS AMENDMENT's code pin deliberately\n"
+        f"                      # (<outputs>/{amendment.pin_file(aid)}; the release pin is never used or moved here).")
+    s = s.replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                  f"_run([sys.executable, 'scripts/colab_setup.py', '--amendment', '{aid}']"
+                  " + (['--update-code'] if UPDATE_CODE else []))")
+    return s + f"A2_ROOT = FINAL + '/amendments/{amendment.NAMESPACES[aid]}'\n"
+
+
+def amendment_exp8_notebook() -> dict:
+    from adgraph.experiments import amendment
+
+    aid = "A2"
+    cfg = amendment.experiment_configs(aid)["exp8a"]
+    v = expand_variants(load_experiment(cfg))
+    name = v[0]["experiment"]
+    plan = run_plan()["contexts"]["source"]
+    ctx = "[" + ", ".join(f"('{i}', '{m}')" for i, m in plan) + "]"
+    variants = "\n".join(f"- `{x['variant']}`: layer 1 {x['model']['layer1']}, layer 2 {x['model']['layer2']}"
+                         + (f" ({x['model']['anatomical_grouping']})" if 'anatomical' in (x['model']['layer1'],
+                                                                                       x['model']['layer2']) else "")
+                         + ("" if x['model']['band_specific'] else ", weights shared across bands") for x in v)
+    return notebook([
+        md(f"""# Exp8a · Xu-inspired dual-adjacency GCN with a cortical-surface anatomical layer (amendment A2)
+
+**Why this notebook exists.** On the recorded analysis atlas (lobes12) the original Exp 8 anatomical layer
+(`lobe_hemisphere`: regions of the same lobe and hemisphere) is the zero matrix, because the 12 regions ARE the
+lobe x hemisphere groups; every original Exp 8 unit failed before training. Amendment A2 (post-design, pre-result;
+methodology log entry 60) redefines layer 2 as the fixed **cortical-surface contiguity** of the atlas regions
+(fsaverage mesh, within a hemisphere): a data- and label-independent anatomical-neighbourhood prior, not measured
+white-matter connectivity. Layer 1 is unchanged: the window's frequency-specific PLV or |ciPLV|. This is an
+adaptation inspired by Xu et al. (2025), not a reproduction.
+
+Config `configs/final/amendments/{cfg.name}` (`{name}`, {len(v)} variants; `alt_bilateral_lobes` is an alternative
+anatomical prior: each lobe linked to its contralateral homologue):
+
+{variants}
+
+**Isolation.** This notebook checks out the amendment's own code pin
+(`<outputs>/{amendment.pin_file(aid)}`) and writes only to `<outputs>/{release.ROOT}/amendments/{amendment.NAMESPACES[aid]}/`.
+The release pin, Exp 0-7, their results and the failed / partial units of the original Exp 8 are not touched or read
+as checkpoints. Stores, QC reports and the atlas / graph decisions are read only. Same protocol (`gnn_fixed60_v1`),
+folds and seeds; development CV only (the holdout is not run here).
+
+{HOLDOUT}
+""" + HOWTO + " Use a **GPU runtime** (T4)."),
+        code(amendment_setup(aid)),
+        md("## 1. Amendment check: pins, numerical environment, stores and QC (nothing is trained)"),
+        code(f'''ACCEPT_ENVIRONMENT_DIFFERENCE = False   # True only after reviewing a reported library difference (recorded)
+sh("python scripts/final.py amendment-check --amendment {aid} --atlas selected"
+   + (" --accept-environment-difference" if ACCEPT_ENVIRONMENT_DIFFERENCE else ""))'''),
+        md("## 2. The anatomical layer of the recorded atlas (fixed; from the atlas only)"),
+        code('''import json, numpy as np, pandas as pd
+from adgraph.models.xu_dual import anatomical_adjacency
+from adgraph.source.atlas import region_names
+ATLAS_NAME = json.load(open(FINAL + '/decisions/atlas.json'))['atlas']
+names = region_names(ATLAS_NAME)
+A = anatomical_adjacency(names, 'surface_contiguity')
+print(ATLAS_NAME, len(names), 'regions,', int(A.sum() // 2), 'surface edges, symmetric', bool((A == A.T).all()))
+display(pd.DataFrame(A.astype(int), index=names, columns=names))'''),
+        md("## 3. Contexts, status, run (resumable; this amendment experiment only)"),
+        code(f'''CONTEXTS = {ctx}     # (inverse, window mode), in this order
+ERRORS = {{}}
+for inverse, mode in CONTEXTS:
+    print(f'==== exp8a | {{inverse}} | mode {{mode}}')
+    sh(f"python scripts/final.py status --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+       f"--atlas selected --graph selected")
+    try:
+        sh(f"python scripts/final.py run --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+           f"--atlas selected --graph selected")
+    except RuntimeError as exc:
+        ERRORS[(inverse, mode)] = exc
+        print(f'{{inverse}} / mode {{mode}}: some units failed; details after the results')'''),
+        md("## 4. Results and diagnostics of THIS amendment only (saved outputs; diagnostic figures)"),
+        code(SHOW_LATEST + f'''
+for inverse, mode in CONTEXTS:
+    sh(f"python scripts/final.py report --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+       f"--atlas selected --graph selected")
+    rep = latest(f"{{A2_ROOT}}/results/{{inverse}}/mode_{{mode}}/{{ATLAS_NAME}}/*/{name}/_reports/report_*")
+    if rep:
+        print('====', inverse, 'mode', mode, rep)
+        t = pd.read_csv(rep + '/results.csv')
+        cols = ['variant', 'setting', 'auc', 'auc_ci_low', 'auc_ci_high', 'mean_fold_auc', 'min_fold_auc',
+                'max_fold_auc', 'balanced_accuracy', 'sensitivity', 'specificity', 'tn', 'fp', 'fn', 'tp']
+        display(t[[c for c in cols if c in t]].round(3))
+        for png in sorted(glob.glob(rep + '/*.png')):
+            display(Image(filename=png))
+if ERRORS:
+    raise RuntimeError(f'units did not complete in {{sorted(ERRORS)}}; completed units are saved. Run all again.')'''),
+    ], gpu=True)
 
 
 def report_notebook() -> dict:
@@ -593,6 +699,8 @@ def main() -> None:
     for exp, cfg in experiment_configs().items():
         name, title, gnn = EXP_TITLES[exp]
         nbs[f"{name}.ipynb"] = (experiment_notebook(exp, cfg), title, "GPU" if gnn else "CPU")
+    nbs["Exp8a_xu_dual_gcn_surface.ipynb"] = (amendment_exp8_notebook(), "Exp 8 with a cortical-surface anatomical "
+                                              "layer (amendment A2; own namespace and code pin)", "GPU")
     nbs["99_results_report.ipynb"] = (report_notebook(), "development-CV report; freeze; descriptive holdout of the "
                                                          "frozen units; final tables", "GPU")
     order = [s["notebook"] for s in run_plan()["steps"]]

@@ -9,6 +9,12 @@ Status: **v2.0 (2026-10-18), the final framework** (`docs/final/framework.md`, m
 
 Changelog:
 
+- **v2.3 (2026-10-23, amendment A2; post-design, pre-result for Exp 8):** on the recorded atlas lobes12 the Exp 8
+  anatomical layer (`lobe_hemisphere`) is the zero matrix; Exp 8 is run as `exp8a_xu_dual_gcn_surface` with a
+  cortical-surface contiguity layer 2, in its own namespace and code pin (`FINAL_v1/amendments/A2_exp8_surface`).
+  Exp 0-7, the release pin, the atlas and graph decisions and the protocol are unchanged. Final-analysis integration:
+  proposal in methodology log entry 60.
+
 - **v2.2 (2026-10-19, after the exact-BEM resolution result; author authorization):** two additional atlas arms,
   dk68 the reference: **lobes12** (recommended by the unchanged `atlas_resolution` rule) and **r18** (exploratory,
   post-result approval, amendment A1; fails the LCMV own-region dominance criterion). Their stores are built from the

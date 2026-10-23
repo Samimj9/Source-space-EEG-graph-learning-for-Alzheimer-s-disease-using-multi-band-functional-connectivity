@@ -19,6 +19,8 @@
     python scripts/final.py freeze                                  # freeze the final analysis (configs/final/
                                                                     # holdout.yaml) once development CV is complete
     python scripts/final.py holdout --exp exp5                      # holdout of the frozen units only (descriptive)
+    python scripts/final.py amendment-check --amendment A2          # amendment namespace: pins, environment, QC
+    python scripts/final.py run --amendment A2 --exp exp8a --inverse lcmv --mode B --atlas selected --graph selected
     python scripts/final.py difficult                               # category C participants (development CV)
     python scripts/final.py parcellation [--bem <bem-sol.fif>]      # source-resolution analysis per atlas
     python scripts/final.py reliability --inverse lcmv --mode B     # split-half reliability of features (development)
@@ -52,14 +54,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument("action", choices=["stores", "qc", "graphs", "status", "run", "report", "select", "difficult",
                                        "parcellation", "reliability", "reconstruct-check", "smoke", "atlas-check",
                                        "store-resolution", "roi-compare", "choose-atlas", "freeze", "holdout",
-                                       "approve-exploratory", "authorize"])
+                                       "approve-exploratory", "authorize", "amendment-check"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--exp", help="exp0 ... exp8")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
 parser.add_argument("--mode", default="B", choices=["B", "A"])
 parser.add_argument("--atlas", default="dk68", help="dk68 | r18 | ... | selected (the recorded decision)")
 parser.add_argument("--reason", default=None, help="choose-atlas: the scientific reason (recorded)")
-parser.add_argument("--amendment", default=None, help="approve-exploratory: id in configs/final/amendments.yaml")
+parser.add_argument("--amendment", default=None, help="approve-exploratory: id in configs/final/amendments.yaml; "
+                    "run / status / report / amendment-check: the amendment namespace (e.g. A2, --exp exp8a)")
+parser.add_argument("--accept-environment-difference", action="store_true",
+                    help="amendment-check: accept (and record) library versions that differ from the release units")
 parser.add_argument("--graph", default=None, help="graph construction of configs/final/graphs.yaml (GNNs; default "
                                                   "dense); 'selected' = the recorded development-only decision")
 parser.add_argument("--variants", nargs="*", default=None)
@@ -77,7 +82,12 @@ pd.set_option("display.width", 250, "display.max_rows", 400, "display.max_column
 def experiment_config(exp: str) -> Path:
     from adgraph.experiments.config import experiment_configs
 
-    cfgs = experiment_configs()
+    if args.amendment and args.action in ("run", "status", "report"):
+        from adgraph.experiments import amendment
+
+        cfgs = amendment.experiment_configs(args.amendment)
+    else:
+        cfgs = experiment_configs()
     if exp not in cfgs:
         sys.exit(f"--exp must be one of {sorted(cfgs)}")
     return cfgs[exp]
@@ -221,15 +231,27 @@ if args.action in ("status", "run"):
     if not args.exp:
         sys.exit("--exp is required")
     cfg = experiment_config(args.exp)
+    root = None
+    if args.amendment:
+        from adgraph.experiments import amendment
+
+        root = amendment.results_dir(P, args.amendment)
     if args.action == "status":
-        print(status_table(cfg, P, args.inverse, args.mode, args.atlas, args.graph, settings=dev_only)
-              .to_string(index=False))
+        print(status_table(cfg, P, args.inverse, args.mode, args.atlas, args.graph, results_root=root,
+                           settings=dev_only).to_string(index=False))
     else:
         from adgraph.provenance import verify_environment
 
         verify_environment()
-        t = run_experiment(cfg, P, args.inverse, args.mode, args.atlas, args.graph, args.variants, dev_only,
-                           allow_ephemeral=args.allow_ephemeral_storage)
+        if args.amendment:
+            try:
+                t = amendment.run(P, args.amendment, args.exp, args.inverse, args.mode, args.atlas, args.graph,
+                                  args.variants, allow_ephemeral=args.allow_ephemeral_storage)
+            except amendment.AmendmentError as exc:
+                sys.exit(str(exc))
+        else:
+            t = run_experiment(cfg, P, args.inverse, args.mode, args.atlas, args.graph, args.variants, dev_only,
+                               allow_ephemeral=args.allow_ephemeral_storage)
         print(t.drop(columns=["updated"]).to_string(index=False))
         failed = t[t["state"] != "completed"]
         if len(failed):
@@ -240,7 +262,12 @@ if args.action in ("status", "run"):
 if args.action == "report":
     from adgraph.experiments.report import experiment_report, write_tables
 
-    res = write_tables(release.results_dir(P), release.root(P) / "reports")
+    results_root, reports_root = release.results_dir(P), release.root(P) / "reports"
+    if args.amendment:                      # this amendment's namespace only (never the release results)
+        from adgraph.experiments import amendment
+
+        results_root, reports_root = amendment.results_dir(P, args.amendment), amendment.reports_dir(P, args.amendment)
+    res = write_tables(results_root, reports_root)
     print(f"{res['n_results']} completed results -> {res['dir']}")
     if args.exp:
         from adgraph.experiments.config import load_experiment
@@ -249,7 +276,7 @@ if args.action == "report":
         inv = "sensor" if args.exp == "exp0" else args.inverse
         ctx = {"inverse": inv, "mode": args.mode, "atlas": args.atlas,
                "graph": "none" if args.exp in ("exp0", "exp1") else (args.graph or "dense")}
-        rep = experiment_report(release.results_dir(P), name, ctx)
+        rep = experiment_report(results_root, name, ctx)
         print(rep["table"].drop(columns=["dir"], errors="ignore").round(3).to_string(index=False)
               if len(rep["table"]) else "no completed result of this experiment in this context")
         print(f"-> {rep['dir']}")
@@ -511,3 +538,29 @@ if args.action == "authorize":
     except (decisions.AtlasNotAuthorized, decisions.DecisionMissing) as exc:
         sys.exit(f"{args.atlas}: NOT authorized: {exc}")
     print(f"{args.atlas}: authorized, {a['label']}")
+
+if args.action == "amendment-check":
+    from adgraph.experiments import amendment
+
+    if not args.amendment:
+        sys.exit("--amendment is required (e.g. A2)")
+    chk = amendment.environment_check(P, args.amendment)
+    for k in ("base_release_pin", "expected_base_release_pin", "amendment_commit", "reference_unit_commit",
+              "libraries_release", "libraries_now", "library_differences"):
+        print(f"{k}: {chk[k]}")
+    try:
+        man = amendment.initialize(P, args.amendment, args.accept_environment_difference)
+    except amendment.AmendmentError as exc:
+        sys.exit(f"NOT ready: {exc}")
+    problems = []
+    for inv in ("lcmv", "wmne"):
+        for mode in ("B", "A"):
+            try:
+                amendment.open_context(P, inv, mode, args.atlas)
+            except Exception as exc:                                      # reported, nothing is written
+                problems.append(f"{inv}/{mode}/{args.atlas}: {exc}")
+    print(f"namespace: {amendment.root(P, args.amendment)} (manifest {man['created_at']})")
+    if problems:
+        sys.exit("NOT ready:\n  " + "\n  ".join(problems))
+    print(f"ready: stores verified (release lock read only), QC reports complete and reused, results go to "
+          f"{amendment.results_dir(P, args.amendment)}")

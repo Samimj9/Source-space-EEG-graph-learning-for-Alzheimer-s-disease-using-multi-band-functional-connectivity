@@ -20,6 +20,7 @@ steps:
   - {notebook: Exp6_psd_strength.ipynb, experiment: exp6, runtime: GPU}
   - {notebook: Exp7_earm_gnn.ipynb, experiment: exp7, runtime: GPU}
   - {notebook: Exp8_xu_dual_gcn.ipynb, experiment: exp8, runtime: GPU}
+  - {notebook: Exp8a_xu_dual_gcn_surface.ipynb, amendment: A2, runtime: GPU, purpose: Exp 8 on the recorded atlas with a cortical-surface anatomical layer (amendment A2; own code pin and namespace)}
   - {notebook: 99_results_report.ipynb, runtime: GPU, purpose: freeze; descriptive holdout of the frozen units; tables}
 
 # contexts of every experiment step, in order (mode B is the primary analysis, mode A the sensitivity analysis)

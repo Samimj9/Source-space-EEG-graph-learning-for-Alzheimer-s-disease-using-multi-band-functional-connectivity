@@ -7,10 +7,12 @@ our representation. It is neither a reproduction of Xu's MF-MGCN nor a replaceme
 * node features: our stored per-window features (log / relative PSD, differential entropy, node strength);
 * layer 1, functional: our weighted PLV or |ciPLV| of that band and window (not Xu's Pearson correlation of DE
   feature vectors; values are used as weights, never cast to integers or binarized);
-* layer 2, anatomical: a FIXED 68 x 68 matrix from atlas labels (``anatomical_adjacency``): 1 if two ROIs belong
-  to the same predefined lobar group, else 0. This is atlas-derived group membership / coarse anatomical
-  proximity, NOT measured (e.g. diffusion-MRI) white-matter structural connectivity. It depends only on the ROI
-  names, never on diagnoses, data or predictions.
+* layer 2, anatomical: a FIXED R x R matrix from atlas labels (``anatomical_adjacency``): 1 if two ROIs belong
+  to the same predefined lobar group (``lobe_hemisphere``, ``lobe_bilateral``) or, for ``surface_contiguity``
+  (amendment A2, methodology log entry 60), if the two regions share an edge of the fsaverage cortical mesh
+  (``source.atlas.contiguity``; never across hemispheres), else 0. This is atlas-derived group membership or
+  cortical-surface neighbourhood, NOT measured (e.g. diffusion-MRI) white-matter structural connectivity. It depends
+  only on the ROI names, never on diagnoses, data or predictions.
 
 Per band b (band-specific weights, as drawn in Xu's Fig. 3; ``band_specific: false`` shares them, as in Xu's code):
 
@@ -44,7 +46,8 @@ DK_LOBES = {
     "cingulate": ("rostralanteriorcingulate", "caudalanteriorcingulate", "posteriorcingulate", "isthmuscingulate"),
     "insula": ("insula",),
 }
-GROUPINGS = ("lobe_hemisphere", "lobe_bilateral")
+GROUPINGS = ("lobe_hemisphere", "lobe_bilateral")         # group-membership priors (roi_groups)
+ANATOMICAL = GROUPINGS + ("surface_contiguity",)          # every anatomical prior of anatomical_adjacency
 
 
 def roi_groups(roi_names: list[str], grouping: str = "lobe_hemisphere") -> list[str]:
@@ -67,9 +70,22 @@ def roi_groups(roi_names: list[str], grouping: str = "lobe_hemisphere") -> list[
 
 
 def anatomical_adjacency(roi_names: list[str], grouping: str = "lobe_hemisphere") -> np.ndarray:
-    """Fixed binary (R, R) matrix: 1 if two different ROIs share a group, diagonal 0 (self-loops are added by the
-    normalization). ``lobe_hemisphere``: same lobe and same hemisphere (12 groups; anatomical proximity);
-    ``lobe_bilateral``: same lobe in either hemisphere (6 groups; the analogue of Xu's electrode regions)."""
+    """Fixed binary (R, R) matrix, diagonal 0 (self-loops are added by the normalization).
+    ``lobe_hemisphere``: same lobe and same hemisphere (12 groups; anatomical proximity);
+    ``lobe_bilateral``: same lobe in either hemisphere (6 groups; the analogue of Xu's electrode regions; for the
+    12-lobe atlas it links each lobe to its contralateral homologue only);
+    ``surface_contiguity``: the two regions share an edge of the fsaverage cortical mesh (``source.atlas.contiguity``,
+    within a hemisphere; amendment A2). It is the only one of the three that is informative for every atlas: with
+    ``lobe_hemisphere`` each region of the 12-lobe atlas is its own group and the matrix is empty."""
+    if grouping == "surface_contiguity":
+        from ..source import atlas
+
+        a = atlas.contiguity(list(roi_names)).astype(np.float32)
+        np.fill_diagonal(a, 0.0)
+        if not a.any():
+            raise ValueError("surface contiguity of these regions is empty: the anatomical layer would carry no "
+                             "information")
+        return a
     g = np.array(roi_groups(roi_names, grouping))
     a = (g[:, None] == g[None, :]).astype(np.float32)
     np.fill_diagonal(a, 0.0)

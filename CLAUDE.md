@@ -124,6 +124,11 @@ e.g. `D1-3`, `D2-3`.
   run-time context (`experiments.config.with_context`). LCMV and wMNE variants must stay identical apart from the
   inverse (tested). A shared-encoder multiband model must carry `model.band_identity: onehot` (validate refuses it
   otherwise, unless declared `band_invariant_baseline`; methodology log entry 57).
+- **Amendments (own namespace and pin):** amendment A2 runs Exp 8 on lobes12 as `exp8a_xu_dual_gcn_surface`
+  (cortical-surface anatomical layer) in `FINAL_v1/amendments/A2_exp8_surface/` with its own `CODE_COMMIT.txt`
+  (`experiments.amendment`, `scripts/colab_setup.py --amendment A2`, `final.py ... --amendment A2`; methodology log
+  entry 60). Never move the release pin for an amendment, never let an amendment write in the release namespace, and
+  never change `src/adgraph/qc/` (the release's QC reports are reused across commits only while that code is unchanged).
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by

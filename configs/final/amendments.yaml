@@ -26,3 +26,23 @@ A1:
     - change the atlas_resolution rule, its thresholds or its recommendation
     - make r18 rule-eligible or the rule-recommended atlas
     - select an analysis atlas (FINAL_v1/decisions/atlas.json is not written)
+A2:
+  date: "2026-10-23"
+  approved_by: author (project author, written request of 2026-10-23)
+  kind: model amendment (post-design, pre-result)
+  experiment: exp8
+  config: configs/final/amendments/exp8a_xu_dual_gcn_surface.yaml
+  namespace: FINAL_v1/amendments/A2_exp8_surface
+  base_release_pin: 59a9ab70a55d107c5ad72acff1fb48f3ef42dff0
+  reason: >-
+    On the recorded analysis atlas lobes12 the pre-specified Exp 8 anatomical layer (lobe_hemisphere) is the zero
+    matrix (each of the 12 regions is its own lobe x hemisphere group), so every Exp 8 unit failed before training.
+    The anatomical layer is redefined as fixed cortical-surface contiguity of the atlas regions (fsaverage mesh,
+    within hemisphere), which keeps its intended role of a data- and label-independent anatomical-neighbourhood prior.
+  scope:
+    - Exp 8 only (10 variants), LCMV and wMNE, window modes B and A, on the recorded atlas and graph construction
+    - development CV; the holdout only through a frozen final analysis (methodology log entry 60, proposal)
+  does_not:
+    - change Exp 0-7, their configurations, results or the release pin FINAL_v1/CODE_COMMIT.txt
+    - change the recorded atlas (lobes12), graph construction (dense) or the training protocol (gnn_fixed60_v1)
+    - reuse any unit of the original exp8_xu_dual_gcn (failed or partial; kept untouched as provenance)
