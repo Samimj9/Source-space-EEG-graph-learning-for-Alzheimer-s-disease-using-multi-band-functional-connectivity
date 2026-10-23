@@ -257,8 +257,16 @@ def test_cli_status_check_and_report_stay_in_the_namespace(amended_root):
         assert (p.returncode == 0) == ok, p.stdout + p.stderr
         return p.stdout + p.stderr
 
+    from adgraph.provenance import git_commit
+
+    (amended_root / amendment.pin_file("A2")).parent.mkdir(parents=True, exist_ok=True)
+    (amended_root / amendment.pin_file("A2")).write_text(git_commit() + "\n")     # colab_setup.py --amendment A2
     out = cli("amendment-check", "--amendment", "A2", "--atlas", "selected")
     assert "ready" in out and str(amendment.results_dir(amended_root, "A2")) in out
+    assert "separate and unchanged" in out and BASE_PIN in out
+    out = cli("holdout", "--amendment", "A2", "--exp", "exp8a", ok=False)    # nothing frozen in the namespace
+    assert "nothing is frozen in amendment A2" in out
+    assert not decisions.final_path(amended_root).exists()
     out = cli("status", "--amendment", "A2", "--exp", "exp8a", "--inverse", "wmne", "--mode", "A", "--atlas",
               "selected", "--graph", "selected")
     assert "exp8a_xu_dual_gcn_surface" in out and "not started" in out
@@ -269,12 +277,27 @@ def test_cli_status_check_and_report_stay_in_the_namespace(amended_root):
     cli("status", "--exp", "exp8a", ok=False)                               # exp8a exists only in the amendment
 
 
-def test_the_exp8a_notebook_uses_its_own_pin_and_namespace_only():
+def _notebook_cells():
     nb = json.loads((REPO / "notebooks" / "Exp8a_xu_dual_gcn_surface.ipynb").read_text())
-    cells = ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
+    return ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
+
+
+def test_the_exp8a_notebook_uses_its_own_pin_and_namespace_only():
+    cells = _notebook_cells()
     assert "'scripts/colab_setup.py', '--amendment', 'A2'" in cells[0] and "MPLBACKEND" in cells[0]
     calls = [ln for c in cells for ln in c.splitlines() if "scripts/final.py" in ln]
     assert calls and all("--amendment A2" in ln for ln in calls)
+    # every script call runs with the verified interpreter of the numerical-environment cell
+    assert len(calls) == 4 and all(ln.lstrip().startswith('sh(f"{PY} scripts/final.py') for ln in calls)
+    assert {a for ln in calls for a in ("amendment-check", "status", "run", "report") if f"final.py {a} " in ln} \
+        == {"amendment-check", "status", "run", "report"}
+    assert "ACCEPT_ENVIRONMENT_DIFFERENCE = False" in cells[1] and "ensure_interpreter" in cells[1]
+    assert "reference_libraries(OUT, 'exp7_earm_gnn')" in cells[1]
+    for needle in ("MANIFEST['amendment'] == 'A2'", "ATLAS_NAME == 'lobes12'", "GRAPH_NAME == 'dense'",
+                   "realpath(A2_PIN_FILE) != os.path.realpath(RELEASE_PIN_FILE)", "RECORD['base_release_pin']"):
+        assert needle in cells[2]
+    assert "assert len(EXPECTED_VARIANTS) == 10" in cells[-1]
+    assert "sorted(t['variant'].unique()) == EXPECTED_VARIANTS" in cells[-1]
     code = "\n".join(cells)
     for banned in ("xu_holdout", "final.py holdout", "final.py freeze", "choose-atlas", "UPDATE_CODE = True"):
         assert banned not in code
@@ -282,3 +305,129 @@ def test_the_exp8a_notebook_uses_its_own_pin_and_namespace_only():
     plan = yaml.safe_load((REPO / "configs" / "final" / "run_plan.yaml").read_text())["steps"]
     names = [s["notebook"] for s in plan]
     assert names.index("Exp8a_xu_dual_gcn_surface.ipynb") == names.index("Exp8_xu_dual_gcn.ipynb") + 1
+
+
+def test_the_notebook_assertions_pass_on_a_correct_namespace_and_catch_a_moved_release_pin(amended_root):
+    """Cell 2's assertions, executed against the synthetic namespace (the amendment check itself is run above)."""
+    from adgraph.checkpoint import atomic_write_json
+    from adgraph.experiments import decisions
+    from adgraph.provenance import git_commit
+
+    atomic_write_json(decisions.atlas_path(amended_root), {"atlas": "lobes12"})
+    atomic_write_json(decisions.graph_path(amended_root), {"selected": "dense", "atlas": "lobes12", "reason": "kept"})
+    (amended_root / amendment.pin_file("A2")).parent.mkdir(parents=True, exist_ok=True)
+    (amended_root / amendment.pin_file("A2")).write_text(git_commit() + "\n# pinned\n")
+    amendment.initialize(amended_root, "A2")
+    checks = amendment.namespace_check(amended_root, "A2")
+    assert all(checks["checks"].values()) and checks["release_pin"] == BASE_PIN
+    cell = _notebook_cells()[2]
+    cell = cell[cell.index("import json, os"):].replace("/content/repo", str(REPO))
+    ns = {"FINAL": str(release.root(amended_root)), "A2_ROOT": str(amendment.root(amended_root, "A2")),
+          "ACCEPT_ENVIRONMENT_DIFFERENCE": False}
+    exec(cell, ns)
+    assert ns["ATLAS_NAME"] == "lobes12" and ns["GRAPH_NAME"] == "dense"
+    (amended_root / release.PIN_FILE).write_text("0" * 40 + "\n")                # a moved release pin
+    with pytest.raises(AssertionError, match="release pin moved"):
+        exec(cell, dict(ns))
+    with pytest.raises(amendment.AmendmentError, match="release pin unchanged"):
+        amendment.namespace_check(amended_root, "A2")
+    (amended_root / release.PIN_FILE).write_text(BASE_PIN + "\n")
+    atomic_write_json(decisions.atlas_path(amended_root), {"atlas": "dk68"})
+    with pytest.raises(AssertionError, match="amendment A2 is defined for lobes12"):
+        exec(cell, dict(ns))
+
+
+def test_the_amendment_holdout_runs_only_frozen_units_at_the_frozen_commit(amended_root, monkeypatch):
+    from adgraph.checkpoint import atomic_write_json
+    from adgraph.experiments import decisions
+    from adgraph.provenance import git_commit
+
+    _short(monkeypatch)
+    amendment.initialize(amended_root, "A2")
+    with pytest.raises(amendment.AmendmentError, match="nothing is frozen"):
+        amendment.holdout(amended_root, "A2", "exp8a")
+    unit = {"exp": "exp8a", "experiment": "exp8a_xu_dual_gcn_surface", "variant": "plv__psd", "inverse": "lcmv",
+            "mode": "B", "atlas": "lobes12", "graph": "dense"}
+    f = amendment.final_path(amended_root, "A2")
+    atomic_write_json(f, {"units": [unit], "git_commit": "another-commit"})
+    with pytest.raises(amendment.AmendmentError, match="frozen at commit"):
+        amendment.holdout(amended_root, "A2", "exp8a")
+    atomic_write_json(f, {"units": [unit], "git_commit": git_commit()})
+    (t,) = amendment.holdout(amended_root, "A2", "exp8a")
+    assert list(t["variant"]) == ["plv__psd"] and list(t["setting"]) == ["xu_holdout"]
+    assert (t["state"] == "completed").all()
+    d = (amendment.results_dir(amended_root, "A2") / "lcmv/mode_B/lobes12/dense/exp8a_xu_dual_gcn_surface/plv__psd"
+         / "xu_holdout")
+    assert len(pd.read_csv(d / "predictions_participants.csv")) == 13
+    assert not decisions.final_path(amended_root).exists()                  # the release record is never written
+    v = {"experiment": unit["experiment"], "variant": "plv__psd", "context": {k: unit[k] for k in
+                                                                              ("inverse", "mode", "atlas", "graph")}}
+    decisions.require_frozen(amended_root, [v], git_commit(), f)            # the namespace's record admits it
+    with pytest.raises(decisions.HoldoutNotFrozen):                         # the release's (absent) record does not
+        decisions.require_frozen(amended_root, [v], git_commit())
+
+
+# ------------------------------------------------------------------------------------------- numerical environment
+def test_restore_commands_pin_python_libraries_and_the_cuda_torch_wheel(tmp_path):
+    from adgraph import numerical_env as ne
+
+    ref = {"python": "3.13.15", "numpy": "2.1.3", "scipy": "1.16.3", "pandas": "2.2.3", "sklearn": "1.6.1",
+           "torch": "2.11.0+cu130"}
+    target = ne.restore_target(ref, "/content")
+    assert str(target) == "/content/restore31315"
+    cmds = ne.restore_commands(ref, target, "/content/repo", uv="uv")
+    assert cmds[0] == ["uv", "venv", "--python", "3.13.15", "/content/restore31315"]
+    assert cmds[1][-3:] == ["torch==2.11.0+cu130", "--index-url", "https://download.pytorch.org/whl/cu130"]
+    for pin in ("numpy==2.1.3", "scipy==1.16.3", "pandas==2.2.3", "scikit-learn==1.6.1", "torch==2.11.0+cu130"):
+        assert pin in cmds[2]
+    assert "/content/repo/requirements.txt" in cmds[2] and cmds[3][-3:] == ["--no-deps", "-e", "/content/repo"]
+    assert all(c[c.index("--python") + 1] == "/content/restore31315/bin/python" for c in cmds[1:])
+    cpu = ne.restore_commands({**ref, "torch": "2.11.0"}, target, "/r")
+    assert len(cpu) == 3 and "torch==2.11.0" in cpu[1] and "--index-url" not in cpu[1]
+
+
+def test_ensure_interpreter_uses_reuses_builds_or_refuses(tmp_path, monkeypatch):
+    import os
+
+    from adgraph import numerical_env as ne
+    from adgraph.provenance import versions
+
+    keys = ("numpy", "scipy", "pandas", "sklearn", "torch")
+    ref = versions(keys)
+    assert ne.interpreter_versions(sys.executable, ref) == ref               # same as the code identity records
+    log = []
+    assert ne.ensure_interpreter(ref, REPO, tmp_path, run=log.append) == sys.executable and not log
+    broken = tmp_path / "old_python"                                        # a kernel that differs
+    broken.write_text("#!/bin/sh\nexit 1\n")
+    broken.chmod(0o755)
+    target = ne.restore_target(ref, tmp_path)
+
+    def build(cmd):                                                          # stands in for uv: the venv appears
+        log.append(cmd)
+        if " venv " in cmd:
+            (target / "bin").mkdir(parents=True)
+            os.symlink(sys.executable, target / "bin" / "python")
+        assert (target / "bin" / "python").exists()                        # installs only into the venv
+    monkeypatch.setattr(ne.shutil, "which", lambda name: "uv")
+    py = ne.ensure_interpreter(ref, REPO, tmp_path, run=build, current=str(broken))
+    n = len(ne.restore_commands(ref, target, REPO))
+    assert py == str(target / "bin" / "python") and len(log) == n and f"--python {ref['python']}" in log[0]
+    log.clear()
+    assert ne.ensure_interpreter(ref, REPO, tmp_path, run=build, current=str(broken)) == py and not log  # reused
+    wrong = {**ref, "torch": "0.0.1"}
+    target = ne.restore_target(wrong, tmp_path / "other")
+    with pytest.raises(ne.EnvironmentMismatch, match="still differs"):
+        ne.ensure_interpreter(wrong, REPO, tmp_path / "other", run=build, current=str(broken))
+    log.clear()
+    assert ne.ensure_interpreter(wrong, REPO, tmp_path / "other", run=build, current=str(broken),
+                                 accept_difference=True) == str(target / "bin" / "python")
+    assert len(log) == len(ne.restore_commands(wrong, target, REPO)) - 1 and not any(" venv " in c for c in log)            # the existing venv is re-pinned
+
+
+def test_reference_libraries_come_from_a_completed_exp7_unit(amended_root, tmp_path):
+    from adgraph import numerical_env as ne
+    from adgraph.provenance import versions
+
+    assert ne.reference_libraries(amended_root) == versions()
+    with pytest.raises(ne.EnvironmentMismatch, match="no completed exp7_earm_gnn unit"):
+        ne.reference_libraries(tmp_path / "empty")      # (amended_root is tmp_path itself)

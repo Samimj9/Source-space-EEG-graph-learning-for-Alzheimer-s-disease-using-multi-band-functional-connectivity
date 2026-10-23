@@ -80,7 +80,8 @@ def open_context(processed, inverse: str, mode: str, atlas: str = "dk68") -> tup
 def run_experiment(config: str | Path, processed: str | Path, inverse: str, mode: str, atlas: str = "dk68",
                    graph: str | None = None, variants=None, settings=None, results_root: str | Path | None = None,
                    store: GraphStore | None = None, store_record: dict | None = None, qc_report: dict | None = None,
-                   allow_ephemeral: bool = False, status_path: str | Path | None = None) -> pd.DataFrame:
+                   allow_ephemeral: bool = False, status_path: str | Path | None = None,
+                   frozen_path: str | Path | None = None) -> pd.DataFrame:
     vs = experiment_variants(config, inverse, mode, atlas, graph, variants)
     todo = units(vs, settings)
     if store is None:
@@ -92,7 +93,7 @@ def run_experiment(config: str | Path, processed: str | Path, inverse: str, mode
         from ..provenance import git_commit
         from .decisions import require_frozen
 
-        require_frozen(processed, holdout, git_commit())
+        require_frozen(processed, holdout, git_commit(), frozen_path)
     results_root = Path(results_root or release.results_dir(processed))
     ctx = vs[0]["context"]
     status_path = Path(status_path) if status_path else (

@@ -158,10 +158,11 @@ def freeze(processed, table: pd.DataFrame, commit: str | None) -> dict:
     return d
 
 
-def require_frozen(processed, variants: list[dict], commit: str | None) -> dict:
+def require_frozen(processed, variants: list[dict], commit: str | None, path: str | Path | None = None) -> dict:
     """Raise ``HoldoutNotFrozen`` unless every variant (with its run context) is a unit of the frozen final
-    analysis and the code is the frozen commit."""
-    d = _read(final_path(processed))
+    analysis and the code is the frozen commit. ``path``: the frozen record (default: the release's; an amendment
+    namespace has its own, ``amendment.final_path``)."""
+    d = _read(Path(path) if path else final_path(processed))
     if not d:
         raise HoldoutNotFrozen("the holdout is evaluated only in the frozen final analysis (notebook 99: "
                                "scripts/final.py freeze, then scripts/final.py holdout); nothing is frozen yet")

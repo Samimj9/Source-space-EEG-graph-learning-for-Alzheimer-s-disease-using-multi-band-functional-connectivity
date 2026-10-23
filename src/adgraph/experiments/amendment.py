@@ -10,6 +10,10 @@ own experiment configs in its OWN namespace with its OWN code pin:
                                                               commit, environment check (written once)
     <processed>/FINAL_v1/amendments/<dir>/results/...         results (same layout as FINAL_v1/results)
     <processed>/FINAL_v1/amendments/<dir>/reports/...         tables of this namespace only
+    <processed>/FINAL_v1/amendments/<dir>/decisions/final_analysis.json
+                                                              the frozen holdout units of this namespace; written
+                                                              only by a later, separately recorded final-analysis
+                                                              amendment (entry 60, plan A3), never by this code
 
 Shared with the release, READ ONLY: the verified stores (``stores.open_store(lock=False)``: the release lock is
 checked, never written), the participant QC reports (used only if already complete for this store and QC code; an
@@ -60,6 +64,11 @@ def results_dir(processed, aid: str) -> Path:
 
 def reports_dir(processed, aid: str) -> Path:
     return root(processed, aid) / "reports"
+
+
+def final_path(processed, aid: str) -> Path:
+    """The namespace's frozen final-analysis record (same format as ``decisions.final_path``)."""
+    return root(processed, aid) / "decisions" / "final_analysis.json"
 
 
 def experiment_configs(aid: str) -> dict[str, Path]:
@@ -161,3 +170,69 @@ def run(processed, aid: str, exp: str, inverse: str, mode: str, atlas: str, grap
     return run_experiment(cfg, processed, inverse, mode, atlas, graph, variants, ["xu_dev_cv"],
                           results_root=results_dir(processed, aid), store=store, store_record=rec, qc_report=qc,
                           allow_ephemeral=allow_ephemeral)
+
+
+def holdout(processed, aid: str, exp: str, allow_ephemeral: bool = False) -> list:
+    """Holdout of the namespace's FROZEN units only (descriptive, release.HOLDOUT_POLICY), at the commit that froze
+    them. Refused unless ``final_path`` exists (written by a recorded final-analysis amendment, never here), lists
+    units of ``exp`` and names this code's commit; ``decisions.require_frozen`` is applied with that record."""
+    from ..provenance import git_commit
+    from .plan import run_experiment
+
+    import pandas as pd
+
+    require_initialized(processed, aid)
+    f = final_path(processed, aid)
+    if not f.exists():
+        raise AmendmentError(f"nothing is frozen in amendment {aid} ({f}); its holdout is evaluated only after a "
+                             "recorded final-analysis amendment has frozen it (methodology log entry 60, plan A3)")
+    d = json.loads(f.read_text())
+    if d.get("git_commit") != git_commit():
+        raise AmendmentError(f"{f} was frozen at commit {d.get('git_commit')}, this code is {git_commit()}")
+    units = [u for u in d.get("units", []) if u["exp"] == exp]
+    if not units:
+        raise AmendmentError(f"{exp} has no frozen unit in amendment {aid} ({f})")
+    cfg = experiment_configs(aid)[exp]
+    out = []
+    for (inv, mode, atlas, graph), g in pd.DataFrame(units).groupby(["inverse", "mode", "atlas", "graph"], sort=False):
+        store, rec, qc = open_context(processed, inv, mode, atlas)
+        out.append(run_experiment(cfg, processed, inv, mode, atlas, graph, sorted(g["variant"]), ["xu_holdout"],
+                                  results_root=results_dir(processed, aid), store=store, store_record=rec,
+                                  qc_report=qc, allow_ephemeral=allow_ephemeral, frozen_path=f))
+    return out
+
+
+def namespace_check(processed, aid: str, repo_head: str | None = None) -> dict:
+    """Separation of the amendment namespace from the release (raises ``AmendmentError`` on any violation): the
+    release pin is still the amendment's base pin, the amendment pin is its own file, names the amendment commit
+    (and the checked-out code) and differs from the release pin, and the manifest belongs to this amendment."""
+    from ..provenance import git_commit
+
+    a = record(aid)
+    rel_file = release.root(processed) / "CODE_COMMIT.txt"
+    am_file = Path(processed) / pin_file(aid)
+
+    def first(f: Path):
+        return next((ln.strip() for ln in f.read_text().splitlines() if ln.strip() and not ln.startswith("#")),
+                    None) if f.exists() else None
+
+    rel, am = first(rel_file), first(am_file)
+    man_file = root(processed, aid) / "manifest.json"
+    man = json.loads(man_file.read_text()) if man_file.exists() else {}
+    head = repo_head or git_commit()
+    checks = {
+        "release pin unchanged (= base_release_pin)": rel == a["base_release_pin"],
+        "amendment pin is a separate file": am_file.resolve() != rel_file.resolve(),
+        "amendment pin recorded": am is not None,
+        "amendment pin differs from the release pin": am is not None and am != rel,
+        "checked-out code is the amendment pin": am == head,
+        "manifest belongs to this amendment": man.get("amendment") == aid,
+        "manifest commit is the amendment pin": man.get("amendment_commit") == am,
+        "manifest base pin is the release pin": man.get("base_release_pin") == rel,
+    }
+    out = {"release_pin": rel, "release_pin_file": str(rel_file), "amendment_pin": am,
+           "amendment_pin_file": str(am_file), "head": head, "checks": checks}
+    bad = [k for k, ok in checks.items() if not ok]
+    if bad:
+        raise AmendmentError(f"amendment {aid} namespace check failed: {bad} ({out})")
+    return out

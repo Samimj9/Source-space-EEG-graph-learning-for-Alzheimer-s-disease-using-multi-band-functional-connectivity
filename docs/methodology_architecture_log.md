@@ -3499,22 +3499,72 @@ reports are reused, never recomputed), atlas and graph decisions. Same protocol,
 records the base pin, the amendment commit and the library versions compared with a completed Exp 7 unit (a
 difference must be accepted explicitly and is recorded). Development CV only.
 
-**Final analysis and holdout (proposal; not implemented, needs the author's decision).** At the release pin,
-`configs/final/holdout.yaml` includes exp8, so `final.py freeze` (notebook 99) refuses: Exp 8 has no development
-result in the release namespace. Proposed, keeping each result produced by its own code version: (1) a final-analysis
-amendment (A3, own namespace and pin) whose freeze composes the units of both namespaces (Exp 0-6 from the release,
-each unit's recorded commit = 59a9ab7; Exp 8a from A2, commit = the A2 pin) and records namespace + commit per unit;
-(2) it writes the release-format `FINAL_v1/decisions/final_analysis.json` for the Exp 0-6 units only, with
-`git_commit` 59a9ab7, so `final.py holdout --exp exp0..exp6` runs at the release pin unchanged (its gate checks only
-unit membership and commit); (3) the Exp 8a holdout runs at the A2 pin in the A2 namespace against an A2 frozen
-record; (4) a combined report reads both namespaces and prints each row's commit. Exp 7 and mode A stay development
-only, as pre-specified.
+**Colab numerical environment of the Exp 8a notebook.** Exp 0-7 ran with Python 3.13.15, NumPy 2.1.3, SciPy 1.16.3,
+pandas 2.2.3, scikit-learn 1.6.1, PyTorch 2.11.0+cu130, the versions recorded in every experiment unit's code identity
+(`checkpoint.code_identity("experiment")`). Colab's default kernel changes over time, so the notebook does not trust
+it: `adgraph.numerical_env` reads the versions of a completed Exp 7 unit (`reference_libraries`), queries what an
+interpreter actually imports (`interpreter_versions`, in a subprocess) and uses the kernel's interpreter only if it
+matches exactly; otherwise it reuses or builds `/content/restore<python digits>` (`/content/restore31315`: `uv venv
+--python 3.13.15`, torch from the `cu130` wheel index, `requirements.txt` with the five libraries pinned exactly, the
+package with `--no-deps -e`) and verifies it again. Every `scripts/final.py` call (amendment-check, status, run,
+report) runs with that interpreter (`PY`). Only Python and library versions are compared; the Exp 8a git commit and
+source hash are its own and are not expected to equal Exp 7's. A difference that remains stops the notebook unless
+`ACCEPT_ENVIRONMENT_DIFFERENCE = True` (default False), and is then recorded in the amendment manifest. The restored
+environment lives on the temporary Colab disk only; nothing of it is written on Drive. The notebook asserts amendment
+A2, the recorded atlas lobes12, the recorded graph construction dense, the 10 variants of each report (development CV
+only), and the separation of the pins (`amendment.namespace_check`, also run by `amendment-check`): the release pin
+file still holds 59a9ab7 (= `base_release_pin`), the A2 pin is a different file, names the checked-out commit and the
+manifest's commit, and differs from the release pin.
+
+**Final analysis (notebook 99): the problem.** `configs/final/holdout.yaml` (pre-specified, unchanged) lists
+exp0-exp6 and exp8 (mode B, LCMV and wMNE, recorded atlas and graph). At the release pin, `final.py freeze` computes
+the planned units from that file and refuses while any has no development-CV result; Exp 8 never produced one on
+lobes12 (every unit failed before training) and the release code cannot run Exp 8a, which exists only in the A2
+namespace. So the existing notebook 99 cannot complete its freeze, and no holdout can be evaluated, by design.
+
+**Final analysis: the exact plan (amendment A3; documented, NOT implemented, needs the author's written approval).**
+Nothing below changes a result of Exp 0-7, the release pin, `holdout.yaml`, `require_frozen`, the holdout policy
+(descriptive, once per frozen unit, never used for selection) or any checkpoint check.
+
+1. *Already in the A2 code (this commit), so the A2 pin never has to move:* `final.py holdout --amendment A2 --exp
+   exp8a` evaluates only units listed in the namespace's own frozen record
+   `FINAL_v1/amendments/A2_exp8_surface/decisions/final_analysis.json`, only at the commit named there
+   (`decisions.require_frozen` with that record), and refuses while it does not exist. The A2 code never writes that
+   record, nor the release record `FINAL_v1/decisions/final_analysis.json` (tested).
+2. *Preconditions (checked by the A3 freeze, refused otherwise):* development CV complete for every Exp 0-6 unit of
+   `holdout.yaml` in the release namespace, each unit's `_identity.json` naming commit 59a9ab7; development CV
+   complete for the 10 Exp 8a variants x (LCMV, wMNE) x mode B on lobes12 / dense in the A2 namespace, each naming
+   the A2 pin; atlas and graph decisions recorded; neither frozen record exists yet.
+3. *A3 record (author):* `configs/final/amendments.yaml: A3` (kind: final-analysis amendment), stating the single
+   protocol change: in the frozen final analysis exp8 is replaced by exp8a (the same 10 variants, the bilateral
+   variant renamed `alt_bilateral_lobes`), because exp8 is undefined on the recorded atlas. `holdout.yaml` itself is
+   not edited (it remains the pre-specified plan); A3 adds `configs/final/amendments/holdout_A3.yaml` = holdout.yaml
+   with `exp8` -> `exp8a`, plus the namespace of each experiment. Exp 7, window mode A, the unrecorded atlases and
+   graph constructions stay development-only, as pre-specified.
+4. *A3 freeze (new commit, own namespace `FINAL_v1/amendments/A3_final/` with its own pin; nothing is trained):*
+   `final.py freeze --amendment A3` writes, each exactly once (a different freeze is refused):
+   (a) the release-format `FINAL_v1/decisions/final_analysis.json` with the Exp 0-6 units only and `git_commit`
+   59a9ab7, plus `amendment: A3` and the development-CV AUC of each unit (the format the 59a9ab7 code reads: unit
+   membership + commit only, verified above);
+   (b) `FINAL_v1/amendments/A2_exp8_surface/decisions/final_analysis.json` with the Exp 8a units and `git_commit` =
+   the A2 pin;
+   (c) `FINAL_v1/amendments/A3_final/freeze.json`: both records' SHA-256, the A3 record, the release and A2 pins.
+5. *Holdout, each part at the code that produced its development results (descriptive, once):*
+   notebook 99 regenerated (opened from the branch head as always) so that its freeze cell runs only when no frozen
+   record exists and otherwise only verifies (a); it checks out the release pin 59a9ab7 as now and runs `final.py
+   holdout --exp exp0` ... `exp6` unchanged. A new notebook `99a_exp8a_holdout` checks out the A2 pin and runs
+   `final.py holdout --amendment A2 --exp exp8a`. Both use the restored numerical environment above.
+6. *Combined report (A3 code, read only):* rows from both namespaces, each with its namespace and commit; Exp 8a
+   labelled "amendment A2 (post-design, pre-result)"; the failed original exp8 units shown only as provenance.
 
 **Tests:** `tests/test_exp8_amendment.py` (degenerate original layer; 12 x 12 surface adjacency: ROI order,
 non-empty, symmetric, zero diagonal, no cross-hemisphere edge; config identical to Exp 8 except as documented; each
 variant's layers; all 10 variants train, predict, resume in the namespace; participant-disjoint folds; release
 results, QC, lock and pin untouched; QC required, never recomputed; base pin, environment and commit checks; QC code
-unchanged since 59a9ab7; separate pin; CLI and notebook stay in the namespace).
+unchanged since 59a9ab7; separate pin; CLI and notebook stay in the namespace; the notebook's interpreter,
+environment and namespace assertions (executed against a synthetic namespace, including a moved release pin); the
+restore commands; the namespace holdout refused without its own frozen record or at another commit, and never writing
+the release record).
 
 ## Open items requiring author confirmation
 

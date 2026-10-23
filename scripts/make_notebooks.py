@@ -566,46 +566,89 @@ folds and seeds; development CV only (the holdout is not run here).
 {HOLDOUT}
 """ + HOWTO + " Use a **GPU runtime** (T4)."),
         code(amendment_setup(aid)),
-        md("## 1. Amendment check: pins, numerical environment, stores and QC (nothing is trained)"),
-        code(f'''ACCEPT_ENVIRONMENT_DIFFERENCE = False   # True only after reviewing a reported library difference (recorded)
-sh("python scripts/final.py amendment-check --amendment {aid} --atlas selected"
-   + (" --accept-environment-difference" if ACCEPT_ENVIRONMENT_DIFFERENCE else ""))'''),
-        md("## 2. The anatomical layer of the recorded atlas (fixed; from the atlas only)"),
-        code('''import json, numpy as np, pandas as pd
+        md("""## 1. Numerical environment (exactly that of the completed Exp 7 units)
+
+Exp 8a is compared with Exp 0-7, so it runs with the Python and library versions recorded in the code identity of a
+completed Exp 7 unit (python, numpy, scipy, pandas, scikit-learn, torch). Only these versions are compared: the git
+commit and source hash of Exp 8a are its own and are NOT expected to match Exp 7. If this Colab kernel differs, the
+environment is restored automatically in `/content/restore<python digits>` (e.g. `/content/restore31315`; built with
+`uv`, a few minutes, on the temporary Colab disk only) and verified; every `scripts/final.py` call below uses that
+interpreter (`PY`). Leave `ACCEPT_ENVIRONMENT_DIFFERENCE = False`: a difference that cannot be removed stops here."""),
+        code(f'''ACCEPT_ENVIRONMENT_DIFFERENCE = False   # True only after reviewing a reported difference (it is then recorded)
+from adgraph import numerical_env
+REFERENCE = numerical_env.reference_libraries(OUT, 'exp7_earm_gnn')   # recorded by a completed Exp 7 unit
+PY = numerical_env.ensure_interpreter(REFERENCE, repo='/content/repo', base='/content',
+                                      accept_difference=ACCEPT_ENVIRONMENT_DIFFERENCE, run=sh)
+NOW = numerical_env.interpreter_versions(PY, REFERENCE)
+DIFF = numerical_env.differences(REFERENCE, NOW)
+assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from Exp 7: {{DIFF}}'
+print('scripts run with', PY, NOW)'''),
+        md("## 2. Amendment check: pins, namespace, decisions, stores and QC (nothing is trained)"),
+        code(f'''sh(f"{{PY}} scripts/final.py amendment-check --amendment {aid} --atlas selected"
+   + (" --accept-environment-difference" if ACCEPT_ENVIRONMENT_DIFFERENCE else ""), cwd='/content/repo')
+
+import json, os, subprocess, yaml
+def _pin(path):
+    return next(ln.strip() for ln in open(path) if ln.strip() and not ln.startswith('#'))
+RECORD = yaml.safe_load(open('/content/repo/configs/final/amendments.yaml'))['{aid}']
+MANIFEST = json.load(open(A2_ROOT + '/manifest.json'))
+RELEASE_PIN_FILE, A2_PIN_FILE = FINAL + '/CODE_COMMIT.txt', A2_ROOT + '/CODE_COMMIT.txt'
+HEAD = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd='/content/repo', text=True).strip()
+ATLAS_NAME = json.load(open(FINAL + '/decisions/atlas.json'))['atlas']
+GRAPH_NAME = json.load(open(FINAL + '/decisions/graph_construction.json'))['selected']
+assert MANIFEST['amendment'] == '{aid}' and RECORD['namespace'].endswith('{amendment.NAMESPACES[aid]}'), 'not amendment {aid}'
+assert ATLAS_NAME == 'lobes12', f'recorded atlas is {{ATLAS_NAME}}, amendment {aid} is defined for lobes12'
+assert GRAPH_NAME == 'dense', f'recorded graph construction is {{GRAPH_NAME}}, expected dense'
+assert os.path.realpath(A2_PIN_FILE) != os.path.realpath(RELEASE_PIN_FILE), 'pins must be separate files'
+assert _pin(RELEASE_PIN_FILE) == RECORD['base_release_pin'] == MANIFEST['base_release_pin'], 'release pin moved'
+assert _pin(A2_PIN_FILE) == HEAD == MANIFEST['amendment_commit'], 'the code is not the amendment pin'
+assert _pin(A2_PIN_FILE) != _pin(RELEASE_PIN_FILE), 'the amendment must not run at the release pin'
+assert ACCEPT_ENVIRONMENT_DIFFERENCE or MANIFEST['environment_ok'], MANIFEST['library_differences']
+print('release pin  ', _pin(RELEASE_PIN_FILE), RELEASE_PIN_FILE)
+print('amendment pin', _pin(A2_PIN_FILE), A2_PIN_FILE)
+print('atlas', ATLAS_NAME, '| graph', GRAPH_NAME, '| namespace', A2_ROOT)'''),
+        md("## 3. The anatomical layer of the recorded atlas (fixed; from the atlas only)"),
+        code('''import numpy as np, pandas as pd
 from adgraph.models.xu_dual import anatomical_adjacency
 from adgraph.source.atlas import region_names
-ATLAS_NAME = json.load(open(FINAL + '/decisions/atlas.json'))['atlas']
 names = region_names(ATLAS_NAME)
 A = anatomical_adjacency(names, 'surface_contiguity')
 print(ATLAS_NAME, len(names), 'regions,', int(A.sum() // 2), 'surface edges, symmetric', bool((A == A.T).all()))
 display(pd.DataFrame(A.astype(int), index=names, columns=names))'''),
-        md("## 3. Contexts, status, run (resumable; this amendment experiment only)"),
+        md("## 4. Contexts, status, run (resumable; this amendment experiment only)"),
         code(f'''CONTEXTS = {ctx}     # (inverse, window mode), in this order
 ERRORS = {{}}
 for inverse, mode in CONTEXTS:
     print(f'==== exp8a | {{inverse}} | mode {{mode}}')
-    sh(f"python scripts/final.py status --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
-       f"--atlas selected --graph selected")
+    sh(f"{{PY}} scripts/final.py status --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+       f"--atlas selected --graph selected", cwd='/content/repo')
     try:
-        sh(f"python scripts/final.py run --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
-           f"--atlas selected --graph selected")
+        sh(f"{{PY}} scripts/final.py run --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+           f"--atlas selected --graph selected", cwd='/content/repo')
     except RuntimeError as exc:
         ERRORS[(inverse, mode)] = exc
         print(f'{{inverse}} / mode {{mode}}: some units failed; details after the results')'''),
-        md("## 4. Results and diagnostics of THIS amendment only (saved outputs; diagnostic figures)"),
+        md("## 5. Results and diagnostics of THIS amendment only (saved outputs; diagnostic figures)"),
         code(SHOW_LATEST + f'''
+EXPECTED_VARIANTS = {sorted(x["variant"] for x in v)!r}
+assert len(EXPECTED_VARIANTS) == {len(v)}
 for inverse, mode in CONTEXTS:
-    sh(f"python scripts/final.py report --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
-       f"--atlas selected --graph selected")
-    rep = latest(f"{{A2_ROOT}}/results/{{inverse}}/mode_{{mode}}/{{ATLAS_NAME}}/*/{name}/_reports/report_*")
-    if rep:
-        print('====', inverse, 'mode', mode, rep)
-        t = pd.read_csv(rep + '/results.csv')
-        cols = ['variant', 'setting', 'auc', 'auc_ci_low', 'auc_ci_high', 'mean_fold_auc', 'min_fold_auc',
-                'max_fold_auc', 'balanced_accuracy', 'sensitivity', 'specificity', 'tn', 'fp', 'fn', 'tp']
-        display(t[[c for c in cols if c in t]].round(3))
-        for png in sorted(glob.glob(rep + '/*.png')):
-            display(Image(filename=png))
+    sh(f"{{PY}} scripts/final.py report --amendment {aid} --exp exp8a --inverse {{inverse}} --mode {{mode}} "
+       f"--atlas selected --graph selected", cwd='/content/repo')
+    rep = latest(f"{{A2_ROOT}}/results/{{inverse}}/mode_{{mode}}/{{ATLAS_NAME}}/{{GRAPH_NAME}}/{name}/_reports/report_*")
+    if (inverse, mode) in ERRORS:
+        continue
+    assert rep, f'no report of {name} for {{inverse}} / mode {{mode}} under {{A2_ROOT}}'
+    print('====', inverse, 'mode', mode, rep)
+    t = pd.read_csv(rep + '/results.csv')
+    assert sorted(t['variant'].unique()) == EXPECTED_VARIANTS, sorted(t['variant'].unique())
+    assert set(t['setting']) == {{'xu_dev_cv'}}, 'development CV only'
+    cols = ['variant', 'setting', 'auc', 'auc_ci_low', 'auc_ci_high', 'mean_fold_auc', 'min_fold_auc',
+            'max_fold_auc', 'balanced_accuracy', 'sensitivity', 'specificity', 'tn', 'fp', 'fn', 'tp']
+    display(t[[c for c in cols if c in t]].round(3))
+    for png in sorted(glob.glob(rep + '/*.png')):
+        display(Image(filename=png))
+assert _pin(RELEASE_PIN_FILE) == RECORD['base_release_pin'], 'release pin moved'
 if ERRORS:
     raise RuntimeError(f'units did not complete in {{sorted(ERRORS)}}; completed units are saved. Run all again.')'''),
     ], gpu=True)

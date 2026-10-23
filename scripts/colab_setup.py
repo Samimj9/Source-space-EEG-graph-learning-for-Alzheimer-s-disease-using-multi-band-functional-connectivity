@@ -59,7 +59,7 @@ if args.amendment:                     # an amendment's own pin; the release pin
     release_pin = pin_file.read_text().split()[0] if pin_file.exists() and pin_file.read_text().split() else None
     print(f"release pin (unchanged, not used for this notebook): {release_pin}")
     pin_file = output_root / amendment.pin_file(args.amendment)
-    REQUIRED += ["src/adgraph/experiments/amendment.py", "configs/final/amendments.yaml"]
+    REQUIRED += ["src/adgraph/experiments/amendment.py", "configs/final/amendments.yaml", "src/adgraph/numerical_env.py"]
 if args.no_pin:
     commit, needs_checkout = head, False
     print(f"code: cloned commit {commit} (maintenance mode, no code pin read or written)")

@@ -21,6 +21,7 @@
     python scripts/final.py holdout --exp exp5                      # holdout of the frozen units only (descriptive)
     python scripts/final.py amendment-check --amendment A2          # amendment namespace: pins, environment, QC
     python scripts/final.py run --amendment A2 --exp exp8a --inverse lcmv --mode B --atlas selected --graph selected
+    python scripts/final.py holdout --amendment A2 --exp exp8a      # only units frozen in the namespace's own record
     python scripts/final.py difficult                               # category C participants (development CV)
     python scripts/final.py parcellation [--bem <bem-sol.fif>]      # source-resolution analysis per atlas
     python scripts/final.py reliability --inverse lcmv --mode B     # split-half reliability of features (development)
@@ -503,6 +504,17 @@ if args.action == "holdout":
     if not args.exp:
         sys.exit("--exp is required")
     verify_environment()
+    if args.amendment:                                  # the namespace's own frozen record only (entry 60, plan A3)
+        from adgraph.experiments import amendment
+
+        try:
+            ts = amendment.holdout(P, args.amendment, args.exp, allow_ephemeral=args.allow_ephemeral_storage)
+        except amendment.AmendmentError as exc:
+            sys.exit(str(exc))
+        for t in ts:
+            print(t.drop(columns=["updated"]).to_string(index=False))
+        print("holdout results are descriptive only (release.HOLDOUT_POLICY)")
+        sys.exit(1 if sum(int((t["state"] != "completed").sum()) for t in ts) else 0)
     f = decisions.final_path(P)
     if not f.exists():
         sys.exit("nothing is frozen: run `python scripts/final.py freeze` first (notebook 99)")
@@ -550,8 +562,11 @@ if args.action == "amendment-check":
         print(f"{k}: {chk[k]}")
     try:
         man = amendment.initialize(P, args.amendment, args.accept_environment_difference)
+        ns = amendment.namespace_check(P, args.amendment)
     except amendment.AmendmentError as exc:
         sys.exit(f"NOT ready: {exc}")
+    print(f"release pin {ns['release_pin']} ({ns['release_pin_file']}); amendment pin {ns['amendment_pin']} "
+          f"({ns['amendment_pin_file']}); separate and unchanged: " + ", ".join(ns["checks"]))
     problems = []
     for inv in ("lcmv", "wmne"):
         for mode in ("B", "A"):

@@ -268,11 +268,15 @@ SHA-256s, timestamps), `status.csv`, per-participant checkpoints, `validation.js
 
 The original `Exp8_xu_dual_gcn` cannot run on lobes12 (its anatomical layer is empty there). Run
 `Exp8a_xu_dual_gcn_surface` instead: it checks out its own code pin (`FINAL_v1/amendments/A2_exp8_surface/CODE_COMMIT.txt`,
-recorded on its first run), never the release pin, and writes only into that namespace. Its first cell checks the base
-pin (59a9ab7), the numerical environment against a completed Exp 7 unit, the stores and the QC reports (reused, never
-recomputed); a library difference stops it until you set `ACCEPT_ENVIRONMENT_DIFFERENCE = True` (recorded). The failed
-/ partial units of the original Exp 8 stay untouched. Notebook 99 at the release pin cannot freeze while
-`holdout.yaml` lists exp8: the proposed cross-namespace final analysis is in methodology log entry 60.
+recorded on its first run), never the release pin, and writes only into that namespace. Its environment cell compares
+this Colab kernel with the Python / library versions of a completed Exp 7 unit (not the commit or source hash) and, if
+they differ, restores them in `/content/restore31315` and verifies it; every `scripts/final.py` call then uses that
+interpreter. Its check cell runs `amendment-check` (base pin 59a9ab7, stores, QC reports reused, never recomputed) and
+asserts amendment A2, atlas lobes12, graph dense and separate, unchanged pins; the report cell asserts the 10
+variants. A difference that cannot be removed stops it unless you set `ACCEPT_ENVIRONMENT_DIFFERENCE = True`
+(recorded). The failed / partial units of the original Exp 8 stay untouched. Notebook 99 at the release pin cannot
+freeze while `holdout.yaml` lists exp8: do not run it; the exact plan (amendment A3, needs your approval) is in
+methodology log entry 60.
 
 ## 6. Begin here (notebook 00)
 
