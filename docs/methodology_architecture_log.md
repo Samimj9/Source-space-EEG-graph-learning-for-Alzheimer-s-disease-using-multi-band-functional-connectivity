@@ -3633,6 +3633,33 @@ recordings. Prior exposure of D2 and the origin of every D2 preprocessing choice
 the line-noise audit, the EDF annotation listing, decisions D6 / D7 / D10 in the campaign, the stability
 authorization, D9 identity matching, source-only node-feature normalization, notebook text and Part A steps.
 
+## 63. Cross-dataset D2: acquisition-specific 50 Hz notch and per-channel unit checks (2026-10-26)
+
+**Part A finding (label-blind, author's run).** Median 49-51 / 35-45 Hz power ratio +22.61 dB in D2 vs -56.74 dB in
+D3; median D2 variance fraction at 47-53 Hz 26.7 % (D2-20: 61.8 %); a diagnostic notch on the resampled segments
+changed the broadband covariance by a median 51.6 % (D2-20: 98.9 %) and flipped 38.5 % of D2-19's window decisions;
+every D2 recording kept >= 129 accepted windows; D2-19 has mixed EDF units (`V;uV`).
+
+**Decision (author, 2026-10-26).** D2-specific line-noise removal; D3 stays provider-preprocessed (no 50 Hz
+interference) and its validated stores are unchanged. Zero-phase FIR notch (MNE, firwin), stop band 49-51 Hz, 1 Hz
+transitions, applied to the 19 selected channels at the input rate after the 0.5-45 Hz band-pass and before the settle
+crop, resampling, the common average, rejection and source reconstruction. The post-filter crop grows from 5 s to 8 s
+(band-pass 3.73 s + notch FIR half-length 3.30 s). Per-channel fail-fast unit and amplitude checks (EDF dimension in
+V / mV / uV / nV; band-passed robust std in [1e-7, 1e-3] V) and a unit audit of every channel. The first audit's
+diagnostic notch (IIR on resampled segments) stays in the audit as `diag_*`, side by side with the actual notch.
+
+**Why a FIR notch and not an IIR notch.** The FIR stop band (-54 to -58 dB at 49-51 Hz) leaves 0.5-45 Hz unchanged
+(< 0.01 dB) and follows the project's filter convention (MNE firwin, 1 Hz transitions); a zero-phase IIR notch with
+Q = 30 would attenuate 45 Hz by 0.2 dB and 47 Hz by 0.6 dB (the gamma band's upper edge).
+
+**Not changed.** The D3 stores, Exp 0-8a, amendment A2, the release lock and every checkpoint. No D2 graph has been
+built. The change was decided from label-blind audit numbers only, before any graph build or classification.
+
+**Tests.** Injected 50 Hz suppressed with < 0.05 dB change in every analysis band and the peak removed; notch
+response, < 0.01 dB in 0.5-45 Hz, cascade support covered by the crop; the order of the steps; determinism; D3 not
+notched and its store configurations unchanged; mixed but correct units read identically in volts; wrong units
+(header V with uV values, header uV with V values, an unknown unit) fail fast naming the channel; the unit audit.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

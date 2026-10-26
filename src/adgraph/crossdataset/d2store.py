@@ -10,8 +10,9 @@ FIR features, PLV / |ciPLV| / PSD / DE) with the D2 loader ``load_d2``:
    to the D3 labels and put in the D3 store order; the 13 other channels are never read;
 2. ``edge_crop_s`` discarded at each end (before any filtering);
 3. 0.5-45 Hz zero-phase 4th-order Butterworth (the provider's documented D3 filter; order not documented by the
-   provider) on the 19 channels;
-4. ``settle_s`` discarded at each end;
+   provider) on the 19 channels; then the per-channel unit / amplitude checks (``check_units``);
+3b. the acquisition-specific 50 Hz notch (``line_noise``: zero-phase FIR, firwin, stop band 49-51 Hz), D2 only;
+4. ``settle_s`` discarded at each end (covers the band-pass and notch edge transients);
 5. head geometry = the D3 positions (``channels.harmonized_geometry``): one forward model shared with D3;
 6. then exactly the D3 path: per-segment resampling to 250 Hz, common average of the SAME 19 electrodes, ...
 
@@ -50,6 +51,10 @@ MODES = {"B": 0, "A": 1}
 
 class D2StoreError(RuntimeError):
     pass
+
+
+class UnitError(D2StoreError):
+    """A selected channel's unit or amplitude is not that of an EEG signal in volts (fail fast; nothing rescaled)."""
 
 
 def spec(path: str | Path | None = None) -> dict:
@@ -157,6 +162,10 @@ def load_d2(path, dataset: str, cfg: dict, table: dict, geometry: dict):
     if n_bound:
         raise D2StoreError(f"{Path(path).name}: {n_bound} boundary annotation(s); D2 recordings are continuous")
     idx = [raw.ch_names.index(name) for name, _ in picks]
+    units = channel_units(raw, [name for name, _ in picks])
+    bad_units = {n: u for n, u in units.items() if u not in cfg["units"]["physical_dimensions"]}
+    if bad_units:
+        raise UnitError(f"{Path(path).name}: unsupported EDF physical dimension(s) {bad_units}")
     x = raw.get_data(picks=idx) * float(cfg["units"]["scale"][dataset])
     if x.shape[0] != 19:
         raise D2StoreError(f"{Path(path).name}: read {x.shape[0]} channels")
@@ -172,6 +181,8 @@ def load_d2(path, dataset: str, cfg: dict, table: dict, geometry: dict):
     x = mne.filter.filter_data(x, sf, bp["l_freq"], bp["h_freq"], method="iir",
                                iir_params={"order": int(bp["order"]), "ftype": "butter", "output": "sos"},
                                phase="zero", verbose="error")
+    rstd = check_units(x, [d3 for _, d3 in picks], units, cfg, Path(path).name)
+    x = remove_line_noise(x, sf, pp.get("line_noise"))
     x = x[:, n_settle:x.shape[1] - n_settle]
     info = mne.create_info(list(table["canonical_order"]), sf, "eeg")
     out = mne.io.RawArray(x, info, verbose="error")
@@ -180,8 +191,88 @@ def load_d2(path, dataset: str, cfg: dict, table: dict, geometry: dict):
            "dropped_channels": [], "unrecognised_channels": [], "channel_naming": "indexed", "geometry": geometry,
            "x_edf_picks": json.dumps([name for name, _ in picks]), "x_original_samples": int(n_total),
            "x_edge_crop_samples": n_edge, "x_settle_samples": n_settle,
-           "x_input_offset_samples": n_edge + n_settle, "x_bandpass": json.dumps(bp)}
+           "x_input_offset_samples": n_edge + n_settle, "x_bandpass": json.dumps(bp),
+           "x_line_noise": json.dumps(pp.get("line_noise")),
+           "x_channel_units": json.dumps({d3: units[name] for name, d3 in picks}),
+           "x_mixed_units": len(set(units.values())) > 1,
+           "x_channel_robust_std_uv": json.dumps({d3: round(v * 1e6, 4) for d3, v in rstd.items()})}
     return out, rec
+
+
+def channel_units(raw, names: list[str]) -> dict:
+    """EDF physical dimension of each named channel as MNE read it (MNE scales each channel by its own unit)."""
+    orig = getattr(raw, "_orig_units", None) or {}
+    return {n: str(orig.get(n, "")).replace("µ", "u") for n in names}
+
+
+def robust_std(x: np.ndarray) -> np.ndarray:
+    med = np.median(x, axis=1, keepdims=True)
+    return 1.4826 * np.median(np.abs(x - med), axis=1)
+
+
+def check_units(x: np.ndarray, names: list[str], units: dict, cfg: dict, rec: str) -> dict:
+    """Fail fast unless every selected channel's band-passed robust std (volts) lies in ``channel_robust_std_v``:
+    catches a header unit that does not match the stored values (factor 1e3 / 1e6) and dead channels."""
+    lo, hi = cfg["units"]["channel_robust_std_v"]
+    r = robust_std(x)
+    bad = {n: f"{v:.3g} V" for n, v in zip(names, r) if not lo <= v <= hi}
+    if bad:
+        raise UnitError(f"{rec}: channel amplitude outside [{lo:g}, {hi:g}] V (robust std of the band-passed signal) "
+                        f"for {bad}; EDF units of the selected channels {sorted(set(units.values()))}. A unit or scaling "
+                        "error, or a dead channel: run scripts/cross_dataset.py inspect-d2-units; nothing is rescaled")
+    return dict(zip(names, r.tolist()))
+
+
+def remove_line_noise(x: np.ndarray, sf: float, ln: dict | None) -> np.ndarray:
+    """The configured acquisition-specific line-noise notch (zero-phase FIR; deterministic). ``None``: unchanged."""
+    import mne
+
+    if not ln:
+        return x
+    if (ln["method"], ln["phase"]) != ("fir_notch", "zero"):
+        raise D2StoreError(f"unsupported line-noise correction {ln}")
+    y = mne.filter.notch_filter(x, sf, list(ln["freqs"]), notch_widths=float(ln["notch_width_hz"]),
+                                trans_bandwidth=float(ln["trans_bandwidth_hz"]), method="fir", phase="zero",
+                                fir_design="firwin", pad=ln.get("pad", "reflect_limited"), verbose="error")
+    if not np.isfinite(y).all():
+        raise D2StoreError("non-finite values after the line-noise notch")
+    return y
+
+
+def unit_audit(reg: pd.DataFrame, cfg: dict, table: dict) -> pd.DataFrame:
+    """Every channel of every recording: EDF label, physical dimension, physical / digital range, whether it is one of
+    the 19 selected channels, and the robust std MNE returns after the band-pass (volts); flags implausible amplitudes.
+    Reads the signals (no labels, no source model)."""
+    import edfio
+    import mne
+
+    from ..io.layout import indexed_number
+
+    rows = []
+    lo, hi = cfg["units"]["channel_robust_std_v"]
+    bp = cfg["preprocessing"]["bandpass"]
+    sel = {r["edf_index"]: r["d3"] for r in table["channels"]}
+    for rec in reg.itertuples():
+        hdr = {s.label: s for s in edfio.read_edf(rec.path, lazy_load_data=True).signals}
+        raw = mne.io.read_raw_edf(rec.path, preload=True, verbose="error")
+        sf = float(raw.info["sfreq"])
+        n = int(round(cfg["preprocessing"]["edge_crop_s"] * sf))
+        x = raw.get_data()[:, n:-n]
+        x = mne.filter.filter_data(x, sf, bp["l_freq"], bp["h_freq"], method="iir",
+                                   iir_params={"order": int(bp["order"]), "ftype": "butter", "output": "sos"},
+                                   phase="zero", verbose="error")
+        r = robust_std(x)
+        units = channel_units(raw, raw.ch_names)
+        for i, name in enumerate(raw.ch_names):
+            h = hdr.get(name)
+            k = indexed_number(name)
+            rows.append({"key": rec.key, "edf_label": name, "edf_index": k, "selected_as": sel.get(k, ""),
+                         "physical_dimension": units[name],
+                         "physical_min": getattr(h, "physical_min", None), "physical_max": getattr(h, "physical_max", None),
+                         "digital_min": getattr(h, "digital_min", None), "digital_max": getattr(h, "digital_max", None),
+                         "robust_std_uv": float(r[i] * 1e6), "plausible": bool(lo <= r[i] <= hi)})
+        del raw, x
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------------------------- build

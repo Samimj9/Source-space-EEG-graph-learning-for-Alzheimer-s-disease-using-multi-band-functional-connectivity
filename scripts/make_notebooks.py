@@ -788,12 +788,19 @@ display(pd.read_csv(CROSS + '/audit/age_overlap_feasibility.csv'))
 print(json.dumps(json.load(open(CROSS + '/audit/d2_filter_response.json'))['magnitude_db'], indent=1))"""),
         md("""## Part A2 · Recording-level inspection (label-blind; no source model, no graph)
 
-Per D2 recording: duration, selection, candidate and accepted windows, amplitude, and line noise with what a 50 Hz
-notch WOULD change (LCMV covariance input, window acceptance); the same line-noise audit of the D3 recordings for
-comparison. Nothing is applied; decision D3 is taken from these numbers before any classification."""),
-        code("""cross('inspect-d2')
+`inspect-d2-units`: every EDF channel of every D2 recording (unit, physical / digital range, the amplitude MNE
+returns after the band-pass); recordings with mixed `V` / `uV` headers are listed channel by channel; an implausible
+SELECTED channel fails. `inspect-d2`: every D2 recording processed exactly as the store will be, WITHOUT and WITH the
+acquisition-specific 50 Hz notch (same crops and pieces): 50 Hz power, the 100 Hz harmonic, residual narrowband peaks,
+covariance change (the LCMV input), accepted windows and the power change in every analysis band; `diag_*` columns
+are the first audit's diagnostic notch on resampled segments (not the preprocessing notch). `inspect-d3-line`: the
+D3 line-noise audit (D3 is not notched)."""),
+        code("""cross('inspect-d2-units')
+cross('inspect-d2')
 cross('inspect-d3-line')
-display(pd.read_csv(CROSS + '/audit/d2_inspection.csv').filter(regex='key|duration|windows|std|line|covariance|flip|status').round(3))"""),
+display(pd.read_csv(CROSS + '/audit/d2_inspection.csv').filter(
+    regex='key|selected_duration|windows_accepted|flip|line_ratio|line_variance|harmonic|covariance|band_power|peaks_after|mixed|status').round(3))
+print(json.dumps(json.load(open(CROSS + '/audit/d2_notch_response.json'))['cascade_db'], indent=1))"""),
         md("""## Part B · Matched-channel D2 stores (STOP HERE unless the author has authorized it in writing)
 
 Set `AUTHORIZED_BY` to the author's name only after the written authorization; it is recorded once in

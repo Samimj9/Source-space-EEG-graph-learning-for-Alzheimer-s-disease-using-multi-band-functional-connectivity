@@ -5,6 +5,7 @@
     python scripts/cross_dataset.py inspect-d2                  # recording-level QC of D2 (no source model, no graph)
                                                                 # + line noise and what a notch would change
     python scripts/cross_dataset.py inspect-d3-line             # the same line-noise audit of the D3 recordings
+    python scripts/cross_dataset.py inspect-d2-units            # every EDF channel's unit and band-passed amplitude
     python scripts/cross_dataset.py authorize --stage build_d2 --by "<name>" [--note ...]   # the AUTHOR, once
     python scripts/cross_dataset.py build-d2 --inverse lcmv [--limit 2]   # matched-channel D2 stores (authorized)
     python scripts/cross_dataset.py validate-d2 --inverse lcmv
@@ -33,7 +34,7 @@ from pathlib import Path
 import pandas as pd
 
 parser = argparse.ArgumentParser()
-parser.add_argument("action", choices=["audit", "inspect-d2", "inspect-d3-line", "authorize", "build-d2", "validate-d2", "compat",
+parser.add_argument("action", choices=["audit", "inspect-d2", "inspect-d2-units", "inspect-d3-line", "authorize", "build-d2", "validate-d2", "compat",
                                        "freeze", "status", "run", "evaluate", "report", "smoke"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
@@ -187,13 +188,18 @@ if args.action == "audit":
     sys.exit(0 if ok else 1)
 
 if args.action == "inspect-d2":
+    import copy
     from functools import partial
+
+    import numpy as np
 
     from adgraph.crossdataset import signal_audit
     from adgraph.io.fingerprint import InputHashes
     from adgraph.sourcegraphs.build import recording_qc, reject
 
-    cfg = d2store.resolve(args.inverse)
+    cfg = d2store.resolve(args.inverse)                          # the store configuration: WITH the D2 notch
+    cfg_off = copy.deepcopy(cfg)                                 # identical, notch disabled (same crops and pieces)
+    cfg_off["preprocessing"]["line_noise"] = None
     table = channels.load_table()
     reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")))
     loader = partial(d2store.load_d2, table=table, geometry=geometry(processed))
@@ -201,24 +207,66 @@ if args.action == "inspect-d2":
     for rec in reg.itertuples():
         try:
             row, segs, pieces, _, _ = recording_qc(rec, cfg, loader)
-            row.update(signal_audit.recording_audit(segs, pieces, cfg))
-            cands, keep, _, _ = reject(segs, pieces, cfg)
-            row["n_windows_accepted"], row["n_windows_rejected"] = int(keep.sum()), int(len(keep) - keep.sum())
-            row["below_min_windows"] = bool(keep.sum() < cfg["windowing"]["min_windows"])
-            del segs
+            _, segs0, pieces0, _, _ = recording_qc(rec, cfg_off, loader)
+            if [(q.segment, q.start, q.stop) for q in pieces] != [(q.segment, q.start, q.stop) for q in pieces0]:
+                raise RuntimeError("the notch changed the selection geometry")
+            sel = np.concatenate([segs[q.segment].data[:, q.start:q.stop] for q in pieces], axis=1)
+            sel0 = np.concatenate([segs0[q.segment].data[:, q.start:q.stop] for q in pieces0], axis=1)
+            row.update(signal_audit.compare(sel0, sel, segs[0].sfreq, cfg))           # the ACTUAL preprocessing notch
+            row.update(signal_audit.notch_sensitivity(segs0, pieces0, cfg))            # diag_*: the first audit's notch
+            _, keep, _, _ = reject(segs, pieces, cfg)
+            _, keep0, _, _ = reject(segs0, pieces0, cfg)
+            row.update({"n_windows_accepted": int(keep.sum()), "n_windows_accepted_without_notch": int(keep0.sum()),
+                        "n_windows_rejected": int(len(keep) - keep.sum()),
+                        "rejection_flip_fraction_actual_notch": float(np.mean(keep != keep0)) if len(keep) else np.nan,
+                        "below_min_windows": bool(keep.sum() < cfg["windowing"]["min_windows"])})
+            del segs, segs0, sel, sel0
             for k in ("label", "y", "age", "sex", "mmse", "acer", "comment"):     # label-blind
                 row.pop(k, None)
         except Exception as exc:
-            row = {"key": rec.key, "status": f"error: {exc}"}
+            row = {"key": rec.key, "status": f"error: {type(exc).__name__}: {exc}"}
         rows.append(row)
     df = pd.DataFrame(rows)
     atomic_write_csv(namespace.sub(processed, "audit", "d2_inspection.csv"), df)
-    cols = [x for x in ("key", "original_duration_s", "selected_duration_s", "n_candidate_windows",
-                        "n_windows_accepted", "below_min_windows", "median_std_uv", "line_ratio_db",
-                        "line_variance_fraction", "covariance_rel_change", "rejection_flip_fraction", "status")
-            if x in df]
-    print(df[cols].to_string(index=False))
-    sys.exit(0)
+    nr = signal_audit.notch_response(cfg)
+    atomic_write_json(namespace.sub(processed, "audit", "d2_notch_response.json"), nr)
+    cols = [x for x in ("key", "selected_duration_s", "n_windows_accepted_without_notch", "n_windows_accepted",
+                        "rejection_flip_fraction_actual_notch", "line_ratio_db_before", "line_ratio_db_after",
+                        "line_variance_fraction_before", "line_variance_fraction_after", "harmonic100_ratio_db_after",
+                        "covariance_rel_change_actual_notch", "diag_covariance_rel_change",
+                        "band_power_change_db_delta", "band_power_change_db_theta", "band_power_change_db_alpha",
+                        "band_power_change_db_beta", "band_power_change_db_gamma", "narrowband_peaks_after",
+                        "x_mixed_units", "status") if x in df]
+    print(df[cols].round(4).to_string(index=False))
+    print("notch:", {k: nr[k] for k in ("notch_max_abs_db_0.5_45", "combined_support_s", "settle_crop_s",
+                                        "settle_covers_cascade")}, nr["cascade_db"])
+    ok = not df.get("status", pd.Series(dtype=str)).astype(str).str.startswith("error").any() and nr[
+        "settle_covers_cascade"]
+    print("D2 INSPECTION PASSED" if ok else "D2 INSPECTION FAILED (see status / notch)")
+    sys.exit(0 if ok else 1)
+
+if args.action == "inspect-d2-units":
+    from adgraph.io.fingerprint import InputHashes
+
+    cfg = d2store.resolve(args.inverse)
+    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")))
+    u = d2store.unit_audit(reg, cfg, channels.load_table())
+    atomic_write_csv(namespace.sub(processed, "audit", "d2_units.csv"), u)
+    per = u.groupby("key")["physical_dimension"].agg(lambda x: ";".join(sorted(set(x))))
+    mixed = per[per.str.contains(";")]
+    print("recordings with mixed EDF units:", mixed.to_dict())
+    for key in mixed.index:
+        g = u[u["key"] == key]
+        print(f"==== {key}: units per channel")
+        print(g[["edf_label", "edf_index", "selected_as", "physical_dimension", "physical_min", "physical_max",
+                 "robust_std_uv", "plausible"]].to_string(index=False))
+    sel = u[u["selected_as"] != ""]
+    bad = sel[~sel["plausible"]]
+    print(f"selected channels: {len(sel)} ({sel['key'].nunique()} recordings); implausible: {len(bad)}")
+    if len(bad):
+        print(bad.to_string(index=False))
+    print("UNIT AUDIT PASSED" if bad.empty else "UNIT AUDIT FAILED")
+    sys.exit(0 if bad.empty else 1)
 
 if args.action == "inspect-d3-line":
     from adgraph.crossdataset import signal_audit

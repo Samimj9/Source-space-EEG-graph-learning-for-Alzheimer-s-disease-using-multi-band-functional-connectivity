@@ -25,12 +25,20 @@ overrides:
     verify_layout: true
   units:
     scale:
-      D2: 1.0                       # EDF header in volts (legacy D2 rule; amplitude plausibility checked per participant)
+      D2: 1.0                       # MNE scales every channel by ITS OWN EDF physical dimension (mixed V / uV headers
+                                    # occur, e.g. D2-19); no extra factor
+    physical_dimensions: [V, mV, uV, nV]       # (µV read as uV) any other unit in a selected channel's header stops the participant
+    channel_robust_std_v: [1.0e-7, 1.0e-3]     # per SELECTED channel, 1.4826 MAD of the band-passed signal (volts):
+                                               # outside = a unit / scaling error (a uV value read as V is 1e6 too
+                                               # large, a V value read as uV 1e6 too small) or a dead channel; fails
+                                               # fast, naming recording and channel
   preprocessing:
     # D3 is used as released by its provider (0.5-45 Hz Butterworth, A1-A2 reference, ASR, ICA/ICLabel); our D3 stores
     # add no sensor filter. D2 is raw: the provider's documented band-pass is reproduced (filter ORDER of the provider
     # is not documented: 4th-order Butterworth applied forward and backward = zero phase, -6 dB at 0.5 and 45 Hz).
-    # ASR / ICA are NOT applied (design section 4.3). Line noise is reported, not removed (no notch in either dataset).
+    # ASR / ICA are NOT applied (design section 4.3). D2 receives an ACQUISITION-SPECIFIC 50 Hz notch (line_noise):
+    # the label-blind Part A audit found strong 50 Hz interference in D2 (median +22.6 dB over 35-45 Hz) and none in
+    # the provider-preprocessed D3 (median -56.7 dB); D3 is not re-filtered (methodology log entry 63).
     edge_crop_s: 10.0               # discarded at each end before any filtering (legacy D2 rule, entry 41)
     bandpass:
       l_freq: 0.5
@@ -39,8 +47,18 @@ overrides:
       ftype: butter
       order: 4
       phase: zero
-    settle_s: 5.0                   # discarded at each end after the band-pass (impulse response < 1e-4 of its
-                                    # peak beyond 3.73 s at 1024 Hz); the analytic-kernel margin applies on top
+    line_noise:                     # applied AFTER the band-pass, BEFORE the settle crop, resampling, the common
+                                    # average, rejection and source reconstruction (on the 19 selected channels)
+      method: fir_notch             # mne.filter.notch_filter, method fir, firwin (the project's filter convention)
+      freqs: [50.0]                 # mains; 100 Hz is already -55 dB after the band-pass (residuals audited)
+      notch_width_hz: 2.0           # stop band 49-51 Hz (-54 to -59 dB; mains drift covered)
+      trans_bandwidth_hz: 1.0       # pass band below 48 Hz: |gain| < 0.02 dB in 0.5-45 Hz
+      phase: zero
+      pad: reflect_limited
+    settle_s: 8.0                   # discarded at each end after band-pass + notch: band-pass impulse response
+                                    # < 1e-4 of its peak beyond 3.73 s + the notch FIR's exact half-length 3.30 s
+                                    # = 7.03 s (tested); the analytic-kernel margin applies on top (was 5 s before
+                                    # the notch; methodology log entry 63)
   discontinuities:
     source: edf_annotations_boundary   # an EDF has no EEGLAB boundary; any 'boundary' annotation would still split
     handling: split

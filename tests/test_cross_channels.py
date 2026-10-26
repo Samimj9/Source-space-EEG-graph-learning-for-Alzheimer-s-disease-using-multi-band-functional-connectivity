@@ -4,6 +4,7 @@ checked); the EDFs are generated."""
 
 import copy
 import hashlib
+import json
 
 import numpy as np
 import pytest
@@ -129,8 +130,8 @@ def test_load_d2_reads_exactly_the_mapped_channels_by_number(tmp_path, table):
     ratio = x.std(axis=1) / x[0].std()                                       # channel 0 = Fp1 = number 1
     assert np.allclose(ratio, idx / idx[0], rtol=1e-3)
     n = 60 * 1024
-    assert rec["x_edge_crop_samples"] == 10 * 1024 and rec["x_settle_samples"] == 5 * 1024
-    assert x.shape[1] == n - 2 * (10 + 5) * 1024
+    assert rec["x_edge_crop_samples"] == 10 * 1024 and rec["x_settle_samples"] == 8 * 1024
+    assert x.shape[1] == n - 2 * (10 + 8) * 1024
     expected = np.median(idx) * 10e-6 * np.sqrt((45 - 0.5) / 512)          # volts; white noise kept in 0.5-45 Hz
     assert abs(np.median(np.std(x, axis=1)) - expected) / expected < 0.1
 
@@ -264,3 +265,125 @@ def test_the_header_audit_lists_annotation_texts(tmp_path):
     h = d2store.header_audit(pd.DataFrame({"key": ["D2-2"], "path": [str(p)]}))
     assert h["annotations"].iloc[0] == "EO|Eyes closed" and h["n_signals"].iloc[0] == 32
     assert "patient" not in " ".join(h.columns)
+
+
+
+# ------------------------------------------------------------------------------------------- D2 line-noise notch
+def _edf_with_line(path, sf=1024, seconds=120, line_uv=60.0, units=None, values_scale=None):
+    import edfio
+
+    rng = np.random.default_rng(0)
+    n = sf * seconds
+    t = np.arange(n) / sf
+    data = (0.8 * rng.standard_normal(n) + 0.6 * rng.standard_normal((32, n))) * 10.0
+    data = data + line_uv * np.sin(2 * np.pi * 50 * t) * rng.uniform(0.5, 1.5, (32, 1))
+    units, values_scale = units or {}, values_scale or {}
+    sigs = []
+    for k, x in enumerate(data):
+        u = units.get(k + 1, "uV")
+        v = x * values_scale.get(k + 1, 1e-6 if u == "V" else 1.0)
+        rng_ = (-0.02, 0.02) if u == "V" and values_scale.get(k + 1) is None else (-20000, 20000)
+        sigs.append(edfio.EdfSignal(v, sampling_frequency=sf, label=f"Misc ExG{k + 1}", physical_dimension=u,
+                                    physical_range=rng_))
+    edfio.Edf(sigs).write(path)
+
+
+def _load(path, table, notch=True):
+    import copy
+
+    from adgraph.crossdataset import d2store
+
+    cfg = d2store.resolve("lcmv", table)
+    if not notch:
+        cfg = copy.deepcopy(cfg)
+        cfg["preprocessing"]["line_noise"] = None
+    return d2store.load_d2(path, "D2", cfg, table, channels.template_geometry(table)), cfg
+
+
+def test_the_notch_suppresses_injected_50hz_without_distorting_the_analysis_bands(tmp_path, table):
+    from adgraph.crossdataset import signal_audit
+
+    _edf_with_line(tmp_path / "a.edf")
+    (r0, _), _ = _load(tmp_path / "a.edf", table, notch=False)
+    (r1, rec), cfg = _load(tmp_path / "a.edf", table)
+    x0, x1, sf = r0.get_data(), r1.get_data(), r1.info["sfreq"]
+    c = signal_audit.compare(x0, x1, sf, cfg)
+    assert c["line_variance_fraction_before"] > 0.5 and c["line_variance_fraction_after"] < 0.02
+    assert c["line_ratio_db_after"] < c["line_ratio_db_before"] - 35
+    assert "50.0Hz" in c["narrowband_peaks_before"] and "50.0Hz" not in c["narrowband_peaks_after"]
+    for b in ("delta", "theta", "alpha", "beta", "gamma"):                 # intended bands untouched
+        assert abs(c[f"band_power_change_db_{b}"]) < 0.05, b
+    assert json.loads(rec["x_line_noise"])["freqs"] == [50.0] and np.isfinite(x1).all()
+    (r2, _), _ = _load(tmp_path / "a.edf", table)                          # deterministic
+    assert np.array_equal(r2.get_data(), x1)
+
+
+def test_the_notch_response_and_edge_support(table):
+    from adgraph.crossdataset import d2store, signal_audit
+
+    r = signal_audit.notch_response(d2store.resolve("lcmv", table))
+    assert r["notch_db"][50.0] < -50 and r["notch_db"][49.0] < -50 and r["notch_db"][51.0] < -50
+    assert r["notch_max_abs_db_0.5_45"] < 0.01                               # 0.5-45 Hz: < 0.01 dB
+    assert abs(r["notch_db"][45.0]) < 0.01 and abs(r["notch_db"][100.0]) < 0.01
+    assert r["cascade_db"][100.0] < -50                                     # the band-pass removes the harmonic
+    assert r["settle_covers_cascade"] and r["combined_support_s"] <= 8.0
+
+
+def test_the_notch_is_applied_after_the_bandpass_and_before_resampling_and_referencing(table):
+    import inspect
+
+    from adgraph.crossdataset import d2store
+
+    src = inspect.getsource(d2store.load_d2)
+    order = [src.index(k) for k in ("x[:, n_edge:", "filter_data(", "check_units(", "remove_line_noise(",
+                                    "x[:, n_settle:", "RawArray(")]
+    assert order == sorted(order)                       # resampling and the common average follow in segments()
+
+
+def test_d3_is_not_notched():
+    from adgraph.sourcegraphs.config import resolve
+
+    for inv in ("lcmv", "wmne"):
+        for atlas in ("dk68", "lobes12"):
+            cfg = resolve(inv, atlas)
+            assert "line_noise" not in cfg["preprocessing"] and cfg["preprocessing"]["bandpass"] is False
+    assert resolve("lcmv", "dk68") and resolve("wmne", "dk68")              # validated store hashes unchanged
+
+
+# ------------------------------------------------------------------------------------------- D2 units
+def test_mixed_but_correct_edf_units_are_read_in_volts(tmp_path, table):
+    _edf_with_line(tmp_path / "m.edf", line_uv=0.0, units={3: "V", 14: "V", 21: "V"})   # Fp2, T3 (=T7), CP1
+    _edf_with_line(tmp_path / "u.edf", line_uv=0.0)
+    (rm, rec), _ = _load(tmp_path / "m.edf", table)
+    (ru, _), _ = _load(tmp_path / "u.edf", table)
+    assert rec["x_mixed_units"] and json.loads(rec["x_channel_units"])["Fp2"] == "V"
+    assert json.loads(rec["x_channel_units"])["T3"] == "V" and json.loads(rec["x_channel_units"])["Fp1"] == "uV"
+    assert np.allclose(rm.get_data(), ru.get_data(), rtol=1e-3, atol=1e-9)  # identical volts either way
+    std = json.loads(rec["x_channel_robust_std_uv"])
+    assert all(1 < v < 50 for v in std.values())
+
+
+@pytest.mark.parametrize("units,scale,match", [
+    ({14: "V"}, {14: 1.0}, "T3"),                       # header V, values in uV: read 1e6 too large
+    ({5: "uV"}, {5: 1e-6}, "F3"),                       # header uV, values in V: read 1e6 too small
+    ({7: "mmHg"}, {7: 1.0}, "unsupported EDF physical"),
+])
+def test_wrong_units_fail_fast_naming_the_channel(tmp_path, table, units, scale, match):
+    from adgraph.crossdataset import d2store
+
+    _edf_with_line(tmp_path / "w.edf", line_uv=0.0, units=units, values_scale=scale)
+    with pytest.raises(d2store.UnitError, match=match):
+        _load(tmp_path / "w.edf", table)
+
+
+def test_the_unit_audit_lists_every_channel(tmp_path, table):
+    import pandas as pd
+
+    from adgraph.crossdataset import d2store
+
+    _edf_with_line(tmp_path / "2_842019_1.edf", seconds=40, line_uv=0.0, units={3: "V", 13: "V"})
+    u = d2store.unit_audit(pd.DataFrame({"key": ["D2-2"], "path": [str(tmp_path / "2_842019_1.edf")]}),
+                           d2store.resolve("lcmv", table), table)
+    assert len(u) == 32 and (u["selected_as"] != "").sum() == 19 and u["plausible"].all()
+    assert set(u.loc[u["physical_dimension"] == "V", "edf_index"]) == {3, 13}
+    assert u.set_index("edf_index").loc[3, "selected_as"] == "Fp2" and u.set_index("edf_index").loc[13, "selected_as"] == ""

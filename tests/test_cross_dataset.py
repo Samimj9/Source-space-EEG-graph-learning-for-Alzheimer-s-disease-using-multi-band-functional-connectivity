@@ -400,7 +400,8 @@ def test_cross_notebooks_use_their_own_branch_pin_and_gates():
         assert "Everything is written to `<outputs>/FINAL_v1/`" not in text
         assert "writes goes to\n`<outputs>/CROSS_D3_D2_19CH_v1/`" in text or "CROSS_D3_D2_19CH_v1/` on Drive" in text
     part_a = "".join("".join(c["source"]) for c in json.loads(nbs[0].read_text())["cells"])
-    for step in ("cross('audit')", "cross('inspect-d2')", "cross('inspect-d3-line')", "demographics.csv",
+    for step in ("cross('audit')", "cross('inspect-d2-units')", "cross('inspect-d2')", "cross('inspect-d3-line')",
+                 "d2_notch_response.json", "demographics.csv",
                  "age_overlap_feasibility.csv", "d2_filter_response.json"):
         assert step in part_a
 

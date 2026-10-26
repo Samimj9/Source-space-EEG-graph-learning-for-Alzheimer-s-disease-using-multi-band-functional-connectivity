@@ -1,6 +1,6 @@
 # Cross-dataset generalization D3 <-> D2 on a matched 19-electrode representation: experimental design
 
-Version 1.1 (2026-10-26), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-62. **Status: designed,
+Version 1.2 (2026-10-26), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-63. **Status: designed,
 synthetically validated, author decisions D1-D10 recorded (section 12); only the audit-only Part A of notebook 00 is
 authorized. No real-data graph has been built, the campaign is not frozen, no model has been trained and no target
 label has been evaluated.** The stages that touch real data beyond the audit (the D2 stores, the training, the
@@ -129,9 +129,11 @@ stored separately; flat-channel and amplitude-plausibility checks. The D2 config
 | Input | EDF, 19 of 32 channels by number | section 3 |
 | Edge crop | 10 s at each end before any filter | legacy D2 rule (entry 41); D3 used as released |
 | Band-pass | 0.5-45 Hz Butterworth, order 4, zero phase (forward-backward) | reproduces the provider's documented D3 filter; the provider's order and phase are not documented |
-| Settle crop | 5 s at each end after the band-pass | impulse response < 1e-4 of its peak beyond 3.73 s |
+| Unit checks | every selected channel: EDF physical dimension in {V, mV, uV, nV}; robust std of the band-passed signal in [1e-7, 1e-3] V; otherwise the participant stops (`UnitError`, naming the channel) | mixed `V` / `uV` headers exist (D2-19); MNE scales each channel by its own unit, a mislabelled channel would be off by 1e6 (12.7) |
+| **Line-noise notch (D2 only)** | zero-phase FIR notch (firwin), stop band 49-51 Hz, 1 Hz transitions, after the band-pass, before the settle crop, resampling, common average, rejection and source reconstruction | acquisition-specific 50 Hz interference measured in Part A (12.2); D3 is provider-preprocessed and not re-filtered |
+| Settle crop | 8 s at each end after band-pass + notch (was 5 s) | band-pass impulse response < 1e-4 of its peak beyond 3.73 s + the notch FIR's exact half-length 3.30 s = 7.03 s |
 | Geometry | the D3 positions | section 3.3 |
-| Unit scale | 1.0 (EDF header units) | amplitude plausibility checked per participant |
+| Unit scale | none beyond MNE's per-channel EDF unit | amplitude checked per channel and per participant |
 
 ### 4.3 What is not harmonized, and why (decision D2)
 
@@ -143,10 +145,10 @@ stored separately; flat-channel and amplitude-plausibility checks. The D2 config
   *different* and is a candidate explanation of any transfer loss. A possible pre-specified sensitivity arm (ICA with
   `mne-icalabel`, fixed thresholds, applied identically to both datasets' raw data where available) is listed in
   section 12 and is not implemented.
-* **Line noise.** Neither dataset is notched; the 45 Hz low-pass attenuates 50 Hz only by about 10 dB (forward-backward
-  order 4), but every band filter and the relative-PSD range end at 45 Hz. The residual 50 Hz power can still affect
-  the broadband LCMV covariance and the peak-to-peak rejection; it is measured in the inspection and the shift
-  diagnostics (decision D3).
+* **Line noise (harmonized by a D2-specific correction).** D2 receives an acquisition-specific 50 Hz notch; D3 remains
+  provider-preprocessed and is not re-filtered (12.2). The two datasets therefore reach comparable line-noise levels by
+  different routes; this is a dataset-specific correction of a dataset-specific artifact, not identical
+  preprocessing.
 * **Reference.** D3: A1-A2 then common average; D2: recording reference then common average. The common average of the
   same electrodes removes any common reference signal exactly, so this is *identical* after referencing (the
   provider's ASR / ICA did act in A1-A2 space).
@@ -290,9 +292,9 @@ Windows are never treated as independent observations.
 |---|---|---|
 | D1 | D3 template geometry for D2 | approved, provided the `.loc` mapping and the real EDF headers pass every check; identical template coordinates do not establish identical physical placement (3.3) |
 | D2 | ASR / ICA on D2 | not in the primary analysis; the preprocessing mismatch with D3 is a stated limitation (4.3) |
-| D3 | 50 Hz notch | none initially; line-noise contamination and what a notch would change in the LCMV covariance input, the window rejection and the features are measured in Part A (12.2); filtering is never changed after any target classification result |
+| D3 | 50 Hz notch | measured in Part A (12.2), then: D2-specific zero-phase FIR notch 49-51 Hz (author, 2026-10-26); D3 not re-filtered; decided before any graph build and any classification |
 | D4 | D2 band-pass | provisionally approved as a harmonization choice, not a reproduction of the provider's filter (order and phase undocumented); response verified (12.1) |
-| D5 | D2 edge crops | provisionally approved (10 s before, 5 s after the band-pass), subject to the real-data inspection |
+| D5 | D2 edge crops | 10 s before the band-pass; the post-filter crop is 8 s (was 5 s) to cover the notch FIR (12.2) |
 | D6 | D2 recording condition | **unknown** (12.3); stated in the campaign with its implication, checked at the freeze |
 | D7 | D2 source-only CV | 5 participant-stratified folds x 1 repeat (primary); 5 repeats only in the stability analysis |
 | D8 | D2 -> D3 target | all 65 D3 participants, with the 52 development and the 13 holdout participants reported separately; the 13 were inspected in earlier work and are **not an untouched holdout** |
@@ -309,14 +311,33 @@ attenuated in D2; the provider's D3 filter has the same pass band and family but
 the gamma and low-delta attenuation of the two datasets can differ (an *approximate* property in the compatibility
 report).
 
-### 12.2 Line noise (decision D3; measured in Part A, never applied)
+### 12.2 Line noise (decision D3: measured in Part A, then corrected in D2 only; methodology log entry 63)
 
-`inspect-d2` and `inspect-d3-line` report per recording, on the analysed 250 Hz average-referenced data: the 49-51 Hz
-power relative to 35-45 Hz, the fraction of variance at 47-53 Hz, and what a 50 Hz notch WOULD change: the relative
-change of the broadband covariance (the LCMV input) and the fraction of candidate windows whose acceptance flips. The
-store features exclude 50 Hz by construction (Welch band powers to 45 Hz; band filters ending at 45 Hz with 1 Hz
-transitions); line noise can reach them only through the LCMV weights and the rejection. A notch, if the author decides
-one from these label-blind numbers, is applied to both datasets before any graph is built.
+**Part A finding (author's run, 2026-10-26; label-blind).** On the analysed 250 Hz data, the 49-51 Hz power relative
+to 35-45 Hz has a median of +22.61 dB in D2 and -56.74 dB in D3; the median D2 fraction of variance at 47-53 Hz is
+26.7 % (D2-20: 61.8 %). A diagnostic IIR notch applied to the already resampled segments changed the broadband
+covariance (the LCMV input) by a median 51.6 % (D2-20: 98.9 %) and flipped 38.5 % of the window-acceptance decisions
+of D2-19. All 23 D2 recordings kept at least 129 accepted windows without a notch. Line noise therefore does not touch
+the features directly (they end at 45 Hz) but dominates the LCMV covariance and changes the rejection.
+
+**Correction (author, 2026-10-26).** D2 only: zero-phase FIR notch (MNE `notch_filter`, firwin, stop band 49-51 Hz,
+1 Hz transitions, `reflect_limited` padding), at the input rate, after the band-pass and the per-channel unit checks,
+before the settle crop, resampling, the common average, rejection and source reconstruction. Verified
+(`audit/d2_notch_response.json`, tests): -54 to -58 dB at 49-51 Hz; |gain| < 0.01 dB everywhere in 0.5-45 Hz; with
+the band-pass -68.5 dB at 50 Hz and -57.9 dB at 100 Hz; FIR half-length 3.30 s, hence the 8 s settle crop;
+deterministic (bit-identical reruns) and finite. On synthetic recordings with strong injected 50 Hz the line-band
+variance fraction falls from 77 % to 1 %, the 50 Hz peak disappears, and the power of every analysis band changes by
+< 0.001 dB. D3 is not notched (its validated stores are unchanged).
+
+**Two notches, not to be confused.** The `diag_*` columns of the inspection are the first audit's *diagnostic* notch:
+an IIR notch on the resampled 250 Hz segments, applied to data whose window grid and crops were fixed without a
+notch. The *preprocessing* notch acts at 1024 Hz on the continuous band-passed recording before the 8 s crop and the
+resampling, so its numbers (`*_before` / `*_after`, `covariance_rel_change_actual_notch`,
+`n_windows_accepted_without_notch` vs `n_windows_accepted`, `rejection_flip_fraction_actual_notch`) are the ones that
+describe the stores; the two are reported side by side and are not assumed equal. Residual interference after the
+notch is checked by the 100 Hz harmonic ratio and a narrowband-peak detector (>= 10 dB over the +-5 Hz median, 1-120
+Hz). Note: after the notch, the 49-51 Hz ratio measures the noise floor in the notch's transition bins, not a residual
+line; the peak detector is the specific test.
 
 ### 12.3 Recording condition (decision D6)
 
@@ -354,6 +375,17 @@ rule (entries 40-41: "No decision may use classification performance"); the 5 s 
 impulse response; everything else from the D3 store configuration. No D2 classification outcome informed any of them,
 and the legacy choices that were tuned on D1 / D2 data (interpolation, the 0.1 Hz high-pass, 20 s windows) are not
 used.
+
+### 12.7 EDF units (Part A finding: mixed `V;uV` headers in D2-19)
+
+The Part A header audit showed D2-19 with physical dimensions `V;uV`. MNE scales every EDF channel by its own header
+unit, so mixed headers are correct when each header matches its stored values (tested: the same signal stored in V
+in some channels and in uV in others loads to identical volts). A header that does NOT match its values would be off
+by a factor 1e6. Hence: `inspect-d2-units` lists every channel of every recording (label, EDF index, selected or not,
+unit, physical / digital range, the band-passed robust std MNE returns), identifying exactly which channels of D2-19
+carry which unit; and the D2 loader fails fast (`UnitError`, naming recording and channel) when a selected channel's
+unit is not V, mV, uV or nV or its band-passed robust std is outside [0.1 uV, 1 mV]. Nothing is ever rescaled to pass.
+The channel-level result for D2-19 comes from the next Part A run (`audit/d2_units.csv`).
 
 ### 12.6 Part A (audit only; authorized 2026-10-26)
 

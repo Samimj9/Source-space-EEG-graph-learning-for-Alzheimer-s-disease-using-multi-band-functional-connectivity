@@ -28,6 +28,7 @@ EXPECTED_CONFIG_DIFFERENCES = {
     "channels.channel_map_hash", "channels.coordinates.accepted_lookups", "channels.coordinates.compare_template",
     "channels.coordinates.head_radius_m", "channels.coordinates.source", "channels.coordinates.units",
     "channels.montage", "channels.selection", "channels.verify_layout", "cross_dataset", "datasets",
+    "preprocessing.line_noise", "units.channel_robust_std_v", "units.physical_dimensions",
     "discontinuities.source", "input.format", "input.recordings", "output_subdir", "preprocessing.bandpass",
     "preprocessing.edge_crop_s", "preprocessing.settle_s", "split", "store_names", "units.scale.D2", "units.scale.D3"}
 
@@ -48,8 +49,13 @@ KNOWN = [  # (property, status, D3, D2, note)
     ("band-pass", "approximate", "provider 0.5-45 Hz Butterworth (order / phase not documented)",
      "0.5-45 Hz Butterworth, order 4, zero phase: -6 dB at 0.5 and 45 Hz, -2.8 dB at 40 Hz (verified)",
      "a harmonization choice, not a reproduction; gamma (40-45 Hz) and low-delta attenuation may differ"),
-    ("line noise (50 Hz)", "approximate", "no notch (provider low-pass only)", "no notch (same low-pass)",
-     "measured per recording in the audit; all band filters end at 45 Hz"),
+    ("line noise (50 Hz)", "different", "provider-preprocessed; no 50 Hz interference measured (median -56.7 dB vs "
+     "35-45 Hz); not re-filtered", "strong interference (median +22.6 dB); ACQUISITION-SPECIFIC zero-phase FIR notch "
+     "49-51 Hz after the band-pass (D2 only)", "a dataset-specific correction of a dataset-specific artifact; the "
+     "notch changes 0.5-45 Hz by < 0.01 dB; residual 50 Hz power and narrowband peaks audited per recording"),
+    ("EDF units", "approximate", "EEGLAB .set in microvolts (MNE: volts)", "per-channel EDF physical dimensions (mixed V "
+     "/ uV headers occur); MNE scales each channel by its own unit", "fail-fast per-channel amplitude check; unit "
+     "audit of every channel"),
     ("reference", "identical", "A1-A2 (provider), then common average of the 19 electrodes",
      "recording reference, then common average of the same 19 electrodes",
      "the common average of the same electrodes removes any common reference signal exactly"),
@@ -169,6 +175,13 @@ def harmonization_manifest(d3: GraphStore, d2: GraphStore, d3_cfg: dict, d2_cfg:
                               "config_hash": config_hash(d2_cfg),
                               "base_d3_config_hash": d2_cfg.get("cross_dataset", {}).get("base_d3_config_hash")}},
             "d2_preprocessing": d2_cfg["preprocessing"],
+            "line_noise_correction": {
+                "D2": {"applied": d2_cfg["preprocessing"].get("line_noise"),
+                       "stage": "after the 0.5-45 Hz band-pass, before the settle crop, resampling, the common "
+                                "average, rejection and source reconstruction",
+                       "why": "acquisition-specific 50 Hz interference measured label-blind in Part A"},
+                "D3": "none added: provider-preprocessed (0.5-45 Hz Butterworth, ASR, ICA); no 50 Hz interference "
+                      "measured; the validated D3 stores are unchanged"},
             "compatibility": compat.to_dict("records"), "compatibility_passed": passed(compat),
             "claims_not_made": ["preprocessing is identical", "electrode matching removes dataset shift",
                                 "D2 performance is disease-specific without the age analyses"]}
