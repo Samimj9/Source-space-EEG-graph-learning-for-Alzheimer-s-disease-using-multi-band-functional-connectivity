@@ -3566,6 +3566,43 @@ environment and namespace assertions (executed against a synthetic namespace, in
 restore commands; the namespace holdout refused without its own frozen record or at another commit, and never writing
 the release record).
 
+## 61. Cross-dataset generalization D3 <-> D2 on 19 matched electrodes (design; 2026-10-26)
+
+**Request (author, 2026-10-26).** A dedicated, source-only, zero-shot cross-dataset experiment in both directions
+(D3 -> D2, D2 -> D3) for the GNN families of Exp 3-8a, with the classical PSD / DE baselines as reference, on a matched
+19-electrode representation; isolated from the running Exp 8a and from every earlier result; no real-data build or
+training before the author's explicit authorization.
+
+**Design (docs/cross_dataset/design.md).** Explicit, hash-pinned 19-electrode mapping (D2 EDF number -> D3 label;
+T3=T7, T4=T8, T5=P7, T6=P8), verified against the layout file, every EDF header and the head geometry; the D2 head
+geometry is the D3 one (identical colin27 10-05 positions; one forward model); channel selection before referencing
+and source reconstruction; D2 stores = the D3 lobes12 store configuration plus documented D2 overrides (EDF input,
+19-channel selection, 0.5-45 Hz zero-phase Butterworth order 4 reproducing the provider's documented filter, 10 s /
+5 s crops); no ASR / ICA on D2 (no validated implementation; stated as a difference); D3 stores reused read only;
+compatibility report (identical / approximate / different) and harmonization manifest; the unchanged Exp 0, 1, 3-7
+and 8a definitions; source-only fits with every fitted transform inside the model; blinded target scoring; a frozen
+campaign before training; participant-level metrics with DeLong and stratified participant-bootstrap CIs, transfer
+degradation, D3 development / holdout strata, Holm-adjusted exploratory paired comparisons, and age analyses (age-only
+baseline, score-age association, age-overlap subset, score beyond age).
+
+**Implementation.** `src/adgraph/crossdataset/`, `scripts/cross_dataset.py`, `configs/cross_dataset/`,
+`notebooks/cross_dataset/` (00-03), namespace `CROSS_D3_D2_19CH_v1/` with its own code pin
+(`colab_setup.py --namespace cross`) and recorded authorizations (`build_d2`, `train`). Two backward-compatible hooks in
+`sourcegraphs.build` (a loader argument; assembly without the ds004504 split); new code-identity scopes `cross_store`
+and `cross_experiment` (the release scopes are unchanged).
+
+**Not done.** No D2 store has been built and no real-data model trained; decisions D1-D10 of the design (section 12)
+await the author.
+
+**Tests.** `tests/test_cross_channels.py` (mapping, refused wrong tables, layout hash and content, EDF picks by number
+and refused inventories, the loader reading exactly the mapped channels from a shuffled synthetic EDF, geometry agreement
+and refused swapped / moved / mirrored positions, the D3 geometry for D2, the audit); `tests/test_cross_dataset.py` (the
+D2 store builder on synthetic EDFs with authorization gate, validation and resume; configuration differences; the
+compatibility report; all 48 GNN variants accept both datasets; the campaign units; no target fitting and blinded
+prediction; participant isolation and the unchanged 52 / 13 split; aggregation; checkpoints and identities; gates for
+authorization, freeze and commit; no writes outside the namespace; participant-level uncertainty; synthetic end-to-end
+in both directions).
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

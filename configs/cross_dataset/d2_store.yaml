@@ -1,0 +1,46 @@
+# Matched-channel D2 source-graph stores of the cross-dataset experiment (docs/cross_dataset/design.md section 4;
+# adgraph.crossdataset.d2store). NOT a separate methodology: the configuration of each D2 store is the validated D3
+# store configuration of the same inverse on atlas lobes12 (sourcegraphs.config.resolve(inverse, 'lobes12')) with
+# ONLY the overrides below; every other key (sampling rate, average reference, five bands, analytic FIR, 10 s / 1 s
+# windows, five-minute selection, rejection rule, minimum windows, mode A, fsaverage ico-5 source space, BEM,
+# LCMV / wMNE parameters, lobes12 regions with mean_flip, Welch PSD, DE, PLV, |ciPLV|) is inherited unchanged and
+# compared key by key in the compatibility report.
+version: 1
+namespace: CROSS_D3_D2_19CH_v1
+atlas: lobes12
+store_names:                        # inside <processed>/CROSS_D3_D2_19CH_v1/stores/
+  lcmv: [graphsXD2L, graphsXD2L10]  # mode B, mode A
+  wmne: [graphsXD2W, graphsXD2W10]
+overrides:
+  datasets: [D2]
+  input:
+    format: edf                     # AD-LEB/EEGs/Dataset 2 (2019)/RestingState/<id>_<date>_1.edf (read only)
+    recordings: resting_state_only  # PictureNaming / ButtonPress never listed
+  channels:
+    selection: channel_map_19       # configs/cross_dataset/channel_map_19.yaml: 19 of 32 EDF channels, by number,
+                                    # selected BEFORE filtering, re-referencing and source reconstruction
+    coordinates:
+      source: d3_reference_geometry # the D3 positions (colin27 10-05, MRI/MNI frame), verified against the .loc
+      frame: mri
+    verify_layout: true
+  units:
+    scale:
+      D2: 1.0                       # EDF header in volts (legacy D2 rule; amplitude plausibility checked per participant)
+  preprocessing:
+    # D3 is used as released by its provider (0.5-45 Hz Butterworth, A1-A2 reference, ASR, ICA/ICLabel); our D3 stores
+    # add no sensor filter. D2 is raw: the provider's documented band-pass is reproduced (filter ORDER of the provider
+    # is not documented: 4th-order Butterworth applied forward and backward = zero phase, -6 dB at 0.5 and 45 Hz).
+    # ASR / ICA are NOT applied (design section 4.3). Line noise is reported, not removed (no notch in either dataset).
+    edge_crop_s: 10.0               # discarded at each end before any filtering (legacy D2 rule, entry 41)
+    bandpass:
+      l_freq: 0.5
+      h_freq: 45.0
+      method: iir
+      ftype: butter
+      order: 4
+      phase: zero
+    settle_s: 5.0                   # discarded at each end after the band-pass (impulse response < 1e-4 of its
+                                    # peak beyond 3.73 s at 1024 Hz); the analytic-kernel margin applies on top
+  discontinuities:
+    source: edf_annotations_boundary   # an EDF has no EEGLAB boundary; any 'boundary' annotation would still split
+    handling: split

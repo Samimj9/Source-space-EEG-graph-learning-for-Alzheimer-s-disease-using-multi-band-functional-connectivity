@@ -70,9 +70,11 @@ def run_dirs(processed: str | Path, cfg: dict, limit: int | None = None) -> tupl
 
 
 # ---------------------------------------------------------------------------------------------- one participant
-def recording_qc(rec, cfg: dict) -> tuple[dict, list, list, int, dict]:
-    """Load + segments + selection (no source model): (row, segments, pieces, margin, geometry)."""
-    raw, load_qc = load_raw(rec.path, rec.dataset, cfg)
+def recording_qc(rec, cfg: dict, loader=None) -> tuple[dict, list, list, int, dict]:
+    """Load + segments + selection (no source model): (row, segments, pieces, margin, geometry). ``loader``
+    (default ``io.eeg.load_raw``) returns (raw, load record with ``geometry``); the cross-dataset D2 stores pass
+    their own (``crossdataset.d2store.load_d2``)."""
+    raw, load_qc = (loader or load_raw)(rec.path, rec.dataset, cfg)
     segs, seg_info = recording.segments(raw, cfg)
     margin = recording.margin_samples(cfg)
     pieces, sel = recording.select(segs, cfg, margin)
@@ -80,7 +82,8 @@ def recording_qc(rec, cfg: dict) -> tuple[dict, list, list, int, dict]:
     row = {k: getattr(rec, k) for k in ("key", "dataset", "subject_id", "label", "y", "age", "sex", "mmse", "path")}
     row.update({"orig_sfreq": float(raw.info["sfreq"]), **seg_info, **sel,
                 "segments_samples": json.dumps([[s.orig_start, s.orig_start + s.n] for s in segs]),
-                **chanlocs.provenance(load_qc["geometry"])})
+                **chanlocs.provenance(load_qc["geometry"]),
+                **{k: v for k, v in load_qc.items() if k.startswith("x_")}})
     for k in ("boundary_positions_s", "boundary_cuts_in", "segments_in", "segment_durations_s"):
         row[k] = json.dumps(row[k])
     return row, segs, pieces, margin, load_qc["geometry"]
@@ -110,9 +113,9 @@ def method(cfg: dict) -> str:
     return m
 
 
-def process_subject(rec, cfg: dict, ctx: dict) -> tuple[dict, pd.DataFrame, dict, pd.DataFrame, dict]:
-    """(arrays, windows, subject_row, qc_windows, extra files) for one participant."""
-    row, segs, pieces, margin, geom = recording_qc(rec, cfg)
+def process_subject(rec, cfg: dict, ctx: dict, loader=None) -> tuple[dict, pd.DataFrame, dict, pd.DataFrame, dict]:
+    """(arrays, windows, subject_row, qc_windows, extra files) for one participant (``loader``: ``recording_qc``)."""
+    row, segs, pieces, margin, geom = recording_qc(rec, cfg, loader)
     if geom["hash"] != ctx["geometry"]["hash"]:
         raise chanlocs.CoordinateError(f"{rec.key}: electrode geometry {geom['hash']} differs from the forward model's")
     win, _ = recording.window_len(cfg)
@@ -369,16 +372,19 @@ def _load_units(run_dir: Path, reg: pd.DataFrame):
 
 
 def assemble(run_dir: Path, run10: Path, reg: pd.DataFrame, cfg: dict, idents: dict, excluded: dict,
-             limit: int | None, ctxs: dict) -> tuple[Path, Path]:
+             limit: int | None, ctxs: dict, split: bool = True, extra_manifest: dict | None = None,
+             kind: str = "lx_assembly") -> tuple[Path, Path]:
+    """Assemble mode B and mode A. ``split`` False (the cross-dataset D2 stores): no ds004504 participant split is
+    computed or saved; ``extra_manifest`` is added to the manifest."""
     units = {k: json.loads((run_dir / "subjects" / k / "subject.done.json").read_text())["files"] for k in reg["key"]}
-    ident = {"kind": "lx_assembly", "version": VERSION, "config_hash": config_hash(cfg), "units": units,
+    ident = {"kind": kind, "version": VERSION, "config_hash": config_hash(cfg), "units": units,
              "subset_limit": limit, "code": code_identity("source_graph")}
     subjects, windows = _load_units(run_dir, reg)
     if not len(windows):
         raise GraphRunIncomplete("no participant produced windows")
     ctx = next(iter(ctxs.values()))
     bands = list(cfg["bands"])
-    split = xu_split_record(subjects, cfg)
+    split = xu_split_record(subjects, cfg) if split else None
     for target, subset in ((run_dir, None), (run10, "xu_tenfold")):
         a_ident = {**ident, "mode": subset or "all"}
         state, _ = check_unit(target, "assembly", a_ident)
@@ -424,6 +430,7 @@ def assemble(run_dir: Path, run10: Path, reg: pd.DataFrame, cfg: dict, idents: d
                              "step_samples": int(cfg["windowing"]["step_s"] * cfg["preprocessing"]["sfreq"]),
                              "margin_samples": recording.margin_samples(cfg)},
             "xu_split": split,
+            **(extra_manifest or {}),
             "summary": {"n_graphs": int(n), "subjects_ok": subjects.loc[subjects.status == "ok", "key"].tolist(),
                         "subjects_not_ok": subjects.loc[subjects.status != "ok", ["key", "status", "reason"]]
                         .to_dict("records")},
@@ -431,7 +438,8 @@ def assemble(run_dir: Path, run10: Path, reg: pd.DataFrame, cfg: dict, idents: d
         store = GraphStore(stacked, sel, bands, np.array(list(cfg["bands"].values()), float), ctx["roi_names"],
                            ctx["channels"], subjects, manifest)
         store.save(target)
-        atomic_write_json(target / "xu_split.json", split)
+        if split is not None:
+            atomic_write_json(target / "xu_split.json", split)
         atomic_write_csv(target / "qc_report.csv", subjects)
         write_marker(target, "assembly", a_ident, ["graphs.npz", "windows.csv", "subjects.csv", "manifest.json"])
         del stacked, store

@@ -53,6 +53,11 @@ CODE_SCOPES = {
     "source_graph": ("config.py", "io", "preprocessing", "source", "features", "connectivity", "graphs/store.py",
                      "evaluation/splits.py", "sourcegraphs"),
     "experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features", "qc"),
+    # cross-dataset experiment D3 <-> D2 (adgraph.crossdataset): the same code plus its own package
+    "cross_store": ("config.py", "io", "preprocessing", "source", "features", "connectivity", "graphs/store.py",
+                    "evaluation/splits.py", "sourcegraphs", "crossdataset"),
+    "cross_experiment": ("config.py", "experiments", "models", "evaluation", "graphs", "features", "qc",
+                         "crossdataset"),
 }
 # Numerical libraries whose version can change results of each kind of computation.
 SCOPE_LIBRARIES = {
@@ -60,6 +65,8 @@ SCOPE_LIBRARIES = {
     "graph": ("numpy", "scipy", "pandas", "mne"),
     "source_graph": ("numpy", "scipy", "pandas", "mne"),
     "experiment": ("numpy", "scipy", "pandas", "sklearn", "torch"),
+    "cross_store": ("numpy", "scipy", "pandas", "mne"),
+    "cross_experiment": ("numpy", "scipy", "pandas", "sklearn", "torch"),
 }
 
 STATES = ("pending", "running", "completed", "failed")

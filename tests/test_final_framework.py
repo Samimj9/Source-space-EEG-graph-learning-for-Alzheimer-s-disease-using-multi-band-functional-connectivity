@@ -266,8 +266,10 @@ def test_notebooks_are_up_to_date_and_thin(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "REPO", tmp_path)
     (tmp_path / "configs").symlink_to(REPO / "configs")
     mod.main()
-    for f in sorted((REPO / "notebooks").glob("*")):
-        assert (tmp_path / "notebooks" / f.name).read_text() == f.read_text(), f"{f.name} is stale: run make_notebooks"
+    for f in sorted((REPO / "notebooks").rglob("*")):
+        if f.is_file():                     # notebooks/ and notebooks/cross_dataset/
+            rel = f.relative_to(REPO / "notebooks")
+            assert (tmp_path / "notebooks" / rel).read_text() == f.read_text(), f"{rel} is stale: run make_notebooks"
     assert sorted(p.name for p in (tmp_path / "notebooks").glob("*")) == sorted(p.name for p in
                                                                                 (REPO / "notebooks").glob("*"))
     for nb in (REPO / "notebooks").glob("*.ipynb"):

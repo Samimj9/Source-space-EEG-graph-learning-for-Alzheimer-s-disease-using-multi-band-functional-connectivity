@@ -12,6 +12,7 @@
     notebooks/Exp8a_xu_dual_gcn_surface.ipynb  amendment A2: Exp 8 with a surface anatomical layer (own pin, namespace)
     notebooks/99_results_report.ipynb          freeze the final analysis, descriptive holdout, final tables (GPU)
     notebooks/README.md                        index, Colab links, execution order, Drive layout
+    notebooks/cross_dataset/*.ipynb            the cross-dataset experiment D3 <-> D2 (own branch, namespace, pin)
 
 Every notebook: Runtime -> Run all. The only cell meant to be edited is an experiment notebook's CONTEXTS list.
 Scientific code lives in src/adgraph; the notebooks call scripts/final.py and scripts/build_stores.py only.
@@ -702,6 +703,203 @@ for f in ('all_results.csv', 'lcmv_vs_wmne.csv', 'mode_B_vs_A.csv'):
     ], gpu=True)
 
 
+# ------------------------------------------------------------------------------------------------ cross-dataset
+CROSS_BRANCH = "claude/cross-dataset-d3-d2-19ch"
+CROSS_COLAB = f"https://colab.research.google.com/github/{OWNER_REPO}/blob/{CROSS_BRANCH}/notebooks/cross_dataset"
+
+
+def cross_setup() -> str:
+    """Setup cell of the cross-dataset notebooks: their own branch and code pin (CROSS_D3_D2_19CH_v1/CODE_COMMIT.txt);
+    the release pin and the amendment A2 pin are never used or moved."""
+    from adgraph.crossdataset import namespace as ns
+
+    s = SETUP.replace(f"BRANCH = '{BRANCH}'", f"BRANCH = '{CROSS_BRANCH}'")
+    s = s.replace(
+        f"UPDATE_CODE = False   # leave False. True only to move the release code pin deliberately to the newest commit\n"
+        f"                      # (<outputs>/{release.PIN_FILE}; unfinished work is then recomputed).",
+        f"UPDATE_CODE = False   # leave False. True only to move THIS EXPERIMENT's code pin deliberately\n"
+        f"                      # (<outputs>/{ns.pin_file()}; the release and A2 pins are never used or moved here).")
+    s = s.replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
+                  "_run([sys.executable, 'scripts/colab_setup.py', '--namespace', 'cross']"
+                  " + (['--update-code'] if UPDATE_CODE else []))")
+    return s + f"CROSS = OUT + '/{ns.ROOT}'\nprint('cross-dataset outputs on Drive:', CROSS)\n"
+
+
+CROSS_ENV = """## Numerical environment (the Python / library versions of the completed Exp 7 units)
+
+The cross-dataset fits must be comparable with Exp 0-8a, so every script runs with the interpreter that reproduces the
+versions recorded by a completed Exp 7 unit (python, numpy, scipy, pandas, scikit-learn, torch); if this kernel
+differs, `/content/restore<python digits>` is built with `uv` and verified (temporary Colab disk only). Leave
+`ACCEPT_ENVIRONMENT_DIFFERENCE = False`."""
+
+CROSS_ENV_CODE = """ACCEPT_ENVIRONMENT_DIFFERENCE = False
+from adgraph import numerical_env
+REFERENCE = numerical_env.reference_libraries(OUT, 'exp7_earm_gnn')
+PY = numerical_env.ensure_interpreter(REFERENCE, repo='/content/repo', base='/content',
+                                      accept_difference=ACCEPT_ENVIRONMENT_DIFFERENCE, run=sh)
+DIFF = numerical_env.differences(REFERENCE, numerical_env.interpreter_versions(PY, REFERENCE))
+assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from Exp 7: {DIFF}'
+def cross(args):   # every step of this experiment: scripts/cross_dataset.py with the verified interpreter
+    sh(f"{PY} scripts/cross_dataset.py {args}", cwd='/content/repo')"""
+
+CROSS_RULES = """**Rules of this experiment** (docs/cross_dataset/design.md): outputs only in `<outputs>/CROSS_D3_D2_19CH_v1/`;
+the release (`FINAL_v1/`), amendment A2 (running Exp 8a), the D3 stores, their lock, pins and decisions are only
+read. Source-only training; the target is BLINDED (labels masked) when it is scored; target labels are read only by
+the evaluation in notebook 03, after the campaign is frozen. Nothing is selected with target results."""
+
+
+def cross_audit_notebook() -> dict:
+    return notebook([
+        md(f"""# Cross-dataset 00 · Audit, matched-channel D2 stores, compatibility, freeze
+
+{CROSS_RULES}
+
+**Part A (no authorization needed; nothing is built):** the verified 19-electrode mapping (D2 EDF channel number ->
+D3 label, T3=T7, T4=T8, T5=P7, T6=P8), the layout file hash, the shared head geometry, the D2 EDF headers (technical
+fields only), the D3 stores (read only), the inherited atlas / graph decisions, and a recording-level inspection of
+D2 (durations, selection, candidate windows; no source model, no graph).
+
+**Part B (only with the author's written authorization):** the matched-channel D2 stores (LCMV and wMNE, modes B and
+A, lobes12) from the 23 original resting-state EDFs, their validation, the compatibility report, the label-blind
+shift diagnostics and D2 QC, and the harmonization manifest.
+
+**Part C (author):** the frozen campaign (configs/cross_dataset/campaign.yaml) is recorded before any training.
+""" + HOWTO + " A CPU runtime is enough."),
+        code(cross_setup()),
+        md(CROSS_ENV),
+        code(CROSS_ENV_CODE),
+        md("## Part A1 · Mapping, layout, geometry, EDF headers, D3 stores, inherited decisions (read only)"),
+        code(SHOW_LATEST + """
+cross('audit')
+display(pd.read_csv(CROSS + '/audit/channel_mapping_audit.csv'))
+display(pd.read_csv(CROSS + '/audit/d2_edf_headers.csv'))"""),
+        md("## Part A2 · Recording-level inspection of D2 (label-blind; no source model, no graph)"),
+        code("""cross('inspect-d2')"""),
+        md("""## Part B · Matched-channel D2 stores (STOP HERE unless the author has authorized it in writing)
+
+Set `AUTHORIZED_BY` to the author's name only after the written authorization; it is recorded once in
+`CROSS_D3_D2_19CH_v1/authorizations.json`. A two-participant smoke build (`--limit 2`) runs and is validated first."""),
+        code("""AUTHORIZED_BY = ''          # e.g. 'Sami (written authorization 2026-..-..)'; empty = stop here
+if not AUTHORIZED_BY:
+    print('Not authorized: the D2 stores are not built. Review Part A and docs/cross_dataset/design.md first.')
+else:
+    cross(f'authorize --stage build_d2 --by "{AUTHORIZED_BY}"')
+    cross('build-d2 --inverse lcmv --limit 2')
+    cross('validate-d2 --inverse lcmv --limit 2')
+    for inverse in ('lcmv', 'wmne'):
+        cross(f'build-d2 --inverse {inverse}')
+        cross(f'validate-d2 --inverse {inverse}')
+    for inverse in ('lcmv', 'wmne'):
+        for mode in ('B', 'A'):
+            cross(f'compat --inverse {inverse} --mode {mode}')"""),
+        md("## Part C · Freeze the campaign (author; before any training)"),
+        code("""FREEZE_CAMPAIGN = False     # True only after reviewing Part A / B outputs and the design document
+if FREEZE_CAMPAIGN:
+    cross('freeze')
+else:
+    print('campaign not frozen; nothing can be trained or evaluated')"""),
+    ])
+
+
+def cross_direction_notebook(direction: str) -> dict:
+    src, tgt = direction.split("_to_")
+    who = ("the 52 frozen D3 development participants (the 13 D3 holdout participants are never used)"
+           if src == "D3" else "all 23 D2 participants; plus the source-only D2 cross-validation (5 x 5 folds)")
+    return notebook([
+        md(f"""# Cross-dataset {'01' if src == 'D3' else '02'} · {src} -> {tgt} (zero-shot)
+
+{CROSS_RULES}
+
+Each unit fits a FRESH model of an unchanged Exp 0 / 1 / 3-7 / 8a variant (fixed 60-epoch protocol for the GNNs;
+classical models: inner CV for C inside the source only) on {who}, then scores the BLINDED {tgt} windows; one mean
+P(AD) per participant is saved, without labels. Completed units are checkpointed and skipped on restart. No target
+metric is computed here (notebook 03).
+""" + HOWTO + " Use a **GPU runtime** (T4)."),
+        code(cross_setup()),
+        md(CROSS_ENV),
+        code(CROSS_ENV_CODE),
+        md("## Training authorization (author) and status"),
+        code("""AUTHORIZED_BY = ''          # the author's name after the written authorization of real-data training
+if AUTHORIZED_BY:
+    cross(f'authorize --stage train --by "{AUTHORIZED_BY}"')
+cross('status')"""),
+        md("## Run (resumable; this direction only). `CONTEXTS` is the only cell meant to be edited."),
+        code(f"""CONTEXTS = [('lcmv', 'B'), ('wmne', 'B'), ('sensor', 'B'), ('lcmv', 'A'), ('wmne', 'A'), ('sensor', 'A')]
+ERRORS = {{}}
+for inverse, mode in CONTEXTS:
+    print(f'==== {direction} | {{inverse}} | mode {{mode}}')
+    try:
+        cross(f'run --direction {direction} --inverses {{inverse}} --modes {{mode}}')
+    except RuntimeError as exc:
+        ERRORS[(inverse, mode)] = exc
+cross('status')
+if ERRORS:
+    raise RuntimeError(f'units failed in {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+    ], gpu=True)
+
+
+def cross_report_notebook() -> dict:
+    return notebook([
+        md(f"""# Cross-dataset 03 · Evaluation and comparison report (both directions)
+
+{CROSS_RULES}
+
+The evaluation reads the target labels for the units of the frozen campaign only, at its commit: participant ROC-AUC
+(DeLong and participant bootstrap CIs), balanced accuracy, sensitivity, specificity (Wilson), F1, MCC, confusion
+matrices, source-only CV, transfer degradation, D3 development / holdout strata, paired exploratory comparisons
+(Holm), the age-only baseline and the age analyses. Tables and figures are diagnostics from saved outputs.
+""" + HOWTO + " A CPU runtime is enough."),
+        code(cross_setup()),
+        md(CROSS_ENV),
+        code(CROSS_ENV_CODE),
+        md("## Evaluate (frozen units only) and report"),
+        code(SHOW_LATEST + """
+cross('status')
+cross('evaluate')
+cross('report')
+rep = latest(CROSS + '/reports/primary_*')
+print(open(rep + '/README.md').read())
+for f in ('table1_transfer.csv', 'table2_d3_strata.csv', 'table3_paired.csv', 'table4_age.csv'):
+    print('====', f)
+    display(pd.read_csv(f'{rep}/{f}').round(3))
+for png in sorted(glob.glob(rep + '/*.png')):
+    display(Image(filename=png))"""),
+    ])
+
+
+def cross_readme(entries) -> str:
+    rows = "\n".join(f"| {i} | [{n}]({CROSS_COLAB}/{n}) | {d} | {rt} |" for i, (n, d, rt) in enumerate(entries, 1))
+    return f"""# Cross-dataset D3 <-> D2 notebooks (branch `{CROSS_BRANCH}`)
+
+Generated by `scripts/make_notebooks.py`; never edit by hand. Design: `docs/cross_dataset/design.md`; exact steps:
+`docs/cross_dataset/run_guide.md`. One notebook at a time, *Runtime → Run all*.
+
+| # | Notebook | What it does | Runtime |
+|---|---|---|---|
+{rows}
+
+Outputs only in `<outputs>/CROSS_D3_D2_19CH_v1/` (own code pin). The release (`FINAL_v1/`), amendment A2 and the D3
+stores are read only. The D2 stores and real-data training need the author's recorded authorization.
+"""
+
+
+def cross_main() -> None:
+    out = REPO / "notebooks" / "cross_dataset"
+    out.mkdir(parents=True, exist_ok=True)
+    nbs = {"00_CrossDataset_Audit_and_Build.ipynb": (cross_audit_notebook(), "audit; matched-channel D2 stores "
+                                                     "(authorized); compatibility; freeze", "CPU"),
+           "01_CrossDataset_D3_to_D2.ipynb": (cross_direction_notebook("D3_to_D2"), "D3 -> D2 source fits, blind D2 "
+                                              "scores", "GPU"),
+           "02_CrossDataset_D2_to_D3.ipynb": (cross_direction_notebook("D2_to_D3"), "D2 -> D3 source fits and D2 CV, "
+                                              "blind D3 scores", "GPU"),
+           "03_CrossDataset_Comparison_Report.ipynb": (cross_report_notebook(), "evaluation (frozen units), tables, "
+                                                       "figures", "CPU")}
+    for name, (nb, _, _) in nbs.items():
+        (out / name).write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")
+    (out / "README.md").write_text(cross_readme([(n, d, rt) for n, (_, d, rt) in nbs.items()]))
+    print(f"{len(nbs)} cross-dataset notebooks -> {out}")
+
+
 # ------------------------------------------------------------------------------------------------ index
 def readme(entries: list[tuple[str, str, str]]) -> str:
     rows = "\n".join(f"| {i} | [{n}]({COLAB}/{n}) | {d} | {rt} |" for i, (n, d, rt) in enumerate(entries, 1))
@@ -754,6 +952,7 @@ def main() -> None:
         (out / name).write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")
     (out / "README.md").write_text(readme([(n, d, rt) for n, (_, d, rt) in nbs.items()]))
     print(f"{len(nbs)} notebooks -> {out}")
+    cross_main()
 
 
 if __name__ == "__main__":

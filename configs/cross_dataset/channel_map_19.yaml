@@ -1,0 +1,50 @@
+# Matched 19-electrode representation of D2 (Lebanese 2019 resting state) for the cross-dataset experiment D3 <-> D2
+# (docs/cross_dataset/design.md section 3; adgraph.crossdataset.channels; tests/test_cross_channels.py).
+#
+# The D2 EDFs label their 32 channels by NUMBER only ("Misc ExG1" ... "Misc ExG32"); EDF channel k is electrode k of
+# AD-LEB/electrodes_positions_32.loc (EEGLAB polar layout). The layout file is identified by its SHA-256 below: any
+# other content refuses the mapping. Every row is verified at run time (adgraph.crossdataset.channels.verify):
+#   * the .loc label at `edf_index` is `d2`;
+#   * `d2` is `d3` or its documented 10-10 equivalent (T3=T7, T4=T8, T5=P7, T6=P8; identical positions in the
+#     colin27 10-05 template used by D3);
+#   * the .loc polar direction of `d2` agrees with the D3 template position of `d3` (angle on a sphere fitted to the
+#     19 positions), the angle-minimising assignment of the 19 .loc directions to the 19 positions is this table
+#     (no swap), and odd-numbered electrodes are on the left, even-numbered on the right;
+#   * `mni_mm` are the colin27 10-05 positions (MNE `colin27_1005`, MRI/MNI frame, mm) = the positions stored in
+#     every D3 .set file (provider lookup standard_1005.elc; methodology log entry 46).
+#
+# `canonical_order` is the channel order of the validated D3 stores (configs/source_graphs.yaml channels.recorded);
+# the D2 store uses exactly these names in exactly this order, so the sensor-level arrays are aligned row by row.
+# The 13 D2 electrodes without a D3 counterpart are never read (selection happens on the EDF header, before any
+# filtering, re-referencing or source reconstruction).
+version: 1
+layout_file: electrodes_positions_32.loc
+layout_sha256: da108d022ebdf4565c52d69bc623b50dafbc92d8b2ff9c09aabacd3876e90bd4
+layout_n_electrodes: 32
+d2_edf_label: "Misc ExG{index}"
+template: colin27_1005
+frame: mri
+equivalences: {T3: T7, T4: T8, T5: P7, T6: P8}
+max_angle_deg: 15.0            # .loc direction vs template position (observed 1.4-12.4 deg; idealized sphere vs head)
+canonical_order: [Fp1, Fp2, F3, F4, C3, C4, P3, P4, O1, O2, F7, F8, T3, T4, T5, T6, Fz, Cz, Pz]
+channels:
+  - {d3: Fp1, d2: Fp1, edf_index: 1, edf_label: "Misc ExG1", loc_theta_deg: -18, loc_radius: 0.479, mni_mm: [-29.44, 83.92, -6.99]}
+  - {d3: Fp2, d2: Fp2, edf_index: 3, edf_label: "Misc ExG3", loc_theta_deg: 18, loc_radius: 0.479, mni_mm: [29.87, 84.90, -7.08]}
+  - {d3: F3, d2: F3, edf_index: 5, edf_label: "Misc ExG5", loc_theta_deg: -39, loc_radius: 0.318, mni_mm: [-50.24, 53.11, 42.19]}
+  - {d3: F4, d2: F4, edf_index: 7, edf_label: "Misc ExG7", loc_theta_deg: 39, loc_radius: 0.318, mni_mm: [51.84, 54.30, 40.81]}
+  - {d3: C3, d2: C3, edf_index: 15, edf_label: "Misc ExG15", loc_theta_deg: -90, loc_radius: 0.247, mni_mm: [-65.36, -11.63, 64.36]}
+  - {d3: C4, d2: C4, edf_index: 17, edf_label: "Misc ExG17", loc_theta_deg: 90, loc_radius: 0.247, mni_mm: [67.12, -10.90, 63.58]}
+  - {d3: P3, d2: P3, edf_index: 25, edf_label: "Misc ExG25", loc_theta_deg: -141, loc_radius: 0.321, mni_mm: [-53.01, -78.79, 55.94]}
+  - {d3: P4, d2: P4, edf_index: 27, edf_label: "Misc ExG27", loc_theta_deg: 141, loc_radius: 0.321, mni_mm: [55.67, -78.56, 56.56]}
+  - {d3: O1, d2: O1, edf_index: 30, edf_label: "Misc ExG30", loc_theta_deg: -169, loc_radius: 0.482, mni_mm: [-29.41, -112.45, 8.84]}
+  - {d3: O2, d2: O2, edf_index: 32, edf_label: "Misc ExG32", loc_theta_deg: 169, loc_radius: 0.482, mni_mm: [29.84, -112.16, 8.80]}
+  - {d3: F7, d2: F7, edf_index: 4, edf_label: "Misc ExG4", loc_theta_deg: -54, loc_radius: 0.491, mni_mm: [-70.26, 42.47, -11.42]}
+  - {d3: F8, d2: F8, edf_index: 8, edf_label: "Misc ExG8", loc_theta_deg: 54, loc_radius: 0.491, mni_mm: [73.04, 44.42, -12.00]}
+  - {d3: T3, d2: T7, edf_index: 14, edf_label: "Misc ExG14", loc_theta_deg: -90, loc_radius: 0.5, mni_mm: [-84.16, -16.02, -9.35]}
+  - {d3: T4, d2: T8, edf_index: 18, edf_label: "Misc ExG18", loc_theta_deg: 90, loc_radius: 0.5, mni_mm: [85.08, -15.02, -9.49]}
+  - {d3: T5, d2: P7, edf_index: 24, edf_label: "Misc ExG24", loc_theta_deg: -126, loc_radius: 0.491, mni_mm: [-72.43, -73.45, -2.49]}
+  - {d3: T6, d2: P8, edf_index: 28, edf_label: "Misc ExG28", loc_theta_deg: 126, loc_radius: 0.491, mni_mm: [73.06, -73.07, -2.54]}
+  - {d3: Fz, d2: Fz, edf_index: 6, edf_label: "Misc ExG6", loc_theta_deg: 0, loc_radius: 0.234, mni_mm: [0.31, 58.51, 66.46]}
+  - {d3: Cz, d2: Cz, edf_index: 16, edf_label: "Misc ExG16", loc_theta_deg: 0, loc_radius: 0, mni_mm: [0.40, -9.17, 100.24]}
+  - {d3: Pz, d2: Pz, edf_index: 26, edf_label: "Misc ExG26", loc_theta_deg: 180, loc_radius: 0.239, mni_mm: [0.32, -81.11, 82.61]}
+excluded_d2: [Fpz, FC5, FC1, FC2, FC6, M1, M2, CP5, CP1, CP2, CP6, POz, Oz]   # never read

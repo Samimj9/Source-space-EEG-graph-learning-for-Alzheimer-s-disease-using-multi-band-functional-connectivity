@@ -129,6 +129,11 @@ e.g. `D1-3`, `D2-3`.
   (`experiments.amendment`, `scripts/colab_setup.py --amendment A2`, `final.py ... --amendment A2`; methodology log
   entry 60). Never move the release pin for an amendment, never let an amendment write in the release namespace, and
   never change `src/adgraph/qc/` (the release's QC reports are reused across commits only while that code is unchanged).
+- **Cross-dataset D3 <-> D2 (branch `claude/cross-dataset-d3-d2-19ch`; `docs/cross_dataset/`, methodology log entry 61):**
+  `adgraph.crossdataset`, `scripts/cross_dataset.py`, namespace `CROSS_D3_D2_19CH_v1/` with its own pin. 19 matched
+  electrodes by EDF number (`configs/cross_dataset/channel_map_19.yaml`, hash-pinned); source-only fits, blinded target,
+  frozen campaign; D2 stores and real-data training only after the author's recorded authorization. Never write
+  outside that namespace.
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by

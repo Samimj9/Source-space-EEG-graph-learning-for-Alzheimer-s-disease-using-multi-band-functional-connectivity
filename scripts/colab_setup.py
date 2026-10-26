@@ -11,6 +11,8 @@
    ``--no-pin`` (maintenance only) uses the cloned commit and touches no pin.
    ``--amendment A2`` (amendment notebooks only, methodology log entry 60) uses the amendment's OWN pin
    ``FINAL_v1/amendments/<dir>/CODE_COMMIT.txt`` instead; the release pin is then only reported, never moved.
+   ``--namespace cross`` (cross-dataset notebooks, docs/cross_dataset/) uses ``CROSS_D3_D2_19CH_v1/CODE_COMMIT.txt``;
+   the release and amendment pins are then only reported, never moved.
 3. Write configs/paths.yaml and install the pinned environment (requirements.txt).
 
 Runs in a subprocess before the notebook imports adgraph, so the checked-out code is the code that is imported.
@@ -33,6 +35,8 @@ parser.add_argument("--update-code", action="store_true", help="move the release
 parser.add_argument("--no-pin", action="store_true", help="use the cloned commit; read and write no pin")
 parser.add_argument("--skip-install", action="store_true")
 parser.add_argument("--amendment", default=None, help="use the code pin of this amendment (e.g. A2), not the release's")
+parser.add_argument("--namespace", default=None, choices=["cross"],
+                    help="use the code pin of the cross-dataset namespace CROSS_D3_D2_19CH_v1")
 args = parser.parse_args()
 
 # pins of the earlier work: reported, never changed (they stay valid for the old branch and its results)
@@ -60,16 +64,24 @@ if args.amendment:                     # an amendment's own pin; the release pin
     print(f"release pin (unchanged, not used for this notebook): {release_pin}")
     pin_file = output_root / amendment.pin_file(args.amendment)
     REQUIRED += ["src/adgraph/experiments/amendment.py", "configs/final/amendments.yaml", "src/adgraph/numerical_env.py"]
+if args.namespace == "cross":          # the cross-dataset experiment's own pin
+    from adgraph.crossdataset import namespace as cross_ns
+
+    release_pin = pin_file.read_text().split()[0] if pin_file.exists() and pin_file.read_text().split() else None
+    print(f"release pin (unchanged, not used for this notebook): {release_pin}")
+    pin_file = output_root / cross_ns.pin_file()
+    REQUIRED += ["scripts/cross_dataset.py", "src/adgraph/crossdataset/__init__.py", "configs/cross_dataset/campaign.yaml",
+                 "src/adgraph/numerical_env.py"]
 if args.no_pin:
     commit, needs_checkout = head, False
     print(f"code: cloned commit {commit} (maintenance mode, no code pin read or written)")
 else:
     old_pin = pin_file.read_text().split()[0] if pin_file.exists() and pin_file.read_text().split() else None
-    work = (any(pin_file.parent.glob("**/*.done.json")) if args.amendment
+    work = (any(pin_file.parent.glob("**/*.done.json")) if args.amendment or args.namespace
             else has_completed_work(output_root, "FINAL"))
     commit, needs_checkout = resolve_code_pin(pin_file, head, update=args.update_code, has_work=work)
     if old_pin and old_pin != commit:
-        print(f"release code pin moved {old_pin[:10]} -> {commit[:10]} "
+        print(f"code pin moved {old_pin[:10]} -> {commit[:10]} "
               + ("(UPDATE_CODE)" if args.update_code else "(no completed results were pinned to the old commit)"))
     if needs_checkout:
         missing = [f for f in REQUIRED
@@ -78,7 +90,9 @@ else:
             raise SystemExit(f"The pinned code ({commit[:10]}, {pin_file}) is older than these notebooks (it lacks "
                              f"{missing}). Set UPDATE_CODE = True in the first cell to use the newest code.")
         sh(f"git checkout -q {commit}", cwd=REPO)
-    print(f"code: commit {commit} ({'amendment ' + args.amendment if args.amendment else 'release ' + release.RELEASE}"
+    which = ("amendment " + args.amendment if args.amendment else "cross-dataset namespace" if args.namespace
+             else "release " + release.RELEASE)
+    print(f"code: commit {commit} ({which}"
           f", pinned in {pin_file})"
           + (" - newer pushes are ignored until UPDATE_CODE" if needs_checkout else ""))
     for name in HISTORICAL_PINS:

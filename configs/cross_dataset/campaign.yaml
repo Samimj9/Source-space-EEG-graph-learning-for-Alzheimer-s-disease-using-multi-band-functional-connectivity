@@ -1,0 +1,49 @@
+# Pre-specified cross-dataset campaign D3 <-> D2 (docs/cross_dataset/design.md; adgraph.crossdataset.plan).
+# Written before any cross-dataset result exists. Frozen (plan/frozen.json, with this file's hash and the code commit)
+# before the first source fit; target labels are read only by the evaluation, after the freeze.
+version: 1
+atlas: lobes12                 # the recorded analysis atlas (FINAL_v1/decisions/atlas.json; checked, not chosen here)
+graph: dense                   # the recorded graph construction (FINAL_v1/decisions/graph_construction.json; checked)
+inverses: [lcmv, wmne]         # evaluated separately, never pooled
+modes: [B, A]                  # B primary (all accepted windows); A sensitivity (first 10 accepted windows)
+directions:
+  D3_to_D2:
+    source: D3
+    target: D2
+    source_participants: d3_development   # the frozen 52 development participants (xu_partition, xu_split.json);
+                                          # the 13 D3 holdout participants are never used
+    target_participants: all              # all 23 D2 participants
+  D2_to_D3:
+    source: D2
+    target: D3
+    source_participants: all              # all 23 D2 participants
+    target_participants: all              # all 65 D3 participants; reported for all 65 and separately for the
+                                          # 52 development / 13 holdout participants (holdout: descriptive only)
+experiments:                   # the existing definitions, unchanged (configs/final/experiments/, amendment A2)
+  gnn: [exp3, exp4, exp5, exp6, exp7, exp8a]   # every pre-specified variant (48); exp8a = amendment A2, NOT exp8
+  reference: [exp0, exp1]      # classical PSD / DE baselines (8 variants); reference only, never "the model"
+  exploratory: [exp7, exp8a]   # designed after earlier results / amended: labelled exploratory in every table
+training:
+  protocol: gnn_fixed60_v1     # GNNs exactly 60 epochs, no early stopping, no search (validated per variant)
+  classical: participant-level inner CV for C inside the SOURCE training participants only
+  seeds: [0]                   # primary: the protocol seed (= the release's xu_holdout fit configuration)
+  stability_seeds: [1, 2, 3, 4]   # secondary stage (separate authorization): seed variability of the target AUC
+  threshold: 0.5               # P(AD) >= 0.5 (SVM: decision_function margin >= 0); never tuned
+source_cv:                     # source-only development estimate (never uses the target dataset)
+  D3: {from: release, setting: xu_dev_cv}      # the completed release / A2 development-CV results (read only;
+                                               # training-config hash and store graph_run_id must match)
+  D2: {folds: 5, repeats: 5, seed: 0}          # participant-stratified 5-fold CV of the 23 D2 participants,
+                                               # 5 repeats (23 participants: one split alone is unstable)
+evaluation:
+  unit: participant            # mean window P(AD) per participant
+  n_bootstrap: 2000            # participant-level percentile bootstrap (stratified by diagnosis)
+  bootstrap_seed: 0
+  auc_ci: delong               # plus participant bootstrap
+  proportion_ci: wilson
+  comparisons:                 # paired, same target participants only; exploratory; Holm within each family
+    reference_baseline: {experiment: exp1, variant: logreg__psd}   # source PSD, LR (same inverse and mode)
+    family: [direction, inverse, mode]
+age:
+  overlap_rule: "target participants whose age lies in [max(min AD age, min HC age), min(max AD age, max HC age)]"
+  min_per_class: 3             # an AUC needs at least 3 AD and 3 HC participants, otherwise "not estimable"
+  covariate_model: logistic    # y ~ age vs y ~ age + score on the target participants (likelihood-ratio, exploratory)
