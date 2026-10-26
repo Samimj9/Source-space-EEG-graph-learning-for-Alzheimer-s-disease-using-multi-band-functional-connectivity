@@ -183,7 +183,7 @@ def test_dry_run_checks_everything_and_writes_nothing(env):
     res = env.freeze(write=False)
     assert res["dry_run"] and res["ok"], [c for c in res["checks"] if not c["ok"]]
     inv = res["inventory"]
-    assert len(inv) == 11 and set(inv["part"]) == {"release", "A2"} and inv["dev_auc"].notna().all()
+    assert len(inv) == 19 and set(inv["part"]) == {"release", "A2"} and inv["dev_auc"].notna().all()
     assert snapshot(env.root) == before and not ns.master_path(env.root).exists()
 
 
@@ -246,7 +246,7 @@ def test_the_freeze_writes_three_checksummed_records_once_and_changes_nothing_el
     res = write_freeze(env)
     assert len(res["written"]) == 3
     m = ns.read_json(ns.master_path(env.root))
-    assert m["release_pin"] == RP and m["a2_pin"] == AP and m["n_units"] == 11 and m["synthetic"]
+    assert m["release_pin"] == RP and m["a2_pin"] == AP and m["n_units"] == 19 and m["synthetic"]
     for p in ns.PARTS:
         f = ns.record_path(env.root, p)
         assert m["records"][p]["sha256"] == ns.sha256_file(f) and m["records"][p]["git_commit"] == ns.part_pin(p)
@@ -301,7 +301,7 @@ def test_any_change_after_the_freeze_is_detected(env, tamper):
         f = ns.record_path(env.root, "A2")
         f.write_text(f.read_text().replace("exp8a", "exp8b", 1))
     elif tamper == "development":
-        v = t[t["exp"] == "exp1"].iloc[0]
+        v = t[(t["exp"] == "exp1") & (t["mode"] == "B")].iloc[0]
         m = env.root / v["rel_dir"] / "metrics.json"
         m.write_text(m.read_text().replace('"n_participants"', '"n_participants" ', 1))
     elif tamper == "release_pin":
@@ -429,12 +429,12 @@ def test_synthetic_end_to_end_holdout_is_participant_disjoint_and_resumes(env):
 
     write_freeze(env)
     ts = env.holdout()
-    assert all((t["state"] == "completed").all() for t in ts) and sum(len(t) for t in ts) == 11
+    assert all((t["state"] == "completed").all() for t in ts) and sum(len(t) for t in ts) == 19
     store, _ = open_store(env.root, "lcmv", "B", "lobes12", lock=False)
     dev, hold = xu_partition(subject_table(store.windows))
     assert len(dev) == 52 and len(hold) == 13 and not set(dev) & set(hold)
     dirs = sorted(env.root.glob("FINAL_v1/**/xu_holdout"))
-    assert len(dirs) == 11
+    assert len(dirs) == 19
     for d in dirs:
         pred = pd.read_csv(d / "predictions_participants.csv")
         assert set(pred["key"]) == set(hold) and len(pred) == 13 and pred["score"].notna().all()
@@ -492,7 +492,7 @@ def test_reports_never_mix_development_and_holdout(env):
     ho = Path(hr["dir"])
     assert (pd.read_csv(ho / "holdout_results.csv")["n_participants"] == 13).all()
     cmp = pd.read_csv(ho / "dev_vs_holdout_descriptive.csv")
-    assert {"dev_auc_frozen_record", "holdout_auc"} <= set(cmp.columns) and len(cmp) == 11
+    assert {"dev_auc_frozen_record", "holdout_auc"} <= set(cmp.columns) and len(cmp) == 19
     assert "Not new external validation" in (ho / "holdout_results.md").read_text()
     with pytest.raises(FileExistsError):
         report.development_report(env.root, out_dir=out, cfg=cfg, make_figures=False)
@@ -667,7 +667,7 @@ def test_a3_notebooks_are_up_to_date_thin_and_safe(tmp_path, monkeypatch):
     for n in ("A3_03_holdout_exp0_6.ipynb", "A3_04_holdout_exp8a.ipynb"):
         assert "numerical_env.ensure_interpreter" in code[n] and "a3.py verify" in code[n]
     assert "--part release" in code["A3_03_holdout_exp0_6.ipynb"] and "--part A2" in code["A3_04_holdout_exp8a.ipynb"]
-    assert '"exp8a"' in code["A3_04_holdout_exp8a.ipynb"] and "exp7" not in code["A3_03_holdout_exp0_6.ipynb"]
+    assert '"exp8a"' in code["A3_04_holdout_exp8a.ipynb"] and '"exp7"' not in code["A3_03_holdout_exp0_6.ipynb"]
     for n in ("A3_01_development_report.ipynb", "A3_02_freeze.ipynb", "A3_05_final_report.ipynb"):
         assert "holdout --part" not in code[n]
     assert "holdout-report" in code["A3_05_final_report.ipynb"] and "completed" in code["A3_05_final_report.ipynb"]

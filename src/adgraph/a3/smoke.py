@@ -25,7 +25,11 @@ from . import audit, d2, freeze, holdout, inventory, report
 from . import namespace as ns
 
 SMOKE = {("exp0", "logreg__psd"), ("exp1", "logreg__psd"), ("exp2", "plv__delta"), ("exp2", "ciplv__delta"),
-         ("exp8a", "plv__psd"), ("exp8a", "plv__psd_de_strength")}
+         ("exp8a", "plv__psd"), ("exp8a", "plv__psd_de_strength"),
+         # the pinned CLI selects variants by whole name tokens, so naming plv__psd_de_strength also runs its four
+         # ablation / alternative variants; the smoke freezes exactly what runs (the real plan freezes all ten)
+         ("exp8a", "plv__psd_de_strength__abl_functional_both"), ("exp8a", "plv__psd_de_strength__abl_anatomical_both"),
+         ("exp8a", "plv__psd_de_strength__alt_bilateral_lobes"), ("exp8a", "plv__psd_de_strength__abl_shared_weights")}
 
 
 def restrict(u: dict) -> bool:
