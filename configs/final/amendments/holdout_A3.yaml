@@ -1,0 +1,23 @@
+# Amendment A3 (methodology log entry 61): the frozen final analysis with exp8 replaced by exp8a.
+# configs/final/holdout.yaml stays unchanged as the historical, pre-specified plan; this file is identical to it except
+# for the substitution below (tested). Exp 7, window mode A, unrecorded atlases and graph constructions remain
+# development-only. The holdout (13 participants) was inspected in earlier work: descriptive only, evaluated once per
+# unit, never used for any selection.
+mode: B
+inverses: [lcmv, wmne]
+experiments: [exp0, exp1, exp2, exp3, exp4, exp5, exp6, exp8a]
+replaces: {exp8: exp8a}
+# Each part runs, and is frozen, in the namespace and at the code commit that produced its development results.
+parts:
+  release:
+    experiments: [exp0, exp1, exp2, exp3, exp4, exp5, exp6]
+    pin: release_pin                 # configs/final/amendments.yaml A3
+    results: FINAL_v1/results
+    record: FINAL_v1/decisions/final_analysis.json
+    holdout_command: "python scripts/final.py holdout --exp <exp>"
+  A2:
+    experiments: [exp8a]
+    pin: a2_pin
+    results: FINAL_v1/amendments/A2_exp8_surface/results
+    record: FINAL_v1/amendments/A2_exp8_surface/decisions/final_analysis.json
+    holdout_command: "python scripts/final.py holdout --amendment A2 --exp exp8a"

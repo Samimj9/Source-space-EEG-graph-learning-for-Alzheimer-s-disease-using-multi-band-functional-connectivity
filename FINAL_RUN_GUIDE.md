@@ -278,6 +278,14 @@ variants. A difference that cannot be removed stops it unless you set `ACCEPT_EN
 freeze while `holdout.yaml` lists exp8: do not run it; the exact plan (amendment A3, needs your approval) is in
 methodology log entry 60.
 
+## 5b. Amendment A3: final analysis (methodology log entry 61; `docs/final/a3_colab_instructions.md`)
+
+Replaces notebook 99 for the final analysis (99 cannot freeze while `holdout.yaml` lists exp8). The A3 notebooks are in
+`notebooks_a3/` (branch `claude/a3-final-analysis`): `A3_01` development report and audit; `A3_02` dry-run freeze
+(`WRITE_FREEZE = False` by default; writing needs the author's approval recorded in `configs/final/amendments.yaml`);
+`A3_03` descriptive holdout of Exp 0-6 at the release pin; `A3_04` Exp 8a at the A2 pin; `A3_05` combined final report.
+Review first: `docs/final/a3_review_checklist.md`.
+
 ## 6. Begin here (notebook 00)
 
 1. Open `notebooks/README.md` on GitHub (branch `claude/unified-final-framework`) and click

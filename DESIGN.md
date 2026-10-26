@@ -9,6 +9,11 @@ Status: **v2.0 (2026-10-18), the final framework** (`docs/final/framework.md`, m
 
 Changelog:
 
+- **v2.4 (2026-10-26, amendment A3; implemented, pending the author's approval, no holdout evaluated):** in the frozen
+  final analysis exp8 is replaced by exp8a (the only protocol change; `holdout.yaml` is kept as the historical plan);
+  Exp 0-6 units are frozen in the release namespace at the release pin, Exp 8a units in the A2 namespace at the A2 pin,
+  linked by an A3 master record with checksums; the holdout stays descriptive, once per unit, never used for selection.
+  Participant-level paired comparisons with Holm correction and selection-bias estimates (methodology log entry 61).
 - **v2.3 (2026-10-23, amendment A2; post-design, pre-result for Exp 8):** on the recorded atlas lobes12 the Exp 8
   anatomical layer (`lobe_hemisphere`) is the zero matrix; Exp 8 is run as `exp8a_xu_dual_gcn_surface` with a
   cortical-surface contiguity layer 2, in its own namespace and code pin (`FINAL_v1/amendments/A2_exp8_surface`).

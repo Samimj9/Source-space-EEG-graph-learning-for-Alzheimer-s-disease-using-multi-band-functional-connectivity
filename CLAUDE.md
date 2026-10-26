@@ -129,6 +129,15 @@ e.g. `D1-3`, `D2-3`.
   (`experiments.amendment`, `scripts/colab_setup.py --amendment A2`, `final.py ... --amendment A2`; methodology log
   entry 60). Never move the release pin for an amendment, never let an amendment write in the release namespace, and
   never change `src/adgraph/qc/` (the release's QC reports are reused across commits only while that code is unchanged).
+- **Amendment A3 (branch `claude/a3-final-analysis`; methodology log entry 61; `docs/final/a3_*.md`):** final-analysis
+  integration: `exp8 -> exp8a` in the frozen final analysis (`configs/final/amendments/holdout_A3.yaml`; `holdout.yaml` stays
+  the historical plan), a dual-namespace freeze (Exp 0-6 at the release pin, Exp 8a at the A2 pin) linked by
+  `FINAL_v1/amendments/A3_final/freeze.json`, the descriptive holdout of each part at its own pin (`scripts/a3.py`,
+  `notebooks_a3/`), the consolidated development report, participant-level statistics and the D3 -> D2 manifest. A3 code
+  lives in `src/adgraph/a3/`, outside the experiment code-identity scope: never move it into `experiments/`, `models/`,
+  `evaluation/`, `graphs/`, `features/`, `qc/` or `config.py`. The freeze is written only after the author sets
+  `approved_by` / `status: approved` in `configs/final/amendments.yaml: A3`; never write either pin, never run the
+  holdout before the freeze verifies (`scripts/a3.py verify`), never read holdout metrics in a development report.
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by

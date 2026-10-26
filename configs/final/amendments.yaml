@@ -46,3 +46,36 @@ A2:
     - change Exp 0-7, their configurations, results or the release pin FINAL_v1/CODE_COMMIT.txt
     - change the recorded atlas (lobes12), graph construction (dense) or the training protocol (gnn_fixed60_v1)
     - reuse any unit of the original exp8_xu_dual_gcn (failed or partial; kept untouched as provenance)
+A3:
+  date: "2026-10-26"
+  approved_by: null          # the author records approval here (status: approved) after reviewing the freeze inventory
+  kind: final-analysis amendment (post-design; development CV of Exp 0-8a complete, no holdout evaluated)
+  status: proposed - pending author approval     # the freeze refuses to WRITE until this reads "approved"
+  namespace: FINAL_v1/amendments/A3_final
+  release_pin: 59a9ab70a55d107c5ad72acff1fb48f3ef42dff0       # Exp 0-6 development CV and holdout run here
+  a2_pin: 7fa470c668b8cce64ca152372422638be3ee8203            # Exp 8a development CV and holdout run here
+  holdout_plan: configs/final/amendments/holdout_A3.yaml
+  original_holdout_plan: configs/final/holdout.yaml           # historical record, never edited
+  original_holdout_plan_sha256: fc1a6988ffc111e2151c7714ba4c81df07037129abe2c656074dc08bf9571ecc
+  recorded_atlas: lobes12
+  recorded_graph: dense
+  reason: >-
+    The pre-specified final analysis (configs/final/holdout.yaml) lists exp8. On the recorded atlas lobes12 the original
+    Exp 8 anatomical layer is the zero matrix and every Exp 8 unit failed before training (methodology log entry 60),
+    so exp8 has no development-CV result and cannot be frozen. Amendment A2 defined exp8a (same 10 variants, cortical-
+    surface anatomical layer, the bilateral variant renamed alt_bilateral_lobes) in its own namespace and pin and
+    completed its development CV (40 contexts, 200 / 200 folds). A3 substitutes exp8a for exp8 in the frozen final
+    analysis; this is the only protocol change.
+  scope:
+    - freeze the eligible Exp 0-6 units (mode B, LCMV and wMNE, recorded atlas and graph; Exp 0 in sensor space) in the
+      release namespace at the release pin
+    - freeze the 20 Exp 8a units (10 variants x LCMV, wMNE; mode B; lobes12; dense) in the A2 namespace at the A2 pin
+    - an A3 master freeze record linking both records by SHA-256
+    - the descriptive holdout of the frozen units, each part at the commit that produced its development results
+    - the consolidated development report, participant-level comparisons and the D3 -> D2 manifest (read only)
+  does_not:
+    - edit configs/final/holdout.yaml (kept as the historical pre-specified plan)
+    - move the release pin or the A2 pin, or change any completed Exp 0-8a checkpoint, QC decision or store
+    - add Exp 7, window mode A, other atlases or graph constructions to the holdout (development-only, as pre-specified)
+    - use the holdout for any selection, tuning or choice of a model; it was inspected earlier and is descriptive only
+    - start any D2 processing or external evaluation

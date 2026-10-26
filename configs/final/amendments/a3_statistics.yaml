@@ -1,0 +1,46 @@
+# Amendment A3: pre-specified participant-level comparisons and the D3 -> D2 selection criteria.
+# Written before any holdout result exists; nothing here reads a holdout metric or a D2 outcome.
+# All comparisons are exploratory/descriptive unless a statement is labelled "supported" by the report (paired DeLong
+# p, Holm-adjusted within its comparison family, below alpha AND a participant-bootstrap CI excluding 0).
+context:                      # the primary development context of the comparisons
+  mode: B
+  atlas: selected             # the recorded atlas decision
+  graph: selected             # the recorded graph decision
+alpha: 0.05
+n_bootstrap: 2000
+n_permutation: 2000
+seed: 20261026
+# classical spectral baselines: the four pre-specified Exp 1 variants (source space), all reported; the post-hoc
+# strongest one is shown separately and labelled selection-biased.
+baselines: {experiment_prefix: exp1_source_psd_de}
+gnn_families: [exp2_conn_minimal, exp3_single_band, exp4_band_mean, exp5_multibranch, exp6_psd_strength,
+               exp7_earm_gnn, exp8a_xu_dual_gcn_surface]
+# architecture-complexity references: the minimal GCN of the same connectivity (Exp 4 band-mean, PSD features)
+complexity_reference: {experiment: exp4_band_mean, variant_template: "{conn}__psd"}
+complexity_families: [exp5_multibranch, exp6_psd_strength, exp7_earm_gnn, exp8a_xu_dual_gcn_surface]
+# Exp 8a ablations (pairs of variants of the same inverse; first minus second)
+exp8a_pairs:
+  - [plv__psd_de_strength, plv__psd_de_strength__abl_functional_both]
+  - [plv__psd_de_strength, plv__psd_de_strength__abl_anatomical_both]
+  - [plv__psd_de_strength, plv__psd_de_strength__alt_bilateral_lobes]
+  - [plv__psd_de_strength, plv__psd_de_strength__abl_shared_weights]
+  - [plv__psd_de_strength, plv__psd]
+  - [plv__psd_de_strength, plv__de]
+# Exp 6 ablations (same inverse; first minus second): is there information beyond PSD / strength / a band?
+exp6_pairs:
+  - [plv__full, plv__no_psd]
+  - [plv__full, plv__no_strength]
+  - [plv__full, plv__no_learned_fusion]
+# D3 -> D2 (objective F): source-only, prespecified criteria. D2 outcomes are never consulted.
+d2_transfer:
+  families: [exp3_single_band, exp4_band_mean, exp5_multibranch, exp6_psd_strength, exp7_earm_gnn,
+             exp8a_xu_dual_gcn_surface]
+  baseline_family: exp1_source_psd_de
+  criteria:
+    - completed development CV in both inverses, window mode B, on the recorded atlas and graph
+    - per family, the variant with the highest mean development participant AUC over the two inverses (ties: variant name)
+    - one pre-specified classical spectral baseline (same rule) as the reference
+    - every other completed variant stays available for exploratory transfer, flagged as such
+  input_requirement: >-
+    The D3 <-> D2 project needs stores restricted to the 19 matched electrodes; the 68-ROI / lobes12 source stores
+    used here are not those inputs. A3 only records which model configurations to carry over.

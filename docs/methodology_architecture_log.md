@@ -3566,6 +3566,94 @@ environment and namespace assertions (executed against a synthetic namespace, in
 restore commands; the namespace holdout refused without its own frozen record or at another commit, and never writing
 the release record).
 
+## 61. Amendment A3: final-analysis integration, frozen-model evaluation and consolidated reporting (2026-10-26)
+
+**Status:** post-design; development CV of Exp 0-7 (release pin `59a9ab7`) and Exp 8a (amendment A2, A2 pin `7fa470c`) is
+complete; **no holdout result of the final analysis exists and none is created by this entry**. A3 is *implemented and
+tested here but NOT approved*: `configs/final/amendments.yaml: A3` carries `status: proposed - pending author approval`
+and `approved_by: null`, and the freeze refuses to write until the author records both (and commits). It implements plan
+A3 of entry 60 (items 2-6) unchanged in substance.
+
+**Request (author, 2026-10-26).** Consolidate the Exp 0-8a development results; replace exp8 by exp8a in the frozen final
+analysis without editing `holdout.yaml`; freeze the eligible units in their own namespaces with one linking record;
+prepare (not run) the descriptive holdout, each part at the commit that produced its development results; add
+participant-level comparisons with explicit selection-bias handling; produce a D3 -> D2 manifest; start nothing of D2.
+
+**The single protocol change.** `configs/final/holdout.yaml` (pre-specified, SHA-256 recorded in the A3 record and tested
+unchanged) lists exp0-exp6 and exp8. On the recorded atlas lobes12 the original Exp 8 anatomical layer is the zero matrix
+and every Exp 8 unit failed before training (entry 60), so exp8 has no development-CV result and cannot be frozen. A3
+substitutes exp8a (A2: the same 10 variants, cortical-surface anatomical layer, `abl_bilateral_lobes` renamed
+`alt_bilateral_lobes`) in the frozen final analysis: `configs/final/amendments/holdout_A3.yaml` = `holdout.yaml` with
+`exp8 -> exp8a` (tested). Nothing else changes: mode B only, LCMV and wMNE, recorded atlas lobes12 and graph dense, Exp 0
+in sensor space, Exp 7 / window mode A / other atlases and graph constructions development-only, holdout descriptive,
+once per unit, never used for any selection. Units: Exp 0-6 = 96 (exp0 4, exp1 8, exp2 20, exp3 20, exp4 8, exp5 16,
+exp6 20), Exp 8a = 20: 116 in total, the same count as `holdout.yaml` (inventory: `docs/final/a3_freeze_inventory.csv`).
+
+**Isolation (what A3 does not touch).** A3's code is in `src/adgraph/a3/` (+ `scripts/a3*.py`, `notebooks_a3/`),
+outside every package of `checkpoint.CODE_SCOPES["experiment"]`; no file of `config.py`, `experiments/`, `models/`,
+`evaluation/`, `graphs/`, `features/`, `qc/`, `checkpoint.py`, `provenance.py`, `stores.py`, `release.py`,
+`requirements.txt` or the experiment / protocol / holdout configs differs from the A2 pin (tested by `git diff`), so the
+source fingerprint recorded in every Exp 0-8a unit is unchanged and no completed checkpoint can become incompatible. A3
+never writes either pin, never trains in the development setting, never reads a holdout metric in a development report
+(`inventory.discover(settings=("xu_dev_cv",))` does not even open those directories), and writes only into
+`FINAL_v1/amendments/A3_final/` (never overwriting: `namespace.new_file` / `write_once` use hard links) plus, once, the
+two frozen records below.
+
+**Dual-namespace freeze (`a3.freeze`, `scripts/a3.py freeze [--write]`).** Dry run by default. Preconditions, all
+checked before anything is written: `holdout.yaml` unchanged; plan = `holdout.yaml` with the substitution; both pin files
+as recorded (release `59a9ab7`, A2 `7fa470c`); atlas and graph decisions recorded and equal to lobes12 / dense; every
+planned unit has a development-CV result whose completion marker and payload checksums verify and whose
+`_identity.json` names the part's pin; no conflicting frozen record; no holdout result exists. With `--write` and an
+approved A3 record, from a clean checkout, it creates once: (a) the release record `FINAL_v1/decisions/final_analysis.json`
+(Exp 0-6, `git_commit` = release pin; the format `decisions.require_frozen` of `59a9ab7` reads), (b)
+`FINAL_v1/amendments/A2_exp8_surface/decisions/final_analysis.json` (Exp 8a, `git_commit` = A2 pin; the format
+`amendment.holdout` of `7fa470c` reads), (c) `FINAL_v1/amendments/A3_final/freeze.json`: both records' SHA-256, both pins, the
+development-results checksum, the SHA-256 of the QC decisions, the store lock and both pin files, the amendment record
+and the justification. Records carry the development AUC and metric hashes of each unit. Rerunning completes an
+interrupted freeze (a record already written must equal the A3 freeze; any other record is refused and left untouched) and
+otherwise changes nothing. `a3.py verify` re-checks everything (record checksums, unit sets, pins, protected files, the
+development results) and is run before and after every holdout call.
+
+**Descriptive holdout (prepared, not run).** `a3.py holdout --part release|A2 --exp expN` (`a3.holdout.run_part`):
+refused unless the master freeze verifies; creates a clean git worktree at the part's pin; requires an interpreter that
+imports that worktree's package; runs the pinned CLI (`final.py holdout --exp expN` at `59a9ab7`; `final.py holdout
+--amendment A2 --exp exp8a` at `7fa470c`), which applies its own gate (frozen record, unit membership, commit). Each unit
+is fitted on the 52 development participants and evaluated once on the 13 holdout participants; scaling and every learned
+transform live inside the fitted model; threshold 0.5 (SVM margin 0); no tuning. Resume is by the pinned code's
+checkpoints (completed units returned unchanged, interrupted units recomputed). The notebooks `A3_03` / `A3_04` restore
+the numerical environment of the completed units (`numerical_env`, as in entry 60).
+
+**Statistics (`a3.stats`, `configs/final/amendments/a3_statistics.yaml`, pre-specified before any holdout result).**
+Participant is the unit; saved out-of-fold scores only; matched participants required (else the comparison is not made);
+paired DeLong test, stratified participant bootstrap CI of the AUC difference (same resamples for both models), Holm
+adjustment within each comparison family; *supported* = Holm p < 0.05 and CI excluding 0, everything else descriptive.
+Families: classical spectral baselines (the four pre-specified Exp 1 variants, all) versus each GNN family; source versus
+sensor; LCMV versus wMNE; mode B versus A; PLV versus |ciPLV|; Exp 8a ablations; Exp 6 ablations; complexity versus the
+minimal band-averaged GCN of the same connectivity. Selection bias: for each candidate set a participant-bootstrap
+estimate of the winner's optimism (winner chosen in-bag, scored out-of-bag), a max-statistic label-permutation test of
+"best of M versus chance", and a selection-aware difference of the best classical and the best GNN model. Development
+versus holdout is shown only in the holdout report, from the frozen record's development AUCs, descriptively (no test).
+
+**Reports and D2 manifest.** `a3.report.development_report` (all completed variants of both namespaces with role
+confirmatory / amended / exploratory / sensitivity, namespace and commit; failed original Exp 8 units only as provenance;
+CSV, Markdown, figures, interpretation computed from saved tables, manifest with output checksums) and
+`holdout_report` (needs a verifying freeze; holdout metrics only). `a3.d2.write`: every Exp 3-8a configuration (resolved
+config and hashes, namespace, commit, D3 development AUC) and a source-only recommended set chosen by the pre-written rule
+(best mean development AUC over the inverses within each family, plus one classical baseline); `holdout_used: false`,
+`d2_outcomes_used: false`, `d2_processing_started: false`. The D3 <-> D2 project needs 19-electrode inputs that these stores
+are not; A3 does not build them.
+
+**Tests:** `tests/test_a3.py` (plan composition and counts; Exp 0 sensor handling; discovery across both namespaces and
+the A2 commit; failed Exp 8 never a result; corrupt results; every freeze gate; write-once, checksums, tamper detection
+of records, results, pins, store lock and QC decisions; interrupted freeze; holdout gates under a missing record, a wrong
+commit, an unfrozen unit, window mode A and Exp 7; worktree pin checks; synthetic end-to-end holdout with participant
+disjointness and resume; report separation; statistics; selection-bias behaviour on noise; D2 manifest; CLI; notebooks;
+code isolation from the pinned scopes), plus `scripts/a3.py smoke`.
+
+**To authorize the real freeze (author):** review `docs/final/a3_review_checklist.md` and the dry run of notebook
+`A3_02`; set `approved_by` and `status: approved` in `configs/final/amendments.yaml: A3`, commit, then run `A3_02` with
+`WRITE_FREEZE = True`. Holdout notebooks A3_03 / A3_04 refuse to run before that.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:
