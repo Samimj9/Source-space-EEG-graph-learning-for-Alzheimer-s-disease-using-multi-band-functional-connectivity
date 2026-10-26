@@ -83,7 +83,7 @@ def campaign(tmp_path_factory):
         mp.setattr(classical.ClassicalModel, "predict_score", rec_pred(c_pred))
         with pytest.raises(plan.NotFrozen):
             transfer.run(tmp, c, variants=quick_variants(c), synthetic=True)
-        frozen = plan.freeze(tmp, c, {"synthetic": "stores"}, plan.decision_audit(tmp, c), synthetic=True)
+        frozen = plan.freeze(tmp, c, transfer.stores_record(tmp, c), plan.decision_audit(tmp, c), synthetic=True)
         t = transfer.run(tmp, c, variants=quick_variants(c), synthetic=True)
         ev = evaluate.evaluate(tmp, c)
         t2 = transfer.run(tmp, c, variants=quick_variants(c), synthetic=True)
@@ -290,7 +290,10 @@ def test_checkpoints_resume_and_identity(campaign):
     with pytest.raises(plan.NotFrozen, match="differs"):
         plan.require_frozen(tmp, {**c, "training": {**c["training"], "seeds": [7]}})
     with pytest.raises(plan.NotFrozen, match="different campaign"):
-        plan.freeze(tmp, {**c, "modes": ["B"]}, {"synthetic": "stores"}, {"passed": True}, synthetic=True)
+        plan.freeze(tmp, {**c, "modes": ["B"]}, frozen["stores"], {"passed": True}, synthetic=True)
+    stale = {**frozen, "stores": {**frozen["stores"], "D2/lcmv/B": "a-rebuilt-store"}}
+    with pytest.raises(RuntimeError, match="frozen campaign recorded"):          # a replaced store is refused
+        transfer.check_frozen_stores(stale, "lcmv", "B", d3, d2)
 
 
 def test_gates_authorization_freeze_and_commit(campaign, monkeypatch):

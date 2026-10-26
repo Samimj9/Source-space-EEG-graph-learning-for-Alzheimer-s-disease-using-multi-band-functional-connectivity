@@ -231,6 +231,7 @@ def evaluate(processed, c: dict, stage: str = "primary") -> dict:
             stores.clear()
             d3 = transfer.open_d3(processed, u["inverse"], u["mode"], c)
             d2 = transfer.open_d2(processed, u["inverse"], u["mode"], c)
+            transfer.check_frozen_stores(frozen, u["inverse"], u["mode"], d3, d2)
             stores[sk] = (d3, d2, label_table(d3, True), label_table(d2, False))
         d3, d2, l3, l2 = stores[sk]
         tgt_labels = l2 if u["direction"] == "D3_to_D2" else l3

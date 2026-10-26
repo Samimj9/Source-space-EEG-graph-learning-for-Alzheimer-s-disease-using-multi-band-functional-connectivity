@@ -127,6 +127,25 @@ def check_stores(d3: GraphStore, d2: GraphStore, sensor: bool) -> None:
         raise InputMismatch("participant keys shared between the datasets")
 
 
+def stores_record(processed, c: dict) -> dict:
+    """{"D3|D2/<inverse>/<mode>": graph_run_id} of every store the campaign reads (each verified when opened)."""
+    out = {}
+    for inv in list(c["inverses"]) + ["sensor"]:
+        for mode in c["modes"]:
+            out[f"D3/{inv}/{mode}"] = graph_run_id(open_d3(processed, inv, mode, c))
+            out[f"D2/{inv}/{mode}"] = graph_run_id(open_d2(processed, inv, mode, c))
+    return out
+
+
+def check_frozen_stores(frozen: dict, inverse: str, mode: str, d3: GraphStore, d2: GraphStore) -> None:
+    """The stores are exactly those of the frozen campaign (a rebuilt or replaced store is refused)."""
+    for ds, st in (("D3", d3), ("D2", d2)):
+        key = f"{ds}/{inverse}/{mode}"
+        want = (frozen.get("stores") or {}).get(key)
+        if want != graph_run_id(st):
+            raise RuntimeError(f"store {key} is {graph_run_id(st)}, the frozen campaign recorded {want}")
+
+
 # ------------------------------------------------------------------------------------------------ units
 def unit_dir(processed, u: dict, c: dict) -> Path:
     inv = u["inverse"]
@@ -319,6 +338,7 @@ def run(processed, c: dict, stage: str = "primary", experiments=None, variants=N
             if sk not in stores:
                 stores.clear()
                 d3, d2 = open_d3(processed, u["inverse"], u["mode"], c), open_d2(processed, u["inverse"], u["mode"], c)
+                check_frozen_stores(frozen, u["inverse"], u["mode"], d3, d2)
                 check_stores(d3, d2, u["inverse"] == "sensor")
                 stores[sk] = (d3, d2)
             d3, d2 = stores[sk]

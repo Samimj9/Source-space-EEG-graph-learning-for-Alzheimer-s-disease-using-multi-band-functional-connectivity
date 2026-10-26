@@ -85,18 +85,6 @@ def geometry(processed) -> dict:
     return json.loads(f.read_text())["d2_geometry"]
 
 
-def stores_record(processed, c) -> dict:
-    """{name: graph_run_id} of every store the campaign reads (verified)."""
-    out = {}
-    for inv in c["inverses"] + ["sensor"]:
-        for mode in c["modes"]:
-            from adgraph.graphs.store import graph_run_id
-
-            out[f"D3/{inv}/{mode}"] = graph_run_id(transfer.open_d3(processed, inv, mode, c))
-            out[f"D2/{inv}/{mode}"] = graph_run_id(transfer.open_d2(processed, inv, mode, c))
-    return out
-
-
 # ------------------------------------------------------------------------------------------------ smoke
 if args.action == "smoke":
     from adgraph.crossdataset import evaluate, report
@@ -115,7 +103,7 @@ if args.action == "smoke":
         trainer.GNNModel.__init__ = init
         c = {**c, "source_cv": {**c["source_cv"], "D2": {**c["source_cv"]["D2"], "repeats": 1}},
              "evaluation": {**c["evaluation"], "n_bootstrap": 200}}
-    frozen = plan.freeze(tmp, c, stores_record(tmp, c), plan.decision_audit(tmp, c), synthetic=True)
+    frozen = plan.freeze(tmp, c, transfer.stores_record(tmp, c), plan.decision_audit(tmp, c), synthetic=True)
     vs = None
     if args.quick:
         vs = [v[0]["variant"] for v in plan.variants(c).values()] + ["logreg__psd"]
@@ -247,7 +235,7 @@ if args.action == "compat":
 if args.action == "freeze":
     dec = plan.decision_audit(processed, c)
     try:
-        rec = plan.freeze(processed, c, stores_record(processed, c), dec)
+        rec = plan.freeze(processed, c, transfer.stores_record(processed, c), dec)
     except plan.NotFrozen as exc:
         sys.exit(str(exc))
     print(f"frozen: {rec['n_units_primary']} primary + {rec['n_units_stability']} stability units, campaign "
