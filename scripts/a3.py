@@ -11,7 +11,8 @@
     python scripts/a3.py report                consolidated development report (tables, figures, comparisons)
     python scripts/a3.py holdout-report        descriptive holdout report (needs a verifying freeze)
     python scripts/a3.py d2-manifest           D3 -> D2 model manifest and recommended source-only set (read only)
-    python scripts/a3.py smoke                 synthetic end-to-end freeze / holdout / report check (temporary root)
+    python scripts/a3.py smoke [--no-link]     synthetic end-to-end freeze / holdout / report check (temporary root)
+    python scripts/a3.py probe                 which write-once method does this file system allow? (own temp folder)
 
 Outputs: <processed>/FINAL_v1/amendments/A3_final/ (never overwritten). The freeze additionally creates the two frozen
 records, once. Nothing here trains in the development setting or touches a result, pin, QC decision or store.
@@ -27,9 +28,10 @@ import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("action", choices=["plan", "audit", "freeze", "verify", "holdout-status", "holdout", "report",
-                                       "holdout-report", "d2-manifest", "smoke"])
+                                       "holdout-report", "d2-manifest", "smoke", "probe"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--no-drive", action="store_true", help="plan: configuration only (atlas / graph from A3)")
+parser.add_argument("--no-link", action="store_true", help="smoke: simulate a file system without hard links")
 parser.add_argument("--write", action="store_true", help="freeze: actually write the records (default: dry run)")
 parser.add_argument("--part", choices=["release", "A2"])
 parser.add_argument("--exp")
@@ -50,7 +52,7 @@ def processed() -> Path:
 if args.action == "smoke":
     from adgraph.a3 import smoke
 
-    res = smoke.run()
+    res = smoke.run(link=not args.no_link)
     print(res["summary"])
     sys.exit(0 if res["ok"] else 1)
 
@@ -90,7 +92,18 @@ if args.action in ("plan", "freeze"):
     if res["dry_run"]:
         print("DRY RUN: nothing was written." + ("" if res["ok"] else " Preconditions failed."))
         sys.exit(0 if res["ok"] else 1)
-    print("written:", *res["written"], sep="\n  ")
+    print("written:", *[f"{w}  [{res['write_methods'].get(w)}]" for w in res["written"]], sep="\n  ")
+
+if args.action == "probe":
+    from adgraph.a3 import probe
+    from adgraph.a3 import namespace as ns
+
+    res = probe.probe(ns.root(P))
+    for k, v in res.items():
+        print(f"{k}: {v}")
+    print("the freeze will use: " + ("hard link (atomic)" if res.get("method") == "link" else
+                                     "claim file + rename (hard links unavailable here)"))
+    sys.exit(0 if res["ok"] else 1)
 
 if args.action == "audit":
     from adgraph.a3 import audit

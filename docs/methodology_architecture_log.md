@@ -3643,6 +3643,17 @@ config and hashes, namespace, commit, D3 development AUC) and a source-only reco
 `d2_outcomes_used: false`, `d2_processing_started: false`. The D3 <-> D2 project needs 19-electrode inputs that these stores
 are not; A3 does not build them.
 
+**Write-once on Google Drive (engineering review, 2026-10-27).** The first implementation published records with
+`os.link`; whether a Colab-mounted Drive folder accepts hard links could not be established from the development
+environment (no Drive access), so none is assumed. `namespace._publish` uses a hard link where available and otherwise
+(errno EPERM / ENOSYS / EOPNOTSUPP / EACCES / EXDEV / EMLINK / EINVAL) an exclusive-create claim file, an
+absence check under the claim, a rename of the finished temporary file and a read-back; other OS errors are never
+swallowed. An existing target is always refused and left untouched, an interrupted write leaves only a hidden temporary
+file (never a partial record), the claim of a killed run blocks for 600 s and is then taken over, and a rerun resumes.
+Limit of the fallback: it cannot stop a writer that ignores the claim in the instant between the final check and the
+rename (single-user use). `scripts/a3.py probe` (notebook A3_02, section 0) reports on the real mount which method will
+be used; `scripts/a3.py smoke --no-link` exercises the fallback end to end.
+
 **Tests:** `tests/test_a3.py` (plan composition and counts; Exp 0 sensor handling; discovery across both namespaces and
 the A2 commit; failed Exp 8 never a result; corrupt results; every freeze gate; write-once, checksums, tamper detection
 of records, results, pins, store lock and QC decisions; interrupted freeze; holdout gates under a missing record, a wrong

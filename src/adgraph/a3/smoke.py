@@ -132,8 +132,13 @@ class Smoke:
         return out
 
 
-def run(root=None, epochs: int = 2) -> dict:
+def run(root=None, epochs: int = 2, link: bool = True) -> dict:
+    """``link=False`` simulates a file system that refuses hard links (the freeze must then use claim + rename)."""
+    import errno
+
     s = Smoke(root, epochs)
+    if not link:
+        s._stack.enter_context(mock.patch.object(ns.os, "link", side_effect=OSError(errno.EPERM, "not permitted")))
     checks = []
 
     def chk(name, ok, detail=""):
@@ -145,6 +150,8 @@ def run(root=None, epochs: int = 2) -> dict:
             [c for c in dry["checks"] if not c["ok"]])
         res = s.freeze(write=True)
         chk("freeze written (two records + master)", len(res["written"]) == 3, res["written"])
+        want = "link" if link else "claim+rename"
+        chk(f"write-once method is {want}", set(res["write_methods"].values()) == {want}, res["write_methods"])
         again = s.freeze(write=True)
         chk("rerunning the freeze writes nothing", again["written"] == [], again["written"])
         freeze.verify(s.root, restrict=restrict)

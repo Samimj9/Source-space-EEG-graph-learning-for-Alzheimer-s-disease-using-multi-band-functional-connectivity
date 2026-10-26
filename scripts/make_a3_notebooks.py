@@ -124,6 +124,8 @@ creates, once: the release record (Exp 0-6, release pin), the A2 record (Exp 8a,
 their SHA-256. Rerunning cannot change an existing freeze. Nothing is trained and no holdout is evaluated here.
 """ + HOWTO),
         code(SETUP),
+        md("## 0. Which write-once method does this Drive folder allow? (own temporary folder only)"),
+        code('sh("python scripts/a3.py probe")'),
         md("## 1. Audit and dry run (writes nothing)"),
         code('''sh("python scripts/a3.py audit")
 sh("python scripts/a3.py freeze")'''),

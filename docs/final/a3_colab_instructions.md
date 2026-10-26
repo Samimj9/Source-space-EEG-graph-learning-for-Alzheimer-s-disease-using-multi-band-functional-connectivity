@@ -8,7 +8,7 @@ analysis: 99 cannot complete its freeze because exp8 has no result on lobes12.
 | Step | Notebook | Runtime | What happens | Writes |
 |---|---|---|---|---|
 | 1 | `A3_01_development_report` | CPU | audit (stops if a pin, commit, count or environment check fails), consolidated Exp 0-8a report, comparisons, selection checks, figures, interpretation, D3 → D2 manifest | `A3_final/{audit,reports,d2_manifest}/` only |
-| 2 | `A3_02_freeze` | CPU | audit, **dry run** (checks + 116-unit inventory with development AUCs). `WRITE_FREEZE = False` writes nothing | nothing (default) |
+| 2 | `A3_02_freeze` | CPU | write-once probe (prints whether this Drive folder accepts hard links; the freeze works either way), audit, **dry run** (checks + 116-unit inventory with development AUCs). `WRITE_FREEZE = False` writes nothing | nothing (default) |
 | — | *you review* | | `docs/final/a3_review_checklist.md`, the inventory printed by step 2, the report of step 1 | |
 | — | *you approve* | | edit `configs/final/amendments.yaml: A3` → `approved_by: <you>`, `status: approved`; commit and push to `claude/a3-final-analysis` | |
 | 3 | `A3_02_freeze` again | CPU | set `WRITE_FREEZE = True`, Run all: writes the release record, the A2 record and `A3_final/freeze.json` once, then verifies. Refuses if anything differs | the 2 frozen records + master |

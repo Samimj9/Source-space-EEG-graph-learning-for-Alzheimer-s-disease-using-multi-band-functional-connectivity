@@ -269,6 +269,55 @@ def test_the_freeze_writes_three_checksummed_records_once_and_changes_nothing_el
         ns.write_once(ns.master_path(env.root), {"x": 1})
 
 
+@pytest.fixture(params=["link", "claim+rename"])
+def fs_mode(request):
+    """Hard links available, or refused as on a file system without them (a Drive mount may be one)."""
+    import errno
+
+    if request.param == "link":
+        yield "link"
+    else:
+        with mock.patch.object(ns.os, "link", side_effect=OSError(errno.EPERM, "Operation not permitted")):
+            yield "claim+rename"
+
+
+def test_the_freeze_has_the_same_guarantees_with_or_without_hard_links(env, fs_mode):
+    res = write_freeze(env)
+    assert len(res["written"]) == 3 and set(res["write_methods"].values()) == {fs_mode}
+    names = [p.name for d in (env.root / "FINAL_v1").rglob("*") if d.is_dir() for p in d.iterdir()
+             if p.name.startswith(".") and ".tmp-" in p.name or p.name.endswith(".claim")]
+    assert names == []                                                        # no temporary file or claim left behind
+    after = snapshot(env.root)
+    assert write_freeze(env)["written"] == [] and snapshot(env.root) == after   # rerun changes nothing
+    f = ns.record_path(env.root, "release")
+    with pytest.raises(FileExistsError):
+        ns.write_once(f, {"x": 1})
+    assert snapshot(env.root) == after                                        # an existing record is refused, intact
+    f.write_text(f.read_text().replace("exp0", "expX", 1))
+    with pytest.raises(freeze.FreezeInvalid):
+        freeze.verify(env.root, restrict=smoke.restrict)
+
+
+def test_a_freeze_interrupted_between_records_resumes_with_or_without_hard_links(env, fs_mode):
+    calls = {"n": 0}
+    real = ns.write_once
+
+    def dies_on_the_second_record(path, obj):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real(path, obj)
+    with mock.patch.object(freeze.ns, "write_once", dies_on_the_second_record), pytest.raises(KeyboardInterrupt):
+        write_freeze(env)
+    first = ns.record_path(env.root, "release")
+    assert first.exists() and not ns.record_path(env.root, "A2").exists() and not ns.master_path(env.root).exists()
+    keep = first.read_bytes()
+    res = write_freeze(env)                                                   # resume: only what is missing is written
+    assert len(res["written"]) == 2 and first.read_bytes() == keep
+    freeze.verify(env.root, restrict=smoke.restrict)
+    assert write_freeze(env)["written"] == []
+
+
 def test_a_different_existing_frozen_record_is_refused_and_left_untouched(env):
     f = ns.record_path(env.root, "release")
     f.parent.mkdir(parents=True, exist_ok=True)

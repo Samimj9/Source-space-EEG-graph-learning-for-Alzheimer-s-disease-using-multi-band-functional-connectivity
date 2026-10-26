@@ -36,7 +36,7 @@ FINAL_v1/amendments/A3_final/{reports,audit,d2_manifest,manifests}/    A3 output
 | every planned unit has a complete (marker + payload checksums), development-CV result whose identity names the part's pin | `freeze.dev_results` |
 | no conflicting frozen record; no holdout result before the freeze | `freeze.preconditions` |
 | A3 approved by the author (`approved_by`, `status: approved`) and clean checkout | `freeze.freeze(write=True)` |
-| records written once (hard link; never overwritten); master written last; rerun completes an interrupted freeze | `namespace.write_once`, `freeze._matches` |
+| records written once, never overwritten: hard link where the file system has it, else exclusive claim file + rename + read-back (Drive-compatible); content complete before the name exists; stale claim of a killed run expires after 600 s; master written last; rerun completes an interrupted freeze | `namespace._publish`, `freeze._matches`, `a3.py probe` |
 | record / result / pin / store-lock / QC-decision tampering detected | `freeze.verify` (before and after each holdout call) |
 | holdout without master, in a worktree not at the pin, or with an interpreter that does not import it | `holdout.run_part` |
 | holdout of a unit outside the record, under another commit, mode A, Exp 7 | pinned code: `decisions.require_frozen`, `amendment.holdout` |

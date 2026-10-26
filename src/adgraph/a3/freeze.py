@@ -215,7 +215,8 @@ def freeze(processed, write: bool = False, restrict=None, a3_commit: str | None 
 
     pre = preconditions(processed, restrict, found, strict_holdout_yaml)
     inv = inventory_table(pre["units"], pre["dev"]) if pre["units"] else pd.DataFrame()
-    out = {"dry_run": not write, "checks": pre["checks"], "ok": pre["ok"], "inventory": inv, "written": []}
+    out = {"dry_run": not write, "checks": pre["checks"], "ok": pre["ok"], "inventory": inv, "written": [],
+           "write_methods": {}}
     if not write:
         return out
     if not pre["ok"]:
@@ -239,6 +240,7 @@ def freeze(processed, write: bool = False, restrict=None, a3_commit: str | None 
             continue
         ns.write_once(path, _record(processed, part, units[part], dev, atlas, graph, a3_commit, synthetic))
         out["written"].append(str(path))
+        out["write_methods"][str(path)] = ns.METHODS.get(str(path))
     master = ns.master_path(processed)
     if master.exists():
         verify(processed, restrict=restrict)
@@ -257,6 +259,7 @@ def freeze(processed, write: bool = False, restrict=None, a3_commit: str | None 
          "substitution": {"exp8": "exp8a", "reason": rec["reason"].strip()}, "holdout_policy": release.HOLDOUT_POLICY}
     ns.write_once(master, m)
     out["written"].append(str(master))
+    out["write_methods"][str(master)] = ns.METHODS.get(str(master))
     out["master"] = m
     if not (ns.root(processed) / "freeze_inventory.csv").exists():
         ns.new_file(ns.root(processed) / "freeze_inventory.csv", inv.to_csv(index=False))
