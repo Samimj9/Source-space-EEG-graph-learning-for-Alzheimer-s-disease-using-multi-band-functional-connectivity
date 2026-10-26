@@ -722,7 +722,8 @@ def cross_setup() -> str:
     s = s.replace("_run([sys.executable, 'scripts/colab_setup.py'] + (['--update-code'] if UPDATE_CODE else []))",
                   "_run([sys.executable, 'scripts/colab_setup.py', '--namespace', 'cross']"
                   " + (['--update-code'] if UPDATE_CODE else []))")
-    return s + f"CROSS = OUT + '/{ns.ROOT}'\nprint('cross-dataset outputs on Drive:', CROSS)\n"
+    s = s.replace("print('release outputs on Drive:', FINAL)", "print('release outputs (READ ONLY here):', FINAL)")
+    return s + f"CROSS = OUT + '/{ns.ROOT}'\nprint('cross-dataset outputs (the only place this notebook writes):', CROSS)\n"
 
 
 CROSS_ENV = """## Numerical environment (the Python / library versions of the completed Exp 7 units)
@@ -741,6 +742,13 @@ DIFF = numerical_env.differences(REFERENCE, numerical_env.interpreter_versions(P
 assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from Exp 7: {DIFF}'
 def cross(args):   # every step of this experiment: scripts/cross_dataset.py with the verified interpreter
     sh(f"{PY} scripts/cross_dataset.py {args}", cwd='/content/repo')"""
+
+CROSS_HOWTO = """
+**How to use:** *Runtime → Run all*. Allow Google Drive access when asked. If Colab disconnects, open the notebook
+again and *Run all* again: finished work is kept on Google Drive and skipped. Everything this notebook writes goes to
+`<outputs>/CROSS_D3_D2_19CH_v1/` on Drive (never to the temporary Colab disk, and never into `FINAL_v1/`, the
+amendment A2 folder or the D3 stores, which are only read).
+"""
 
 CROSS_RULES = """**Rules of this experiment** (docs/cross_dataset/design.md): outputs only in `<outputs>/CROSS_D3_D2_19CH_v1/`;
 the release (`FINAL_v1/`), amendment A2 (running Exp 8a), the D3 stores, their lock, pins and decisions are only
@@ -764,7 +772,7 @@ A, lobes12) from the 23 original resting-state EDFs, their validation, the compa
 shift diagnostics and D2 QC, and the harmonization manifest.
 
 **Part C (author):** the frozen campaign (configs/cross_dataset/campaign.yaml) is recorded before any training.
-""" + HOWTO + " A CPU runtime is enough."),
+""" + CROSS_HOWTO + " A CPU runtime is enough."),
         code(cross_setup()),
         md(CROSS_ENV),
         code(CROSS_ENV_CODE),
@@ -772,9 +780,20 @@ shift diagnostics and D2 QC, and the harmonization manifest.
         code(SHOW_LATEST + """
 cross('audit')
 display(pd.read_csv(CROSS + '/audit/channel_mapping_audit.csv'))
-display(pd.read_csv(CROSS + '/audit/d2_edf_headers.csv'))"""),
-        md("## Part A2 · Recording-level inspection of D2 (label-blind; no source model, no graph)"),
-        code("""cross('inspect-d2')"""),
+display(pd.read_csv(CROSS + '/audit/d2_edf_headers.csv'))
+print('D2 EDF annotation texts (recording-condition evidence, decision D6):',
+      json.load(open(CROSS + '/audit/audit.json'))['d2_edf_annotations'])
+display(pd.read_csv(CROSS + '/audit/demographics.csv').round(1))          # age / sex by diagnosis (descriptive)
+display(pd.read_csv(CROSS + '/audit/age_overlap_feasibility.csv'))
+print(json.dumps(json.load(open(CROSS + '/audit/d2_filter_response.json'))['magnitude_db'], indent=1))"""),
+        md("""## Part A2 · Recording-level inspection (label-blind; no source model, no graph)
+
+Per D2 recording: duration, selection, candidate and accepted windows, amplitude, and line noise with what a 50 Hz
+notch WOULD change (LCMV covariance input, window acceptance); the same line-noise audit of the D3 recordings for
+comparison. Nothing is applied; decision D3 is taken from these numbers before any classification."""),
+        code("""cross('inspect-d2')
+cross('inspect-d3-line')
+display(pd.read_csv(CROSS + '/audit/d2_inspection.csv').filter(regex='key|duration|windows|std|line|covariance|flip|status').round(3))"""),
         md("""## Part B · Matched-channel D2 stores (STOP HERE unless the author has authorized it in writing)
 
 Set `AUTHORIZED_BY` to the author's name only after the written authorization; it is recorded once in
@@ -804,7 +823,8 @@ else:
 def cross_direction_notebook(direction: str) -> dict:
     src, tgt = direction.split("_to_")
     who = ("the 52 frozen D3 development participants (the 13 D3 holdout participants are never used)"
-           if src == "D3" else "all 23 D2 participants; plus the source-only D2 cross-validation (5 x 5 folds)")
+           if src == "D3" else "all 23 D2 participants; plus the source-only D2 cross-validation (5 folds x 1 repeat, "
+                                  "the primary D3 protocol)")
     return notebook([
         md(f"""# Cross-dataset {'01' if src == 'D3' else '02'} · {src} -> {tgt} (zero-shot)
 
@@ -814,7 +834,7 @@ Each unit fits a FRESH model of an unchanged Exp 0 / 1 / 3-7 / 8a variant (fixed
 classical models: inner CV for C inside the source only) on {who}, then scores the BLINDED {tgt} windows; one mean
 P(AD) per participant is saved, without labels. Completed units are checkpointed and skipped on restart. No target
 metric is computed here (notebook 03).
-""" + HOWTO + " Use a **GPU runtime** (T4)."),
+""" + CROSS_HOWTO + " Use a **GPU runtime** (T4)."),
         code(cross_setup()),
         md(CROSS_ENV),
         code(CROSS_ENV_CODE),
@@ -835,6 +855,15 @@ for inverse, mode in CONTEXTS:
 cross('status')
 if ERRORS:
     raise RuntimeError(f'units failed in {{sorted(ERRORS)}}; completed units are saved. Run all again.')"""),
+        md("""## Optional · Source-only stability analysis (separately authorized; never selects anything)
+
+Training seeds 1-4 for every unit and, for D2 -> D3, the repeated D2 source CV (5 folds x 5 repeats). Leave empty
+unless the author has authorized it in writing."""),
+        code(f"""STABILITY_AUTHORIZED_BY = ''
+if STABILITY_AUTHORIZED_BY:
+    cross(f'authorize --stage stability --by "{{STABILITY_AUTHORIZED_BY}}"')
+    for inverse, mode in CONTEXTS:
+        cross(f'run --stage stability --direction {direction} --inverses {{inverse}} --modes {{mode}}')"""),
     ], gpu=True)
 
 
@@ -846,9 +875,10 @@ def cross_report_notebook() -> dict:
 
 The evaluation reads the target labels for the units of the frozen campaign only, at its commit: participant ROC-AUC
 (DeLong and participant bootstrap CIs), balanced accuracy, sensitivity, specificity (Wilson), F1, MCC, confusion
-matrices, source-only CV, transfer degradation, D3 development / holdout strata, paired exploratory comparisons
-(Holm), the age-only baseline and the age analyses. Tables and figures are diagnostics from saved outputs.
-""" + HOWTO + " A CPU runtime is enough."),
+matrices, source-only CV, transfer degradation, D3 development / holdout strata (the 13 holdout participants were
+inspected in earlier work: they are NOT an untouched holdout), paired exploratory comparisons (Holm), the age-only
+baseline and the age analyses. Tables and figures are diagnostics from saved outputs.
+""" + CROSS_HOWTO + " A CPU runtime is enough."),
         code(cross_setup()),
         md(CROSS_ENV),
         code(CROSS_ENV_CODE),

@@ -238,17 +238,19 @@ def run_unit(processed, u: dict, c: dict, frozen: dict, d3: GraphStore, d2: Grap
 
 
 # ------------------------------------------------------------------------------------------------ source-only CV
-def d2_source_cv(processed, u: dict, c: dict, frozen: dict, d2: GraphStore, force: bool = False) -> dict:
-    """Participant-stratified K-fold CV inside D2 (source of D2 -> D3), ``source_cv.D2`` repeats; one checkpoint per
-    fold; returns the metrics (also saved as ``source_cv/metrics.json``)."""
+def d2_source_cv(processed, u: dict, c: dict, frozen: dict, d2: GraphStore, force: bool = False,
+                 cv: dict | None = None, subdir: str = "source_cv") -> dict:
+    """Participant-stratified K-fold CV inside D2 (source of D2 -> D3): primary ``source_cv.D2`` (5 folds x 1
+    repeat), or the stability analysis (``stability.d2_source_cv``, saved in ``source_cv_stability``); one checkpoint
+    per fold; returns the metrics (also saved as ``<subdir>/metrics.json``)."""
     from ..evaluation.metrics import aggregate_subjects, auc_delong, binary_metrics
     from ..evaluation.splits import assert_disjoint, stratified_subject_folds, subject_table
     from ..experiments.config import apply_hparams
 
-    sc = c["source_cv"]["D2"]
+    sc = cv or c["source_cv"]["D2"]
     v0 = next(x for x in plan.variants(c, ("gnn", "reference"))[u["exp"]] if x["variant"] == u["variant"])
     v = with_store_context(plan.contextualize(v0, u["inverse"], u["mode"], c), d2)
-    out = unit_dir(processed, {**u, "direction": "D2_to_D3"}, c) / "source_cv"
+    out = unit_dir(processed, {**u, "direction": "D2_to_D3"}, c) / subdir
     base = {"kind": "cross_source_cv", "campaign_hash": frozen["campaign_hash"], "training_config_hash":
             training_hash(v), "context": v["context"], "graph_run_id": graph_run_id(d2), "cv": sc,
             "code": code_identity("cross_experiment")}
@@ -309,10 +311,11 @@ def release_source_cv(processed, u: dict, c: dict, d3: GraphStore) -> dict:
     if not (d / "final.done.json").exists() or not (d / "_identity.json").exists():
         return rec
     ident = json.loads((d / "_identity.json").read_text())["identity"]
-    if ident.get("training_config_hash") != training_hash(v):
-        return {**rec, "status": "mismatch: training configuration"}
-    if ident.get("graph_run_id") != graph_run_id(d3):
-        return {**rec, "status": "mismatch: D3 store"}
+    want = {"training_config_hash": training_hash(v), "graph_run_id": graph_run_id(d3), "setting": "xu_dev_cv",
+            "experiment": v["experiment"], "variant": v["variant"], "context": v["context"]}
+    for k, val in want.items():                               # decision D9: the exact identities must match
+        if ident.get(k) != val:
+            return {**rec, "status": f"mismatch: {k}"}
     m = json.loads((d / "metrics.json").read_text())
     return {**rec, "status": "available", "git_commit": (ident.get("code") or {}).get("git_commit"),
             "auc": m["participant"]["roc_auc"], "balanced_accuracy": m["participant"]["balanced_accuracy"],
@@ -328,6 +331,8 @@ def run(processed, c: dict, stage: str = "primary", experiments=None, variants=N
     frozen = plan.require_frozen(processed, c)
     if not synthetic:
         namespace.require_authorized(processed, "train")
+        if stage == "stability":
+            namespace.require_authorized(processed, c["stability"]["authorization"])
     us = [u for u in plan.units(c, stage, experiments, variants)
           if (not directions or u["direction"] in directions) and (not inverses or u["inverse"] in inverses)
           and (not modes or u["mode"] in modes)]
@@ -347,6 +352,9 @@ def run(processed, c: dict, stage: str = "primary", experiments=None, variants=N
                 state = run_unit(processed, u, c, frozen, d3, d2, cache, force)
                 if u["direction"] == "D2_to_D3" and stage == "primary":
                     d2_source_cv(processed, u, c, frozen, d2, force)
+                elif u["direction"] == "D2_to_D3" and u["seed"] == c["stability"]["seeds"][0]:
+                    d2_source_cv(processed, u, c, frozen, d2, force, c["stability"]["d2_source_cv"],
+                                 "source_cv_stability")
             except Exception as exc:                          # recorded; the next unit continues
                 state = f"failed: {type(exc).__name__}: {exc}"[:500]
             rows.append({**{k: u[k] for k in ("direction", "inverse", "mode", "experiment", "variant", "seed")},

@@ -14,11 +14,16 @@ results and the D3 stores.
 
 ## 1. `00_CrossDataset_Audit_and_Build.ipynb` (CPU)
 
+**Authorized now (2026-10-26): Part A only.** Leave `AUTHORIZED_BY = ''` and `FREEZE_CAMPAIGN = False`; the notebook
+then stops after Part A. Send the printed audit tables (mapping audit, EDF headers and annotations, D3 store table,
+decision audit, demographics / overlap, filter response, D2 inspection, D3 line noise).
+
 | Part | What runs | Needs |
 |---|---|---|
 | Setup, environment | own pin; the Exp 7 numerical environment restored if needed | nothing |
 | A1 `audit` | mapping table, layout hash, geometry (D3 `.set` positions vs `.loc`), D2 EDF technical headers, D3 stores verified (read only), inherited decisions | nothing (reads only) |
-| A2 `inspect-d2` | per D2 recording: duration, selection, candidate windows (no source model, no graph) | nothing |
+| A1 (cont.) | demographics by diagnosis and the age-overlap feasibility (descriptive), the verified D2 filter response, the EDF annotation texts (recording condition, D6) | nothing |
+| A2 `inspect-d2`, `inspect-d3-line` | per D2 recording: duration, selection, candidate and accepted windows, amplitude, line noise and what a 50 Hz notch would change (LCMV covariance input, window acceptance); the same line-noise audit of D3 (no source model, no graph, labels removed) | nothing |
 | B `build-d2`, `validate-d2`, `compat` | the D2 stores (smoke `--limit 2` first, then LCMV and wMNE, modes B and A), validation, compatibility report, shift diagnostics, D2 QC on the label-masked store, harmonization manifest | `AUTHORIZED_BY = '<name>'` after your written authorization |
 | C `freeze` | the frozen campaign (before any training) | `FREEZE_CAMPAIGN = True` |
 
@@ -33,7 +38,9 @@ Disconnected? Open again, *Run all*: completed units are skipped. No metric is s
 
 ## 3. `02_CrossDataset_D2_to_D3.ipynb` (GPU, T4)
 
-Same, D2 -> D3, plus the source-only D2 cross-validation (5 x 5 folds) of every unit.
+Same, D2 -> D3, plus the source-only D2 cross-validation (5 folds x 1 repeat, the primary D3 protocol) of every
+unit. The optional last cell of notebooks 01 / 02 runs the stability analysis (seeds 1-4, D2 CV 5 x 5) only with a
+separate `STABILITY_AUTHORIZED_BY`.
 
 ## 4. `03_CrossDataset_Comparison_Report.ipynb` (CPU)
 
@@ -45,6 +52,7 @@ figures, README with the disclosures, under `CROSS_D3_D2_19CH_v1/reports/primary
 ```
 python scripts/cross_dataset.py audit
 python scripts/cross_dataset.py inspect-d2
+python scripts/cross_dataset.py inspect-d3-line
 python scripts/cross_dataset.py authorize --stage build_d2 --by "<name>"
 python scripts/cross_dataset.py build-d2 --inverse lcmv --limit 2 && python scripts/cross_dataset.py validate-d2 --inverse lcmv --limit 2
 python scripts/cross_dataset.py build-d2 --inverse lcmv && python scripts/cross_dataset.py validate-d2 --inverse lcmv
@@ -64,6 +72,7 @@ python scripts/cross_dataset.py smoke --quick                           # synthe
 CROSS_D3_D2_19CH_v1/
   CODE_COMMIT.txt  authorizations.json
   audit/        channel_mapping_audit.csv  d2_edf_headers.csv  reference_geometry.json  audit.json  d2_inspection.csv
+                demographics.csv  age_overlap_feasibility.csv  d2_filter_response.json  d3_line_noise.csv
                 <inverse>_mode_<m>/compatibility_report.csv  shift_diagnostics.csv  harmonization_manifest.json
                 <inverse>_mode_<m>/d2_qc_blind/
   stores/       graphsXD2L_v1_<hash>/  graphsXD2L10_v1_<hash>/  graphsXD2W_v1_<hash>/  graphsXD2W10_v1_<hash>/  cache/

@@ -1,9 +1,11 @@
 # Cross-dataset generalization D3 <-> D2 on a matched 19-electrode representation: experimental design
 
-Version 1.0 (2026-10-26), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entry 61. **Status: designed and
-synthetically validated; no real-data graph has been built and no real-data model trained.** The stages that touch
-real data (the D2 stores, the training) need the author's recorded authorization (section 10). No result exists yet,
-and nothing in this document reports or anticipates one.
+Version 1.1 (2026-10-26), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-62. **Status: designed,
+synthetically validated, author decisions D1-D10 recorded (section 12); only the audit-only Part A of notebook 00 is
+authorized. No real-data graph has been built, the campaign is not frozen, no model has been trained and no target
+label has been evaluated.** The stages that touch real data beyond the audit (the D2 stores, the training, the
+stability analysis) need the author's recorded authorization (section 10). No result exists yet, and nothing in this
+document reports or anticipates one.
 
 Code: `src/adgraph/crossdataset/` (`channels`, `d2store`, `namespace`, `compat`, `plan`, `transfer`, `evaluate`,
 `report`, `synthetic`), `scripts/cross_dataset.py`. Configs: `configs/cross_dataset/` (`channel_map_19.yaml`,
@@ -17,7 +19,8 @@ another dataset **without any target-domain training** (zero-shot)?
 
 * **Direction A, D3 -> D2:** train on D3 only (the 52 frozen development participants), test on all 23 D2 participants.
 * **Direction B, D2 -> D3:** train on D2 only (all 23), test on all 65 D3 participants, reported for all 65 and
-  separately for the 52 development and the 13 holdout participants.
+  separately for the 52 development and the 13 holdout participants (the 13 were inspected in earlier work:
+  not an untouched holdout).
 
 Nothing is fitted on the target: no model parameter, scaler, graph-construction parameter, class weight, threshold,
 calibration, hyperparameter, preprocessing setting or model choice. Target labels are read only by the evaluation,
@@ -93,13 +96,17 @@ D2 has no digitized positions; neither has D3 (template lookup). The D2 geometry
 verified against the `.loc` layout (3.2.4). Hence one forward model (fsaverage ico-5, BEM, mindist 5 mm) and the
 identical wMNE operator for both datasets; LCMV uses the same forward with each participant's own covariance. No
 coordinate is substituted silently: the substitution of a template is the documented harmonization step, and the
-`.loc` agreement is a hard gate.
+`.loc` agreement is a hard gate. **Identical template coordinates do not establish identical physical electrode
+placement** (decision D1): neither dataset has digitized positions, caps and heads differ, and the shared geometry
+only removes a modelling difference (two forward models), not the real placement error, which remains part of the
+source-localization uncertainty of both datasets.
 
 ### 3.4 Order of operations
 
 EDF header -> select 19 channels by number -> crop -> band-pass -> crop -> per-segment resampling -> **common average
 of the same 19 electrodes** -> rejection -> source reconstruction. The original 30 / 32 D2 channels never enter the
-reference or the inverse.
+reference or the inverse. Tested: a 5 mV signal on all 13 unselected EDF channels leaves the loaded data, the common
+average (over 19 channels) and the segments bit-identical (`tests/test_cross_channels.py`).
 
 ## 4. Matched signal processing
 
@@ -192,11 +199,14 @@ the source training participants only.
   built; tensor shapes, feature names, band and ROI order and adjacency kind are checked equal; the fitted model scores
   every target window; one mean P(AD) per participant (SVM: mean margin) is saved without labels.
 * **Threshold.** 0.5 (SVM margin 0); never tuned.
-* **Source-only estimates.** D2 -> D3: participant-stratified 5-fold CV of D2, 5 repeats (decision D7). D3 -> D2: the
-  completed release / A2 development CV of the same variant, used only if its training-config hash and D3 store
-  graph_run_id equal this campaign's (else reported as missing; optional recomputation is not part of the primary
-  plan).
-* **Seeds.** Primary: seed 0. A separately authorized stability stage adds seeds 1-4 (target AUC spread per variant).
+* **Source-only estimates.** D2 -> D3: participant-stratified 5-fold CV of D2, **one repeat**, the primary D3
+  protocol (decision D7). D3 -> D2: the completed release / A2 development CV of the same variant, used only if its
+  training-config hash, D3 store graph_run_id, setting, experiment, variant and run context all equal this campaign's
+  (decision D9; else reported as missing or mismatched; optional recomputation is not part of the primary plan).
+* **Seeds.** Primary: seed 0. The separately authorized **stability analysis** (decisions D7, D10;
+  `campaign.yaml: stability`, authorization `stability`) adds training seeds 1-4 and the repeated D2 source CV
+  (5 folds x 5 repeats, `source_cv_stability/`); it never selects anything and is reported apart from the primary
+  analysis.
 * **Freeze.** Before any training, `plan/frozen.json` records the campaign (hash), all units, the store graph_run_ids,
   the code commit and the decision audit (recorded atlas lobes12 and graph dense; A2 record; no target evaluation
   yet). Training and evaluation refuse to run without it, with another campaign or at another commit.
@@ -210,7 +220,8 @@ Per direction (never pooled), per inverse and window mode (never pooled), per un
   sensitivity (AD), specificity (HC) with Wilson and bootstrap CIs; F1, MCC, confusion matrix; n AD / n HC;
 * source-only CV AUC and balanced accuracy; transfer degradation (target - source) with a CI from independent
   participant bootstraps of both;
-* D2 -> D3 strata: all 65 (primary), 52 development, 13 holdout (descriptive);
+* D2 -> D3 strata: all 65 (primary), 52 development, 13 holdout (descriptive; inspected in earlier work, so not an
+  untouched holdout);
 * paired comparisons only on identical target participants: each GNN variant vs the reference baseline (Exp 1 LR on
   source PSD, same direction / inverse / mode), paired DeLong, Holm within each direction x inverse x mode family;
   labelled exploratory; small ranking differences are not interpreted (D2 has 23 participants);
@@ -260,7 +271,8 @@ Windows are never treated as independent observations.
 * **Table 1 (main, one per direction):** rows = experiment / variant (grouped: reference, GNN, exploratory GNN),
   columns per inverse x mode: source-only CV AUC; target AUC [95 % DeLong CI]; balanced accuracy [bootstrap CI];
   sensitivity / specificity [Wilson]; F1; MCC; degradation in AUC [CI]. n AD / n HC in the header.
-* **Table 2:** D2 -> D3 by D3 partition (development 52, holdout 13; holdout descriptive).
+* **Table 2:** D2 -> D3 by D3 partition (development 52, holdout 13; holdout descriptive and
+  previously inspected).
 * **Table 3:** paired comparisons vs the reference baseline (difference, SE, p, Holm p; exploratory).
 * **Table 4:** demographics; age-only baseline (transfer and within-source); age-overlap subset; score-age
   associations; score-adds-to-age tests.
@@ -272,24 +284,90 @@ Windows are never treated as independent observations.
   diagnostics (label-blind distributions). Rules: participants, not windows; PLV and |ciPLV| separate; no significance
   marks except from the saved, corrected comparison table; synthetic outputs watermarked; never overwritten.
 
-## 12. Decisions that need the author (with the recommendation implemented as default)
+## 12. Recorded decisions (author, 2026-10-26)
 
-| # | Decision | Implemented default (recommendation) |
+| # | Decision | Recorded |
 |---|---|---|
-| D1 | Use the D3 geometry for D2 (one forward model) | yes, gated by the `.loc` agreement (section 3.3) |
-| D2 | ASR / ICA on D2 | no (section 4.3); optional pre-specified ICA arm on both datasets later |
-| D3 | 50 Hz notch | none in either dataset; measured and reported |
-| D4 | D2 band-pass order / phase | Butterworth order 4, zero phase |
-| D5 | D2 edge crops | 10 s before, 5 s after the band-pass |
-| D6 | D2 recording condition (eyes closed?) | must be confirmed; recorded in the report |
-| D7 | D2 source-only CV repeats | 5 x 5 folds (the dominant compute cost; 1 repeat is the minimum) |
-| D8 | Include the D3 holdout in the D2 -> D3 target | yes, as a separately reported, descriptive stratum (no D3 data is fitted or selected) |
-| D9 | D3 -> D2 source-only estimate | the matching release / A2 development CV (no recomputation) |
-| D10 | Stability seeds 1-4 | separate stage, separate authorization |
+| D1 | D3 template geometry for D2 | approved, provided the `.loc` mapping and the real EDF headers pass every check; identical template coordinates do not establish identical physical placement (3.3) |
+| D2 | ASR / ICA on D2 | not in the primary analysis; the preprocessing mismatch with D3 is a stated limitation (4.3) |
+| D3 | 50 Hz notch | none initially; line-noise contamination and what a notch would change in the LCMV covariance input, the window rejection and the features are measured in Part A (12.2); filtering is never changed after any target classification result |
+| D4 | D2 band-pass | provisionally approved as a harmonization choice, not a reproduction of the provider's filter (order and phase undocumented); response verified (12.1) |
+| D5 | D2 edge crops | provisionally approved (10 s before, 5 s after the band-pass), subject to the real-data inspection |
+| D6 | D2 recording condition | **unknown** (12.3); stated in the campaign with its implication, checked at the freeze |
+| D7 | D2 source-only CV | 5 participant-stratified folds x 1 repeat (primary); 5 repeats only in the stability analysis |
+| D8 | D2 -> D3 target | all 65 D3 participants, with the 52 development and the 13 holdout participants reported separately; the 13 were inspected in earlier work and are **not an untouched holdout** |
+| D9 | D3 source-only estimate | reuse of a completed release / A2 development-CV result only with exactly matching store and training identities |
+| D10 | Seeds 1-4 | deferred to the separately authorized stability analysis |
+
+### 12.1 D2 filter response (verified; `audit/d2_filter_response.json`, tested)
+
+Zero-phase 4th-order Butterworth 0.5-45 Hz at 1024 Hz (squared magnitude): -48.8 dB at 0.25 Hz, -6.02 dB at 0.5 Hz,
+-0.03 dB at 1 Hz, 0.00 dB from 2 to 13 Hz, -0.01 dB at 20 Hz, -0.06 dB at 25 Hz, -0.29 dB at 30 Hz, -2.78 dB at 40 Hz,
+-6.02 dB at 45 Hz, -10.6 dB at 50 Hz, -21.4 dB at 60 Hz; impulse response below 1e-4 of its peak beyond 3.73 s (the
+5 s post-filter crop covers it). Consequence: the upper gamma band (40-45 Hz) and the lowest delta frequencies are
+attenuated in D2; the provider's D3 filter has the same pass band and family but an undocumented order and phase, so
+the gamma and low-delta attenuation of the two datasets can differ (an *approximate* property in the compatibility
+report).
+
+### 12.2 Line noise (decision D3; measured in Part A, never applied)
+
+`inspect-d2` and `inspect-d3-line` report per recording, on the analysed 250 Hz average-referenced data: the 49-51 Hz
+power relative to 35-45 Hz, the fraction of variance at 47-53 Hz, and what a 50 Hz notch WOULD change: the relative
+change of the broadband covariance (the LCMV input) and the fraction of candidate windows whose acceptance flips. The
+store features exclude 50 Hz by construction (Welch band powers to 45 Hz; band filters ending at 45 Hz with 1 Hz
+transitions); line noise can reach them only through the LCMV weights and the rejection. A notch, if the author decides
+one from these label-blind numbers, is applied to both datasets before any graph is built.
+
+### 12.3 Recording condition (decision D6)
+
+D3: eyes closed (provider README). D2: **unknown**. Searched (2026-10-26): the repository documentation, the AD-LEB
+folder on Drive (no protocol or README for the 2019 data), the 2019 participant sheet (columns: ID, age, gender, group,
+ACE-R and subscores, MMSE, data quality, comments; no condition field). Remaining evidence: the EDF annotation texts,
+listed by the Part A audit (`audit/d2_edf_headers.csv`, `audit.json: d2_edf_annotations`), and the data owner. If D2
+was recorded eyes open or mixed, posterior alpha and the theta / alpha balance differ from eyes-closed D3 for reasons
+unrelated to diagnosis; a transfer loss or gain may then reflect the condition. Until established, every cross-dataset
+result carries this limitation and the condition is reported as unknown.
+
+### 12.4 Age, sex and data-quality confounding in D2 (from the participant sheet; aggregates only)
+
+| D2 | n | Age mean (range) | Female / male |
+|---|---|---|---|
+| AD | 10 | 80.3 (66-92) | 7 / 3 |
+| HC | 13 | 61.9 (55-71) | 4 / 9 |
+
+The pre-specified age-overlap interval is [66, 71] years and holds 1 AD and 4 HC participants: the age-overlap AUC is
+**not estimable** (at least 3 per class required) and will be reported as such. The analyses that remain informative
+are the age-only baseline (transfer and within-source), the within-diagnosis score-age association and the test of
+whether a model's score adds to age (section 9). In addition, the sheet's quality comments (bad channels, movement)
+concern 7 of 10 AD and 3 of 13 HC recordings: recording quality is also associated with diagnosis in D2, so
+artifact-related signal differences are a second non-disease route to separation. D3's groups have similar ages
+(66.4 and 67.9 years). These are descriptive facts about the cohorts; no EEG quantity was combined with a label to
+obtain them.
+
+### 12.5 Prior exposure of D2 and the origin of the D2 preprocessing (item 6)
+
+D2 was analysed within-dataset in earlier work (legacy pipeline: 30 channels, 0.1-45 Hz FIR, interpolation, wMNE,
+68 ROIs, 20 s windows; graph runs and experiments under `processed/graphs_v*` and `processed/experiments/`). Every D2
+choice of this experiment comes from elsewhere: the 19 electrodes from the D3 montage; the 0.5-45 Hz Butterworth band
+from the D3 provider's documentation; the 10 s pre-filter crop from the pre-specified, label-blind boundary audit and
+rule (entries 40-41: "No decision may use classification performance"); the 5 s post-filter crop from the filter's
+impulse response; everything else from the D3 store configuration. No D2 classification outcome informed any of them,
+and the legacy choices that were tuned on D1 / D2 data (interpolation, the 0.1 Hz high-pass, 20 s windows) are not
+used.
+
+### 12.6 Part A (audit only; authorized 2026-10-26)
+
+Verified from this session through the Drive connector (read only): the layout file on Drive has SHA-256
+`da108d02...bd4` (the pinned hash); the RestingState folder holds exactly 23 EDFs (20.5-37.2 MB, about 312-568 s at
+32 channels x 1024 Hz if the files are plain EDF); the participant sheet has 23 rows (10 AD, 13 HC). The EDF headers,
+the D3 geometry, the D3 store verification, the recording-level inspection and the line-noise audit run in Colab
+(notebook 00 Part A); the build, the freeze, the training and any target evaluation stay blocked.
 
 ## 13. Compute (relative estimate; no timing has been measured on real data)
 
 Primary units: 432 transfer units (2 directions x 2 modes x (48 GNN + 4 Exp 1 variants) x 2 inverses + 4 Exp 0
 variants x 2 modes x 2 directions) + 25 D2 CV folds for each D2 -> D3 unit. Relative to one release development-CV
 fold of the same variant (about 41 D3 training participants): a D3 -> D2 fit about 1.25 folds, a D2 -> D3 fit about
-0.5, a D2 CV fold about 0.4; mode A units are a small fraction of mode B. The D2 CV (decision D7) dominates.
+0.5, a D2 CV fold about 0.4; mode A units are a small fraction of mode B. With one D2 CV repeat (decision D7) the
+D2 CV costs about 5 x 0.4 = 2 fold-equivalents per D2 -> D3 unit; the stability analysis multiplies the transfer
+units by 5 (seeds 0-4) and the D2 CV by 5.

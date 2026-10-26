@@ -36,7 +36,21 @@ def load_campaign(path: str | Path | None = None) -> dict:
         raise ValueError(f"directions must be {DIRECTIONS}")
     if "exp8" in c["experiments"]["gnn"] + c["experiments"]["reference"]:
         raise ValueError("the original exp8 is undefined on lobes12; the campaign uses amendment A2's exp8a")
+    if set(c["training"]["seeds"]) & set(c["stability"]["seeds"]):
+        raise ValueError("stability seeds must differ from the primary seed")
     return c
+
+
+def recording_condition_check(c: dict) -> dict:
+    """Decision D6: the recording condition of each dataset is stated (``unknown`` is allowed, never invented), and an
+    unknown condition carries its stated implication for external validity."""
+    rc = c.get("recording_condition") or {}
+    ok = all(str(rc.get(d, "")).strip() for d in ("D3", "D2"))
+    unknown = [d for d in ("D3", "D2") if str(rc.get(d, "")).strip().lower().startswith("unknown")]
+    if unknown and not str(rc.get("implication", "")).strip():
+        ok = False
+    return {"passed": ok, "unknown": unknown, "D3": rc.get("D3"), "D2": rc.get("D2"),
+            "implication": rc.get("implication")}
 
 
 def campaign_hash(c: dict) -> str:
@@ -79,7 +93,9 @@ def contextualize(v: dict, inverse: str, mode: str, c: dict) -> dict:
 def units(c: dict, stage: str = "primary", experiments: list[str] | None = None,
           variant_filter: list[str] | None = None) -> list[dict]:
     """Every unit of a stage (``primary``: the protocol seed; ``stability``: the additional seeds)."""
-    seeds = c["training"]["seeds"] if stage == "primary" else c["training"]["stability_seeds"]
+    if stage not in ("primary", "stability"):
+        raise ValueError(f"unknown stage {stage!r}")
+    seeds = c["training"]["seeds"] if stage == "primary" else c["stability"]["seeds"]
     out = []
     for exp, vs in variants(c).items():
         if experiments and exp not in experiments:
@@ -105,8 +121,8 @@ def unit_key(u: dict) -> tuple:
 
 # ------------------------------------------------------------------------------------------------ decision audit
 DISCLOSURES = [
-    "The D3 holdout (13 participants) was inspected in earlier work; it is never used to fit or select anything here "
-    "and is reported separately as a descriptive stratum of the D2 -> D3 target set.",
+    "The D3 holdout (13 participants) was inspected in earlier work, so it is NOT an untouched holdout; it is never "
+    "used to fit or select anything here and is reported separately as a descriptive stratum of the D2 -> D3 target.",
     "D2 was analysed within-dataset in earlier work (legacy D1 / D2 pipeline: 30 channels, wMNE, 68 ROIs, 20 s "
     "windows). The model families were designed with knowledge of those and of earlier D3 results; no configuration "
     "of this campaign is chosen on D2, and the cross-dataset transfer itself has never been run before this freeze.",
@@ -116,6 +132,13 @@ DISCLOSURES = [
     "exploratory model-family comparisons.",
     "All variants of every listed experiment are evaluated and reported; no winning architecture, variant, inverse, "
     "window mode or preprocessing is selected with target-domain results.",
+    "The D2 preprocessing (19 electrodes, 0.5-45 Hz band-pass, edge crops) was fixed from the D3 montage, the D3 "
+    "provider's documented filter, the pre-specified label-blind edge rule (entries 40-41) and the filter's impulse "
+    "response; no D2 classification result informed it.",
+    "Identical template electrode coordinates do not establish identical physical electrode placement: neither dataset "
+    "has digitized positions, and the D2 cap may sit differently on each head.",
+    "The D2 recording condition (eyes closed / open) is unknown unless stated otherwise in the frozen campaign; D3 is "
+    "eyes closed.",
 ]
 
 
@@ -141,6 +164,10 @@ def decision_audit(processed, c: dict) -> dict:
     tgt = namespace.root(processed) / "evaluation"
     check("no target evaluation exists in this namespace before the freeze",
           not any(tgt.glob("**/*.json")) if tgt.exists() else True, str(tgt))
+    rc = recording_condition_check(c)
+    check("recording condition of both datasets stated (unknown allowed, with its implication)", rc["passed"],
+          {k: rc[k] for k in ("D3", "D2")})
+    out["recording_condition"] = rc
     out["atlas_decision"] = {k: (a or {}).get(k) for k in ("atlas", "reason", "decided_at")}
     out["graph_decision"] = {k: (g or {}).get(k) for k in ("selected", "atlas", "reason")}
     out["passed"] = all(x["passed"] for x in out["checks"].values())

@@ -194,3 +194,73 @@ def test_the_mapping_audit(table, loc):
     assert list(df["d3"]) == D3_ORDER and summary["layout"]["verified"]
     assert summary["recordings"] == {"n": 2, "all_19_present_once": True, "identical_picks": True}
     assert summary["geometry"]["max_angle_deg"] < 15
+
+
+
+# ------------------------------------------------------------------------------------------- 4. selection before CAR
+def test_unselected_channels_never_reach_the_reference_or_the_source_model(tmp_path, table):
+    """A huge signal on the 13 unselected channels changes nothing: selection happens on the EDF header, before the
+    band-pass, the common average (over the 19 channels only) and the inverse."""
+    import edfio
+
+    from adgraph.crossdataset import d2store
+    from adgraph.sourcegraphs import recording
+
+    rng = np.random.default_rng(3)
+    sf, n = 1024, 1024 * 60
+    base = rng.standard_normal((32, n)) * 10.0 + rng.standard_normal(n) * 5.0
+    loud = base.copy()
+    mapped = {r["edf_index"] - 1 for r in table["channels"]}
+    for k in set(range(32)) - mapped:
+        loud[k] = rng.standard_normal(n) * 5000.0                             # 5 mV on Fpz, FC*, M1/M2, CP*, POz, Oz
+    for name, data in (("a.edf", base), ("b.edf", loud)):
+        edfio.Edf([edfio.EdfSignal(x, sampling_frequency=sf, label=f"Misc ExG{k + 1}", physical_dimension="uV",
+                                   physical_range=(-30000, 30000)) for k, x in enumerate(data)]).write(tmp_path / name)
+    cfg = d2store.resolve("lcmv", table)
+    g = channels.template_geometry(table)
+    ra, _ = d2store.load_d2(tmp_path / "a.edf", "D2", cfg, table, g)
+    rb, _ = d2store.load_d2(tmp_path / "b.edf", "D2", cfg, table, g)
+    assert np.allclose(ra.get_data(), rb.get_data(), atol=1e-12)
+    segs, _ = recording.segments(rb, cfg)
+    assert segs[0].data.shape[0] == 19 and np.allclose(segs[0].data.mean(axis=0), 0, atol=1e-12)   # CAR of 19
+    sa, _ = recording.segments(ra, cfg)
+    assert np.allclose(sa[0].data, segs[0].data, atol=1e-12)
+
+
+# ------------------------------------------------------------------------------------------- D3 / D4: signal audits
+def test_the_d2_filter_response_is_verified(table):
+    from adgraph.crossdataset import d2store, signal_audit
+
+    fr = signal_audit.filter_response(d2store.resolve("lcmv", table))
+    m = fr["magnitude_db"]
+    assert abs(m[0.5] + 6.02) < 0.05 and abs(m[45.0] + 6.02) < 0.05           # zero phase: -6 dB at both edges
+    assert all(abs(m[f]) < 0.1 for f in (2.0, 4.0, 8.0, 10.0, 13.0, 20.0))    # flat inside delta-beta
+    assert m[50.0] < -10 and m[0.25] < -40 and fr["settle_covers_impulse"]
+
+
+def test_line_noise_and_notch_sensitivity_are_measured_not_applied():
+    from adgraph.crossdataset import signal_audit
+
+    rng = np.random.default_rng(0)
+    sf, t = 250.0, np.arange(250 * 60) / 250.0
+    clean = rng.standard_normal((19, t.size)) * 1e-5
+    noisy = clean + 2e-5 * np.sin(2 * np.pi * 50 * t)
+    a, b = signal_audit.line_noise(clean, sf), signal_audit.line_noise(noisy, sf)
+    assert b["line_ratio_db"] > a["line_ratio_db"] + 10 and b["line_variance_fraction"] > a["line_variance_fraction"]
+    assert np.abs(signal_audit.notch(noisy, sf) - noisy).max() > 0                # computed on a copy only
+
+
+def test_the_header_audit_lists_annotation_texts(tmp_path):
+    import edfio
+    import pandas as pd
+
+    from adgraph.crossdataset import d2store
+
+    p = tmp_path / "2_842019_1.edf"
+    edf = edfio.Edf([edfio.EdfSignal(np.zeros(1024 * 10), sampling_frequency=1024, label=n, physical_dimension="uV",
+                                     physical_range=(-100, 100)) for n in D2_NAMES])
+    edf.set_annotations([edfio.EdfAnnotation(1.0, None, "Eyes closed"), edfio.EdfAnnotation(5.0, None, "EO")])
+    edf.write(p)
+    h = d2store.header_audit(pd.DataFrame({"key": ["D2-2"], "path": [str(p)]}))
+    assert h["annotations"].iloc[0] == "EO|Eyes closed" and h["n_signals"].iloc[0] == 32
+    assert "patient" not in " ".join(h.columns)

@@ -3603,6 +3603,36 @@ prediction; participant isolation and the unchanged 52 / 13 split; aggregation; 
 authorization, freeze and commit; no writes outside the namespace; participant-level uncertainty; synthetic end-to-end
 in both directions).
 
+## 62. Cross-dataset D3 <-> D2: the author's decisions D1-D10 and the audit-only stage (2026-10-26)
+
+**Decisions (author, 2026-10-26; docs/cross_dataset/design.md section 12).** D1 shared D3 template geometry for D2,
+conditional on the `.loc` and real EDF-header checks, with the explicit caveat that identical template coordinates do
+not establish identical physical placement; D2 no ASR / ICA (stated limitation); D3 no notch initially, line noise and
+its effect on the LCMV covariance input, the rejection and the features measured before any classification; D4 the
+zero-phase 4th-order Butterworth 0.5-45 Hz as a harmonization choice (response verified: -6.02 dB at both edges,
+-2.8 dB at 40 Hz, impulse 3.73 s); D5 the 10 s / 5 s crops provisionally; D6 D2 recording condition unknown (not in the
+repository, the AD-LEB folder or the participant sheet; EDF annotations listed by the audit), stated with its
+implication and checked at the freeze; D7 primary D2 source CV 5 folds x 1 repeat, 5 repeats only in the separately
+authorized stability analysis; D8 all 65 D3 participants as the D2 -> D3 target, the 13 previously inspected holdout
+participants reported separately and not called untouched; D9 release / A2 development CV reused only with exactly
+matching store, training, setting, variant and context identities; D10 seeds 1-4 in the stability analysis.
+
+**Implementation.** `campaign.yaml` (D2 CV 1 repeat; `stability` section; `recording_condition`); stage
+`stability` with its own authorization; `plan.recording_condition_check` in the decision audit; stricter
+`transfer.release_source_cv`; `crossdataset.signal_audit` (filter response, line noise, notch sensitivity, never
+applied); `inspect-d2` with line noise, accepted windows and the min-windows flag, `inspect-d3-line`; the audit writes
+demographics by diagnosis, the age-overlap feasibility, the filter response and the EDF annotation texts; the cross
+notebooks state that they write only to `CROSS_D3_D2_19CH_v1/` (the shared how-to text had said `FINAL_v1/`).
+
+**Audit findings available without Colab (Drive connector, read only).** Layout file hash equals the pinned one; 23
+resting-state EDFs (20.5-37.2 MB); D2 AD 80.3 y (66-92), HC 61.9 y (55-71); the age-overlap interval [66, 71] holds
+1 AD and 4 HC participants, so the age-overlap AUC is not estimable; quality notes concern 7 / 10 AD and 3 / 13 HC
+recordings. Prior exposure of D2 and the origin of every D2 preprocessing choice: design 12.5.
+
+**Tests.** Selection before the common average (unselected channels cannot change any output), the filter response,
+the line-noise audit, the EDF annotation listing, decisions D6 / D7 / D10 in the campaign, the stability
+authorization, D9 identity matching, source-only node-feature normalization, notebook text and Part A steps.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

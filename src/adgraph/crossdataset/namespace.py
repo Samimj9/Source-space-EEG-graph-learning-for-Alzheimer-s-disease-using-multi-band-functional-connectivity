@@ -24,6 +24,7 @@ ROOT = "CROSS_D3_D2_19CH_v1"
 STAGES = {
     "build_d2": "construct the full matched-channel D2 stores from the original recordings",
     "train": "real-data cross-dataset training and label-blind target prediction",
+    "stability": "the source-only stability analysis (training seeds 1-4, repeated D2 source CV)",
 }
 
 

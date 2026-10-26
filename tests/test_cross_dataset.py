@@ -29,7 +29,7 @@ def _snapshot(dirs):
     return out
 
 
-def _quick(c, repeats=2, n_boot=200):
+def _quick(c, repeats=1, n_boot=200):
     return {**c, "source_cv": {**c["source_cv"], "D2": {**c["source_cv"]["D2"], "repeats": repeats}},
             "evaluation": {**c["evaluation"], "n_bootstrap": n_boot}}
 
@@ -57,7 +57,7 @@ def campaign(tmp_path_factory):
     v = next(x for x in plan.variants(c)["exp1"] if x["variant"] == "logreg__psd")
     run_variant(d3, with_context(v, "lcmv", "B", "lobes12", None), "xu_dev_cv", release.results_dir(tmp))
     protected = _snapshot(namespace.protected(tmp))
-    calls = {"fit": [], "predict": []}
+    calls = {"fit": [], "predict": [], "scaler": []}
     with pytest.MonkeyPatch.context() as mp:
         g_init, g_fit, g_pred = trainer.GNNModel.__init__, trainer.GNNModel.fit, trainer.GNNModel.predict_proba
         c_fit, c_pred = classical.ClassicalModel.fit, classical.ClassicalModel.predict_score
@@ -76,6 +76,12 @@ def campaign(tmp_path_factory):
                 calls["predict"].append({"role": view.role, "keys": set(view.meta["key"]), "y": set(view.meta["y"])})
                 return orig(self, view, *a, **k)
             return f
+        s_fit = trainer.NodeFeatureScaler.fit
+
+        def rec_scaler(self, view):
+            calls["scaler"].append({"role": view.role, "keys": set(view.meta["key"]), "y": set(view.meta["y"])})
+            return s_fit(self, view)
+        mp.setattr(trainer.NodeFeatureScaler, "fit", rec_scaler)
         mp.setattr(trainer.GNNModel, "__init__", init)
         mp.setattr(trainer.GNNModel, "fit", rec_fit(g_fit))
         mp.setattr(trainer.GNNModel, "predict_proba", rec_pred(g_pred))
@@ -226,6 +232,9 @@ def test_no_target_fitting_and_blind_prediction(campaign):
     d2_keys, d3_keys = set(d2.windows["key"]), set(d3.windows["key"])
     fits = campaign["calls"]["fit"]
     assert fits and all(f["role"] == "train" for f in fits)
+    scalers = campaign["calls"]["scaler"]                                  # node-feature normalization: source only
+    assert scalers and all(f["role"] == "train" and -1 not in f["y"] and (f["keys"] <= d2_keys or f["keys"] <= d3_keys)
+                           for f in scalers)
     for f in fits:                                                         # a fit sees ONE dataset only
         assert f["keys"] <= d2_keys or f["keys"] <= d3_keys
         assert -1 not in f["y"]
@@ -385,3 +394,43 @@ def test_cross_notebooks_use_their_own_branch_pin_and_gates():
     for nb in nbs[1:3]:
         src = "".join("".join(c["source"]) for c in json.loads(nb.read_text())["cells"])
         assert "AUTHORIZED_BY = ''" in src and "evaluate" not in src        # no target labels before notebook 03
+        assert "STABILITY_AUTHORIZED_BY = ''" in src and "--stage stability" in src
+    for nb in nbs:                                                          # outputs stay in the cross namespace
+        text = "".join("".join(c["source"]) for c in json.loads(nb.read_text())["cells"])
+        assert "Everything is written to `<outputs>/FINAL_v1/`" not in text
+        assert "writes goes to\n`<outputs>/CROSS_D3_D2_19CH_v1/`" in text or "CROSS_D3_D2_19CH_v1/` on Drive" in text
+    part_a = "".join("".join(c["source"]) for c in json.loads(nbs[0].read_text())["cells"])
+    for step in ("cross('audit')", "cross('inspect-d2')", "cross('inspect-d3-line')", "demographics.csv",
+                 "age_overlap_feasibility.csv", "d2_filter_response.json"):
+        assert step in part_a
+
+
+# ------------------------------------------------------------------------------------------- decisions D6, D7, D9, D10
+def test_decisions_d6_d7_d10_in_the_campaign(campaign):
+    c = plan.load_campaign()
+    assert c["source_cv"]["D2"] == {"folds": 5, "repeats": 1, "seed": 0}             # D7: primary = D3 protocol
+    assert c["stability"]["d2_source_cv"]["repeats"] == 5 and c["stability"]["seeds"] == [1, 2, 3, 4]
+    assert c["training"]["seeds"] == [0] and c["stability"]["authorization"] == "stability"
+    assert len(plan.units(c, "stability")) == 4 * len(plan.units(c, "primary"))
+    rc = plan.recording_condition_check(c)                                         # D6: never invented
+    assert rc["passed"] and rc["unknown"] == ["D2"] and "eyes closed" in rc["D3"] and rc["implication"]
+    bad = plan.recording_condition_check({**c, "recording_condition": {"D3": "eyes closed", "D2": "unknown"}})
+    assert not bad["passed"]                                                       # unknown needs its implication
+    tmp = campaign["tmp"]
+    with pytest.raises(namespace.NotAuthorized, match="train"):
+        transfer.run(tmp, campaign["c"], stage="stability", variants=["logreg__psd"])
+    assert namespace.STAGES["stability"]
+
+
+def test_d9_release_cv_is_reused_only_with_identical_identities(campaign, monkeypatch):
+    tmp, c = campaign["tmp"], campaign["c"]
+    d3 = transfer.open_d3(tmp, "lcmv", "B", c)
+    u = next(x for x in plan.units(c) if x["variant"] == "logreg__psd" and x["exp"] == "exp1"
+             and x["direction"] == "D3_to_D2" and x["inverse"] == "lcmv" and x["mode"] == "B")
+    assert transfer.release_source_cv(tmp, u, c, d3)["status"] == "available"
+    monkeypatch.setattr(transfer, "graph_run_id", lambda st: "another-store")
+    assert transfer.release_source_cv(tmp, u, c, d3)["status"] == "mismatch: graph_run_id"
+    monkeypatch.undo()
+    monkeypatch.setattr(transfer, "training_hash", lambda v: "another-training")
+    assert transfer.release_source_cv(tmp, u, c, d3)["status"] == "mismatch: training_config_hash"
+    assert transfer.release_source_cv(tmp, {**u, "mode": "A"}, c, d3)["status"] == "missing"

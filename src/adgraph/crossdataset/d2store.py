@@ -123,7 +123,8 @@ TECHNICAL = ("label", "sampling_frequency", "physical_dimension", "prefiltering"
 
 def header_audit(reg: pd.DataFrame) -> pd.DataFrame:
     """Technical EDF header fields of every recording (header only; no signal, no patient / recording identity
-    fields): channel labels, rates, units, prefiltering, transducer, ranges, duration."""
+    fields): channel labels, rates, units, prefiltering, transducer, ranges, duration, and the distinct annotation
+    texts (evidence on the recording condition, decision D6)."""
     import edfio
 
     rows = []
@@ -131,7 +132,9 @@ def header_audit(reg: pd.DataFrame) -> pd.DataFrame:
         edf = edfio.read_edf(rec.path, lazy_load_data=True)
         sig = edf.signals
         per = {k: sorted({str(getattr(s, k)) for s in sig}) for k in TECHNICAL if k != "label"}
+        ann = sorted({str(a.text).strip() for a in edf.annotations if str(a.text).strip()})
         rows.append({"key": rec.key, "n_signals": len(sig), "raw_names": ",".join(s.label for s in sig),
+                     "annotations": "|".join(ann)[:500],       # event texts only (e.g. eyes open / closed markers)
                      "duration_s": float(edf.duration),
                      "data_record_duration_s": float(edf.data_record_duration),
                      **{k: ";".join(v) for k, v in per.items()}})

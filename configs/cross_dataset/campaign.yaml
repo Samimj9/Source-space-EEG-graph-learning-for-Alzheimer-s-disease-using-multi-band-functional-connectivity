@@ -27,13 +27,26 @@ training:
   protocol: gnn_fixed60_v1     # GNNs exactly 60 epochs, no early stopping, no search (validated per variant)
   classical: participant-level inner CV for C inside the SOURCE training participants only
   seeds: [0]                   # primary: the protocol seed (= the release's xu_holdout fit configuration)
-  stability_seeds: [1, 2, 3, 4]   # secondary stage (separate authorization): seed variability of the target AUC
   threshold: 0.5               # P(AD) >= 0.5 (SVM: decision_function margin >= 0); never tuned
 source_cv:                     # source-only development estimate (never uses the target dataset)
   D3: {from: release, setting: xu_dev_cv}      # the completed release / A2 development-CV results (read only;
                                                # training-config hash and store graph_run_id must match)
-  D2: {folds: 5, repeats: 5, seed: 0}          # participant-stratified 5-fold CV of the 23 D2 participants,
-                                               # 5 repeats (23 participants: one split alone is unstable)
+  D2: {folds: 5, repeats: 1, seed: 0}          # participant-stratified 5-fold CV of the 23 D2 participants, ONE
+                                               # repeat = the primary D3 protocol (decision D7, author 2026-10-26)
+stability:                     # separately authorized source-only stability analysis (decisions D7, D10); its results
+                               # never select anything and are reported apart from the primary analysis
+  authorization: stability
+  seeds: [1, 2, 3, 4]          # additional training seeds of every transfer unit
+  d2_source_cv: {folds: 5, repeats: 5, seed: 0}   # repeated D2 source-only CV (saved as source_cv_stability/)
+recording_condition:           # decision D6 (author 2026-10-26): never invented
+  D3: "eyes closed (provider README of ds004504, 'resting state-closed eyes recordings')"
+  D2: unknown                  # not in the 2019 participant sheet, the AD-LEB folder or the repository documentation;
+                               # the EDF annotations are listed by the audit (audit/d2_edf_headers.csv)
+  implication: >-
+    If D2 was recorded with eyes open, or mixed, the posterior alpha rhythm (and the theta / alpha ratio) differs
+    systematically from eyes-closed D3 for reasons unrelated to diagnosis; a transfer loss, or gain, may then reflect
+    the recording condition. Until the condition is established it is reported as unknown and every cross-dataset
+    result carries this limitation.
 evaluation:
   unit: participant            # mean window P(AD) per participant
   n_bootstrap: 2000            # participant-level percentile bootstrap (stratified by diagnosis)

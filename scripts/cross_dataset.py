@@ -3,6 +3,8 @@
     python scripts/cross_dataset.py audit                       # mapping, layout, geometry, EDF headers, D3 stores,
                                                                 # inherited decisions (reads only; no graph is built)
     python scripts/cross_dataset.py inspect-d2                  # recording-level QC of D2 (no source model, no graph)
+                                                                # + line noise and what a notch would change
+    python scripts/cross_dataset.py inspect-d3-line             # the same line-noise audit of the D3 recordings
     python scripts/cross_dataset.py authorize --stage build_d2 --by "<name>" [--note ...]   # the AUTHOR, once
     python scripts/cross_dataset.py build-d2 --inverse lcmv [--limit 2]   # matched-channel D2 stores (authorized)
     python scripts/cross_dataset.py validate-d2 --inverse lcmv
@@ -31,7 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 parser = argparse.ArgumentParser()
-parser.add_argument("action", choices=["audit", "inspect-d2", "authorize", "build-d2", "validate-d2", "compat",
+parser.add_argument("action", choices=["audit", "inspect-d2", "inspect-d3-line", "authorize", "build-d2", "validate-d2", "compat",
                                        "freeze", "status", "run", "evaluate", "report", "smoke"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--inverse", default="lcmv", choices=["lcmv", "wmne"])
@@ -146,22 +148,50 @@ if args.action == "audit":
                 stores.append({"inverse": inv, "mode": mode, "atlas": atlas, "passed": r["passed"], "dir": r["dir"],
                                "graph_run_id": r["graph_run_id"]})
     dec = plan.decision_audit(processed, c)
+    from adgraph.crossdataset import evaluate, signal_audit
+    from adgraph.io import bids
+
+    # demographics by diagnosis (descriptive; no EEG quantity is combined with a label): the age confound audit
+    d3_meta, _ = bids.load_participants_tsv(bids.participants_path(P["dataset3"]["root"]))
+    tables = {"D3": d3_meta.assign(sex=d3_meta["sex"].astype(str).str.upper().str[:1]),
+              "D2": reg.assign(sex=reg["sex"].astype(str).str.upper().str[:1])}
+    demo = evaluate.demographics(tables)
+    overlap = []
+    for ds, t in tables.items():
+        lo, hi = evaluate.age_overlap(t)
+        a = pd.to_numeric(t["age"], errors="coerce")
+        inside = t[(a >= lo) & (a <= hi)]
+        overlap.append({"dataset": ds, "overlap_low": lo, "overlap_high": hi, "n_ad": int((inside["y"] == 1).sum()),
+                        "n_hc": int((inside["y"] == 0).sum()),
+                        "estimable": bool((inside["y"] == 1).sum() >= c["age"]["min_per_class"]
+                                          and (inside["y"] == 0).sum() >= c["age"]["min_per_class"])})
+    atomic_write_csv(out / "demographics.csv", demo)
+    atomic_write_csv(out / "age_overlap_feasibility.csv", pd.DataFrame(overlap))
+    fr = signal_audit.filter_response(d2store.resolve("lcmv"))
+    atomic_write_json(out / "d2_filter_response.json", fr)
+    print(demo.round(1).to_string(index=False))
+    print(pd.DataFrame(overlap).to_string(index=False))
+    print("D2 band-pass (zero phase) dB:", fr["magnitude_db"], "impulse", fr["impulse_length_s_1e-4"], "s")
     atomic_write_json(out / "audit.json", {"channel_map": summary, "d3_stores": stores, "decision_audit": dec,
                                            "d2_registry": {"n": len(reg), "AD": int(reg["y"].sum()),
-                                                           "HC": int((reg["y"] == 0).sum())}})
+                                                           "HC": int((reg["y"] == 0).sum())},
+                                           "age_overlap": overlap, "d2_filter_response": fr,
+                                           "d2_edf_annotations": sorted({a for x in headers["annotations"]
+                                                                         for a in str(x).split("|") if a})})
     print(df.to_string(index=False))
     print(json.dumps(summary, indent=1, default=str))
     print(pd.DataFrame(stores).to_string(index=False))
     print(json.dumps(dec["checks"], indent=1))
-    ok = all(s["passed"] for s in stores) and dec["passed"]
+    ok = all(s["passed"] for s in stores) and dec["passed"] and fr["settle_covers_impulse"]
     print("AUDIT PASSED" if ok else "AUDIT FAILED")
     sys.exit(0 if ok else 1)
 
 if args.action == "inspect-d2":
     from functools import partial
 
+    from adgraph.crossdataset import signal_audit
     from adgraph.io.fingerprint import InputHashes
-    from adgraph.sourcegraphs.build import recording_qc
+    from adgraph.sourcegraphs.build import recording_qc, reject
 
     cfg = d2store.resolve(args.inverse)
     table = channels.load_table()
@@ -170,16 +200,45 @@ if args.action == "inspect-d2":
     rows = []
     for rec in reg.itertuples():
         try:
-            row = recording_qc(rec, cfg, loader)[0]
-            row.pop("label", None), row.pop("y", None), row.pop("age", None), row.pop("mmse", None)
+            row, segs, pieces, _, _ = recording_qc(rec, cfg, loader)
+            row.update(signal_audit.recording_audit(segs, pieces, cfg))
+            cands, keep, _, _ = reject(segs, pieces, cfg)
+            row["n_windows_accepted"], row["n_windows_rejected"] = int(keep.sum()), int(len(keep) - keep.sum())
+            row["below_min_windows"] = bool(keep.sum() < cfg["windowing"]["min_windows"])
+            del segs
+            for k in ("label", "y", "age", "sex", "mmse", "acer", "comment"):     # label-blind
+                row.pop(k, None)
         except Exception as exc:
             row = {"key": rec.key, "status": f"error: {exc}"}
         rows.append(row)
     df = pd.DataFrame(rows)
     atomic_write_csv(namespace.sub(processed, "audit", "d2_inspection.csv"), df)
-    cols = [x for x in ("key", "original_duration_s", "selection_mode", "selected_duration_s", "n_candidate_windows",
-                        "status") if x in df]
+    cols = [x for x in ("key", "original_duration_s", "selected_duration_s", "n_candidate_windows",
+                        "n_windows_accepted", "below_min_windows", "median_std_uv", "line_ratio_db",
+                        "line_variance_fraction", "covariance_rel_change", "rejection_flip_fraction", "status")
+            if x in df]
     print(df[cols].to_string(index=False))
+    sys.exit(0)
+
+if args.action == "inspect-d3-line":
+    from adgraph.crossdataset import signal_audit
+    from adgraph.io.fingerprint import InputHashes
+    from adgraph.sourcegraphs.build import recording_qc
+    from adgraph.sourcegraphs.build import registry as d3_registry
+    from adgraph.sourcegraphs.config import resolve
+
+    cfg = resolve(args.inverse, c["atlas"])
+    reg, _ = d3_registry(P, cfg, None, namespace.sub(processed, "stores", "cache", "input_sha256_d3.json"))
+    rows = []
+    for rec in reg.itertuples():
+        try:
+            row, segs, pieces, _, _ = recording_qc(rec, cfg)
+            rows.append({"key": rec.key, **signal_audit.recording_audit(segs, pieces, cfg)})
+        except Exception as exc:
+            rows.append({"key": rec.key, "status": f"error: {exc}"})
+    df = pd.DataFrame(rows)
+    atomic_write_csv(namespace.sub(processed, "audit", "d3_line_noise.csv"), df)
+    print(df.describe().round(4).to_string())
     sys.exit(0)
 
 if args.action == "authorize":
