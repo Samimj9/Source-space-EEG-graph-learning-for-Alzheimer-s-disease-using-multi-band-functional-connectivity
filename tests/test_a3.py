@@ -31,6 +31,9 @@ AP = "7fa470c668b8cce64ca152372422638be3ee8203"
 HOLDOUT_YAML_SHA = "fc1a6988ffc111e2151c7714ba4c81df07037129abe2c656074dc08bf9571ecc"
 
 
+RUN_STATUS = ("_run_status.csv",)        # status tables carry a timestamp and are rewritten on every call; not results
+
+
 def snapshot(d, skip=()):
     return {str(p.relative_to(d)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(d).rglob("*"))
             if p.is_file() and not any(s in str(p) for s in skip)}
@@ -450,9 +453,9 @@ def test_synthetic_end_to_end_holdout_is_participant_disjoint_and_resumes(env):
     assert len(exp0) == 1 and "mode_B/dk68/none/exp0_sensor_psd_de" in str(exp0[0])
     st = holdout.status(env.root, smoke.restrict)
     assert (st["holdout_state"] == "completed").all()
-    before = snapshot(env.root)
+    before = snapshot(env.root, skip=RUN_STATUS)
     env.holdout()                                                           # a second call: nothing recomputed
-    assert snapshot(env.root) == before
+    assert snapshot(env.root, skip=RUN_STATUS) == before
     freeze.verify(env.root, restrict=smoke.restrict)
 
 
