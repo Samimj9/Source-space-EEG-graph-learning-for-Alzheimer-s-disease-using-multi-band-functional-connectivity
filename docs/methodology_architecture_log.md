@@ -3569,9 +3569,11 @@ the release record).
 ## 61. Amendment A3: final-analysis integration, frozen-model evaluation and consolidated reporting (2026-10-26)
 
 **Status:** post-design; development CV of Exp 0-7 (release pin `59a9ab7`) and Exp 8a (amendment A2, A2 pin `7fa470c`) is
-complete; **no holdout result of the final analysis exists and none is created by this entry**. A3 is *implemented and
-tested here but NOT approved*: `configs/final/amendments.yaml: A3` carries `status: proposed - pending author approval`
-and `approved_by: null`, and the freeze refuses to write until the author records both (and commits). It implements plan
+complete; **no holdout result of the final analysis exists and none is created by this entry**. A3 was *implemented and
+tested without approval*: `configs/final/amendments.yaml: A3` carried `status: proposed - pending author approval` and
+`approved_by: null`, and the freeze refuses to write until the author records both (and commits). **Update 2026-10-27:** the
+author recorded the approval (`approved_by: author (2026-10-27)`, `status: approved`; commit `bee8480`) and completed and
+verified the freeze of the 116 units; the holdout evaluation had not been run (see entry 62 for the separate single-model path). It implements plan
 A3 of entry 60 (items 2-6) unchanged in substance.
 
 **Request (author, 2026-10-26).** Consolidate the Exp 0-8a development results; replace exp8 by exp8a in the frozen final

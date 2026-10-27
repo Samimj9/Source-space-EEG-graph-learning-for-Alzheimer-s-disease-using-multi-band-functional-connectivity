@@ -197,10 +197,12 @@ def test_dry_run_checks_everything_and_writes_nothing(env):
     assert snapshot(env.root) == before and not ns.master_path(env.root).exists()
 
 
-def test_the_real_a3_record_is_unapproved_so_the_freeze_refuses_to_write(env):
-    assert not str(ns.record()["status"]).startswith("approved")
+def test_an_unapproved_a3_record_makes_the_freeze_refuse_to_write(env):
+    """The gate is tested on a record patched to 'proposed' (the committed one carries the author's approval since
+    2026-10-27, commit bee8480), so the test does not depend on the repository's current approval state."""
+    unapproved = {**smoke._ORIGINAL_RECORD(), "approved_by": None, "status": "proposed - pending author approval"}
     before = snapshot(env.root)
-    with pytest.raises(freeze.FreezeRefused, match="not approved"):
+    with mock.patch.object(ns, "record", lambda: unapproved), pytest.raises(freeze.FreezeRefused, match="not approved"):
         freeze.freeze(env.root, write=True, restrict=smoke.restrict, require_clean=False)
     assert snapshot(env.root) == before
 
