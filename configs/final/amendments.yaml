@@ -48,9 +48,9 @@ A2:
     - reuse any unit of the original exp8_xu_dual_gcn (failed or partial; kept untouched as provenance)
 A3:
   date: "2026-10-26"
-  approved_by: null          # the author records approval here (status: approved) after reviewing the freeze inventory
+  approved_by: author (2026-10-27)
   kind: final-analysis amendment (post-design; development CV of Exp 0-8a complete, no holdout evaluated)
-  status: proposed - pending author approval     # the freeze refuses to WRITE until this reads "approved"
+  status: approved
   namespace: FINAL_v1/amendments/A3_final
   release_pin: 59a9ab70a55d107c5ad72acff1fb48f3ef42dff0       # Exp 0-6 development CV and holdout run here
   a2_pin: 7fa470c668b8cce64ca152372422638be3ee8203            # Exp 8a development CV and holdout run here
