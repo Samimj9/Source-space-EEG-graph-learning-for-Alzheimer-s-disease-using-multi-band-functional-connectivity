@@ -387,3 +387,35 @@ def test_the_unit_audit_lists_every_channel(tmp_path, table):
     assert len(u) == 32 and (u["selected_as"] != "").sum() == 19 and u["plausible"].all()
     assert set(u.loc[u["physical_dimension"] == "V", "edf_index"]) == {3, 13}
     assert u.set_index("edf_index").loc[3, "selected_as"] == "Fp2" and u.set_index("edf_index").loc[13, "selected_as"] == ""
+
+
+def test_channels_without_eeg_are_found_and_stop_the_participant(tmp_path, table):
+    """D2-19's case: channels stored in V with a +-1 V EDF range (one 16-bit step = 30.5 uV) whose stored samples are
+    constant: no recorded EEG. Reported channel by channel (flat), the participant stops; never rescaled, interpolated
+    or excluded automatically."""
+    import edfio
+    import pandas as pd
+
+    from adgraph.crossdataset import d2store
+
+    rng = np.random.default_rng(0)
+    sf, n = 1024, 1024 * 40
+    data = (0.8 * rng.standard_normal(n) + 0.6 * rng.standard_normal((32, n))) * 10.0      # uV
+    sigs = []
+    for k, x in enumerate(data):
+        if k + 1 in (18, 24):                                  # T4, T5: +-1 V range, constant stored samples
+            sigs.append(edfio.EdfSignal(np.zeros(n), sampling_frequency=sf, label=f"Misc ExG{k + 1}",
+                                        physical_dimension="V", physical_range=(-1.0, 0.99997)))
+        else:
+            sigs.append(edfio.EdfSignal(x, sampling_frequency=sf, label=f"Misc ExG{k + 1}", physical_dimension="uV",
+                                        physical_range=(-20000, 20000)))
+    edfio.Edf(sigs).write(tmp_path / "19_2352019_1.edf")
+    u = d2store.unit_audit(pd.DataFrame({"key": ["D2-19"], "path": [str(tmp_path / "19_2352019_1.edf")]}),
+                           d2store.resolve("lcmv", table), table).set_index("edf_index")
+    for k in (18, 24):
+        assert u.loc[k, "finding"] == "flat" and abs(u.loc[k, "lsb_uv"] - 30.52) < 0.05
+        assert u.loc[k, "constant_fraction"] == 1.0 and u.loc[k, "n_unique_values"] == 1 and not u.loc[k, "plausible"]
+    assert (u.drop(index=[18, 24])["finding"] == "ok").all()
+    with pytest.raises(d2store.UnitError, match="no EEG in .*T4.*T5"):
+        d2store.load_d2(tmp_path / "19_2352019_1.edf", "D2", d2store.resolve("lcmv", table), table,
+                        channels.template_geometry(table))

@@ -215,11 +215,15 @@ def check_units(x: np.ndarray, names: list[str], units: dict, cfg: dict, rec: st
     catches a header unit that does not match the stored values (factor 1e3 / 1e6) and dead channels."""
     lo, hi = cfg["units"]["channel_robust_std_v"]
     r = robust_std(x)
-    bad = {n: f"{v:.3g} V" for n, v in zip(names, r) if not lo <= v <= hi}
-    if bad:
-        raise UnitError(f"{rec}: channel amplitude outside [{lo:g}, {hi:g}] V (robust std of the band-passed signal) "
-                        f"for {bad}; EDF units of the selected channels {sorted(set(units.values()))}. A unit or scaling "
-                        "error, or a dead channel: run scripts/cross_dataset.py inspect-d2-units; nothing is rescaled")
+    low = {n: f"{v:.3g} V" for n, v in zip(names, r) if v < lo}
+    high = {n: f"{v:.3g} V" for n, v in zip(names, r) if v > hi}
+    if low or high:
+        raise UnitError(f"{rec}: channel amplitude outside [{lo:g}, {hi:g}] V (robust std of the band-passed signal): "
+                        + (f"no EEG in {low} (flat, or the signal is below one quantization step of the EDF range; "
+                           "see lsb_uv / constant_fraction in inspect-d2-units); " if low else "")
+                        + (f"too large in {high} (a header unit that does not match the stored values?); " if high else "")
+                        + f"EDF units of the selected channels {sorted(set(units.values()))}. Nothing is rescaled, "
+                        "interpolated or excluded automatically")
     return dict(zip(names, r.tolist()))
 
 
@@ -240,9 +244,13 @@ def remove_line_noise(x: np.ndarray, sf: float, ln: dict | None) -> np.ndarray:
 
 
 def unit_audit(reg: pd.DataFrame, cfg: dict, table: dict) -> pd.DataFrame:
-    """Every channel of every recording: EDF label, physical dimension, physical / digital range, whether it is one of
-    the 19 selected channels, and the robust std MNE returns after the band-pass (volts); flags implausible amplitudes.
-    Reads the signals (no labels, no source model)."""
+    """Every channel of every recording: EDF label, physical dimension, physical / digital range, the quantization step
+    (``lsb_uv`` = physical range / digital range, in uV), whether it is one of the 19 selected channels, the fraction of
+    raw samples equal to the most frequent value (``constant_fraction``), the number of distinct raw values, the plain
+    and robust std MNE returns after the band-pass, and a ``finding``:
+    ``ok`` | ``flat`` (>= 99 % of the stored samples identical: no recorded signal) | ``no_eeg_below_quantization``
+    (varying samples, but a robust std below the minimum and below one quantization step) | ``too_small`` | ``too_large``
+    (unit / scaling error) | ``unsupported_unit``. Reads the signals (no labels, no source model)."""
     import edfio
     import mne
 
@@ -257,21 +265,36 @@ def unit_audit(reg: pd.DataFrame, cfg: dict, table: dict) -> pd.DataFrame:
         raw = mne.io.read_raw_edf(rec.path, preload=True, verbose="error")
         sf = float(raw.info["sfreq"])
         n = int(round(cfg["preprocessing"]["edge_crop_s"] * sf))
-        x = raw.get_data()[:, n:-n]
-        x = mne.filter.filter_data(x, sf, bp["l_freq"], bp["h_freq"], method="iir",
+        raw_x = raw.get_data()[:, n:-n]
+        x = mne.filter.filter_data(raw_x, sf, bp["l_freq"], bp["h_freq"], method="iir",
                                    iir_params={"order": int(bp["order"]), "ftype": "butter", "output": "sos"},
                                    phase="zero", verbose="error")
-        r = robust_std(x)
+        r, sd = robust_std(x), x.std(axis=1)
         units = channel_units(raw, raw.ch_names)
         for i, name in enumerate(raw.ch_names):
             h = hdr.get(name)
             k = indexed_number(name)
+            vals, counts = np.unique(raw_x[i], return_counts=True)
+            scale = {"V": 1e6, "mV": 1e3, "uV": 1.0, "nV": 1e-3}.get(units[name])
+            lsb = (float(h.physical_max - h.physical_min) / float(h.digital_max - h.digital_min) * scale
+                   if h is not None and scale and h.digital_max != h.digital_min else float("nan"))
+            if units[name] not in cfg["units"]["physical_dimensions"]:
+                finding = "unsupported_unit"
+            elif r[i] > hi:
+                finding = "too_large"
+            elif r[i] < lo:                       # no EEG: constant samples, or a signal finer than one step
+                finding = ("flat" if counts.max() / counts.sum() >= 0.99 else
+                           "no_eeg_below_quantization" if np.isfinite(lsb) and r[i] * 1e6 < lsb else "too_small")
+            else:
+                finding = "ok"
             rows.append({"key": rec.key, "edf_label": name, "edf_index": k, "selected_as": sel.get(k, ""),
                          "physical_dimension": units[name],
                          "physical_min": getattr(h, "physical_min", None), "physical_max": getattr(h, "physical_max", None),
                          "digital_min": getattr(h, "digital_min", None), "digital_max": getattr(h, "digital_max", None),
-                         "robust_std_uv": float(r[i] * 1e6), "plausible": bool(lo <= r[i] <= hi)})
-        del raw, x
+                         "lsb_uv": lsb, "constant_fraction": float(counts.max() / counts.sum()),
+                         "n_unique_values": int(len(vals)), "std_uv": float(sd[i] * 1e6),
+                         "robust_std_uv": float(r[i] * 1e6), "plausible": finding == "ok", "finding": finding})
+        del raw, x, raw_x
     return pd.DataFrame(rows)
 
 

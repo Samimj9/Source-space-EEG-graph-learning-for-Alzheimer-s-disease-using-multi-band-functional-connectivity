@@ -795,12 +795,19 @@ acquisition-specific 50 Hz notch (same crops and pieces): 50 Hz power, the 100 H
 covariance change (the LCMV input), accepted windows and the power change in every analysis band; `diag_*` columns
 are the first audit's diagnostic notch on resampled segments (not the preprocessing notch). `inspect-d3-line`: the
 D3 line-noise audit (D3 is not notched)."""),
-        code("""cross('inspect-d2-units')
-cross('inspect-d2')
-cross('inspect-d3-line')
+        code("""FINDINGS = {}
+for step in ('inspect-d2-units', 'inspect-d2', 'inspect-d3-line'):   # every audit runs; findings are collected
+    try:
+        cross(step)
+    except RuntimeError as exc:
+        FINDINGS[step] = str(exc)
+units = pd.read_csv(CROSS + '/audit/d2_units.csv')
+display(units[(units['selected_as'].notna()) & (units['finding'] != 'ok')])
 display(pd.read_csv(CROSS + '/audit/d2_inspection.csv').filter(
     regex='key|selected_duration|windows_accepted|flip|line_ratio|line_variance|harmonic|covariance|band_power|peaks_after|mixed|status').round(3))
-print(json.dumps(json.load(open(CROSS + '/audit/d2_notch_response.json'))['cascade_db'], indent=1))"""),
+print(json.dumps(json.load(open(CROSS + '/audit/d2_notch_response.json'))['cascade_db'], indent=1))
+if FINDINGS:
+    raise RuntimeError(f'Part A2 findings (send them; nothing is built): {sorted(FINDINGS)}')"""),
         md("""## Part B · Matched-channel D2 stores (STOP HERE unless the author has authorized it in writing)
 
 Set `AUTHORIZED_BY` to the author's name only after the written authorization; it is recorded once in

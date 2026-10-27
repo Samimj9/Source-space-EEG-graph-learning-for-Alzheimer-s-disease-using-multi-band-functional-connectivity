@@ -3660,6 +3660,23 @@ response, < 0.01 dB in 0.5-45 Hz, cascade support covered by the crop; the order
 notched and its store configurations unchanged; mixed but correct units read identically in volts; wrong units
 (header V with uV values, header uV with V values, an unknown unit) fail fast naming the channel; the unit audit.
 
+## 64. Cross-dataset D2: D2-19 has four matched electrodes without recorded EEG (finding; decision pending, 2026-10-27)
+
+**Finding (Part A unit audit on real data, label-blind).** D2-19 is the only recording with mixed EDF units. Two
+channels stored in V with a +-0.14 V range (M1, T3 = T7) are plausible EEG. Five channels stored in V with a +-1 V range,
+four of them matched electrodes (T4 = T8, T5 = P7, T6 = P8, O1) and CP1, have constant stored samples (robust std
+2.8e-27 V; one 16-bit step = 30.5 uV): no recorded signal. Not a unit error (MNE scales each channel by its own unit
+correctly). Every selected channel of the other 22 recordings is plausible.
+
+**Effect.** The fail-fast check stops D2-19 (`UnitError`), so no D2 store can be assembled under the current rules.
+The audit now reports per channel the quantization step, the fraction of identical samples, the number of distinct
+values, the plain std and a finding, and the notebook runs every Part A2 audit before reporting findings (one finding
+no longer hides the others).
+
+**Decision needed (author).** Exclude D2-19 by a logged amendment (technical, label-blind; D2 = 22: 9 AD / 13 HC) or
+interpolate 4 of 19 electrodes (not recommended: edge extrapolation, connectivity inflation, asymmetry with D3).
+Docs: docs/cross_dataset/design.md 12.7. Nothing was changed in the protocol; no graph was built.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

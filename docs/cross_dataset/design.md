@@ -385,7 +385,33 @@ by a factor 1e6. Hence: `inspect-d2-units` lists every channel of every recordin
 unit, physical / digital range, the band-passed robust std MNE returns), identifying exactly which channels of D2-19
 carry which unit; and the D2 loader fails fast (`UnitError`, naming recording and channel) when a selected channel's
 unit is not V, mV, uV or nV or its band-passed robust std is outside [0.1 uV, 1 mV]. Nothing is ever rescaled to pass.
-The channel-level result for D2-19 comes from the next Part A run (`audit/d2_units.csv`).
+**Result (author's Part A run, 2026-10-27).** Only D2-19 has mixed units. Its 32 channels: 26 in uV (ranges +-4,246
+to +-53,740 uV, one 16-bit step 0.13-1.64 uV) and 6 in V. Two V channels, M1 (`ExG13`, unselected) and T7 = T3
+(`ExG14`, selected), have a +-0.14 V range (one step about 4.3 uV) and plausible amplitudes (robust std 184 and 102
+uV). Four V channels, all SELECTED, T8 = T4 (`ExG18`), P7 = T5 (`ExG24`), P8 = T6 (`ExG28`) and O1 (`ExG30`), plus the
+unselected CP1 (`ExG20`), have a +-1 V range (one step 30.5 uV) and a robust std of 2.8e-27 V: their stored samples are
+constant, i.e. they contain no recorded EEG (consistent with the sheet's "8-10 bad channels" note for this
+recording). It is not a unit error: MNE reads every channel in volts correctly; there is simply nothing to read. All
+other 22 recordings: every selected channel plausible. The unit audit now also reports, per channel, the
+quantization step (`lsb_uv`), the fraction of identical stored samples (`constant_fraction`), the number of distinct
+values and the plain std, and a `finding` (`flat`, `no_eeg_below_quantization`, `too_small`, `too_large`,
+`unsupported_unit`, `ok`).
+
+**Consequence and the decision it needs (author; not taken by code).** The D2 loader stops D2-19 (`UnitError`: no EEG
+in T4, T5, T6, O1), so the D2 stores cannot be assembled with the current rules (a store with a failed participant is
+never assembled). 4 of the 19 matched electrodes (21 %), at the right temporal and left occipital edge of the montage,
+carry nothing. Options:
+1. **Exclude D2-19 from both directions by a logged amendment** (a technical, label-blind fact established from the
+   stored samples before any graph or classification): D2 becomes 22 participants (9 AD / 13 HC; AD age 79.7 y, range
+   66-92; 6 F / 3 M). This is a deviation from rule 4 (the only pre-specified exclusion is fewer than 5 clean
+   windows) and must be recorded as such, with the participant's diagnosis (AD) stated.
+2. **Interpolate the 4 channels** (spherical spline from the 15 remaining matched electrodes; the legacy D1 / D2
+   pipeline interpolated bad channels). Not recommended: 21 % synthetic channels, two adjacent pairs at the montage
+   edge where splines extrapolate, interpolated channels are linear mixtures of their neighbours and inflate sensor
+   and source connectivity (PLV / |ciPLV|), and D3 is not interpolated (a new asymmetry).
+3. Use other D2 channels for these positions: excluded by design (the matched 19-electrode representation).
+Recommendation: option 1, decided and recorded before the first build; the D2 cohort, the age summaries and every
+report then state 22 / 23 with the reason.
 
 ### 12.6 Part A (audit only; authorized 2026-10-26)
 

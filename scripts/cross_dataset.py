@@ -255,17 +255,22 @@ if args.action == "inspect-d2-units":
     per = u.groupby("key")["physical_dimension"].agg(lambda x: ";".join(sorted(set(x))))
     mixed = per[per.str.contains(";")]
     print("recordings with mixed EDF units:", mixed.to_dict())
-    for key in mixed.index:
-        g = u[u["key"] == key]
-        print(f"==== {key}: units per channel")
-        print(g[["edf_label", "edf_index", "selected_as", "physical_dimension", "physical_min", "physical_max",
-                 "robust_std_uv", "plausible"]].to_string(index=False))
+    cols = ["edf_label", "edf_index", "selected_as", "physical_dimension", "physical_min", "physical_max", "lsb_uv",
+            "constant_fraction", "n_unique_values", "std_uv", "robust_std_uv", "finding"]
+    for key in sorted(set(mixed.index) | set(u.loc[u["finding"] != "ok", "key"])):
+        print(f"==== {key}: every channel")
+        print(u[u["key"] == key][cols].to_string(index=False))
     sel = u[u["selected_as"] != ""]
-    bad = sel[~sel["plausible"]]
-    print(f"selected channels: {len(sel)} ({sel['key'].nunique()} recordings); implausible: {len(bad)}")
+    bad = sel[sel["finding"] != "ok"]
+    print(f"selected channels: {len(sel)} ({sel['key'].nunique()} recordings); not ok: {len(bad)}")
     if len(bad):
-        print(bad.to_string(index=False))
-    print("UNIT AUDIT PASSED" if bad.empty else "UNIT AUDIT FAILED")
+        print(bad.groupby(["key", "finding"])["selected_as"].agg(lambda x: ",".join(x)).to_string())
+    unit_errors = bad[bad["finding"].isin(["too_large", "unsupported_unit"])]
+    no_eeg = bad[bad["finding"].isin(["no_eeg_below_quantization", "flat", "too_small"])]
+    print(f"unit / scaling errors in selected channels: {len(unit_errors)}; selected channels without EEG: "
+          f"{len(no_eeg)} in {sorted(set(no_eeg['key']))}")
+    print("UNIT AUDIT PASSED" if bad.empty else "UNIT AUDIT FAILED: the build would stop at these recordings "
+          "(nothing is rescaled, interpolated or excluded automatically; the author decides)")
     sys.exit(0 if bad.empty else 1)
 
 if args.action == "inspect-d3-line":
