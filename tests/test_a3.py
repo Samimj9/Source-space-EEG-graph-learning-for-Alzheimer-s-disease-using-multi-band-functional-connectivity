@@ -901,7 +901,7 @@ def test_holdout_reference_is_the_exp8a_environment_of_the_real_results(env):
     ref = environment.holdout_reference(t)
     assert ref == json.loads(t[t["namespace"] == "A2"].iloc[0]["libraries"]) and "python" in ref and "torch" in ref
     from adgraph import numerical_env
-    assert numerical_env.differences(ref, same_environment("py", ref.keys())) == {}    # ensure_interpreter's comparison
+    assert numerical_env.differences(ref, same_environment("py", [k for k in ref if k != "python"])) == {}    # ensure_interpreter's comparison
     for rel in dev_rows(env.root, exp="exp8a")["rel_dir"].iloc[:1]:
         set_env(env.root, rel, new=other_build)
     t2, _ = inventory.discover(env.root)

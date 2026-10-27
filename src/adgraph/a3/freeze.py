@@ -172,6 +172,7 @@ def inventory_table(units: dict[str, list[dict]], dev: list[dict]) -> pd.DataFra
             r = by.get((part,) + _key(u), {})
             rows.append({"part": part, "pin": ns.part_pin(part)[:10], **u, "dev_auc": r.get("auc"),
                          "dev_ci_low": r.get("auc_ci_low"), "dev_ci_high": r.get("auc_ci_high"),
+                         "dev_env": environment.env_id(r["libraries"]) if r else None,
                          "dev_n_participants": r.get("n_participants"), "dev_result": r.get("rel_dir")})
     return pd.DataFrame(rows)
 
