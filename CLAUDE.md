@@ -138,6 +138,9 @@ e.g. `D1-3`, `D2-3`.
   `evaluation/`, `graphs/`, `features/`, `qc/` or `config.py`. The freeze is written only after the author sets
   `approved_by` / `status: approved` in `configs/final/amendments.yaml: A3`; never write either pin, never run the
   holdout before the freeze verifies (`scripts/a3.py verify`), never read holdout metrics in a development report.
+- **A3 single-model holdout (log entry 62; `docs/final/a3_single_model.md`):** a separate, development-CV-selected holdout of ONE frozen
+  Exp 8a unit (`configs/final/amendments/a3_single_model.yaml`, `a3.py single-*`, notebook A3_06); not completion of the full A3
+  protocol, never changes the freeze, the 116-unit plan or any result; descriptive only.
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by

@@ -3675,6 +3675,34 @@ code isolation from the pinned scopes), plus `scripts/a3.py smoke`.
 `A3_02`; set `approved_by` and `status: approved` in `configs/final/amendments.yaml: A3`, commit, then run `A3_02` with
 `WRITE_FREEZE = True`. Holdout notebooks A3_03 / A3_04 refuse to run before that.
 
+## 62. A3 single-model holdout, selected after development CV (2026-10-27)
+
+**Status:** the author completed and verified the A3 freeze (116 units) and asked, to reduce computation, to evaluate only
+one frozen configuration instead of the 116: `exp8a_xu_dual_gcn_surface` / `plv__psd_de_strength__abl_anatomical_both`, wMNE,
+mode B, lobes12, dense (development AUC 0.873), A2 pin `7fa470c`. This entry documents the separate path that does so; it
+is **not** completion of the full A3 holdout protocol and changes neither the A3 master freeze, the two frozen records, the
+116-unit plan, any experiment definition nor any result.
+
+**Selection.** Made by the author after development CV, on development participant AUC, before any holdout result of this
+model exists; the holdout was inspected in earlier work and informs nothing. The manifest records the model's rank among the
+frozen GNN units by development AUC from the frozen records (it claims "highest" only if true), that the other frozen
+configurations are not evaluated, and that the result is descriptive only. The model's development AUC is the maximum over
+many configurations and therefore optimistic (entry 61, selection bias).
+
+**Implementation (`a3.single`, `scripts/a3_single_holdout.py`, notebook `A3_06_single_model_holdout`).** Membership: the exact
+unit must be in the frozen A2 record with the reported AUC. Verification is lighter than `a3.py verify` (no scan of the ~320
+development results) but not weaker for this evaluation: master and both records (checksums, unit sets, pins, QC decisions, store
+lock) and the selected unit's own development result (marker, payload checksums, hashes in the record, A2 pin). The unit runs
+at the A2 pin in a worktree through a driver that uses only the pinned package: the pinned `amendment.holdout` can only run all
+frozen Exp 8a units, so the driver applies its gates (initialized amendment; frozen record naming the commit and the unit) and
+calls the pinned `open_context` and `run_experiment` for one unit, with the exactly-one-unit selector check. Environment: the
+interpreter is restored to the environment recorded by the unit's development result and checked with the entry-61 policy.
+Resumable (completed units are not launched, interrupted ones resume). The report needs only this unit.
+
+**Tests (targeted):** the single-model section of `tests/test_a3.py` (membership and refusals, light verification and what it
+deliberately does not scan, selection manifest, environment levels, the driver's gates / participant disjointness / resume /
+exactly-one-unit, report content and independence from the other units, notebook).
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

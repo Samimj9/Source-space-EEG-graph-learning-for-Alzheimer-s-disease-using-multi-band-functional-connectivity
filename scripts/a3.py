@@ -12,6 +12,9 @@
     python scripts/a3.py holdout-report        descriptive holdout report (needs a verifying freeze)
     python scripts/a3.py d2-manifest           D3 -> D2 model manifest and recommended source-only set (read only)
     python scripts/a3.py smoke [--no-link]     synthetic end-to-end freeze / holdout / report check (temporary root)
+    python scripts/a3.py single-verify         the single selected model (a3_single_model.yaml): membership + checks, read only
+    python scripts/a3.py single-holdout --python <interpreter> [--repo . --base /content]   holdout of ONLY that model
+    python scripts/a3.py single-report         report of that one model (does not need the other frozen units)
     python scripts/a3.py probe                 which write-once method does this file system allow? (own temp folder)
 
 Outputs: <processed>/FINAL_v1/amendments/A3_final/ (never overwritten). The freeze additionally creates the two frozen
@@ -28,7 +31,8 @@ import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("action", choices=["plan", "audit", "freeze", "verify", "holdout-status", "holdout", "report",
-                                       "holdout-report", "d2-manifest", "smoke", "probe"])
+                                       "holdout-report", "d2-manifest", "smoke", "probe", "single-verify", "single-holdout",
+                                       "single-report"])
 parser.add_argument("--paths", default="configs/paths.yaml")
 parser.add_argument("--no-drive", action="store_true", help="plan: configuration only (atlas / graph from A3)")
 parser.add_argument("--no-link", action="store_true", help="smoke: simulate a file system without hard links")
@@ -104,6 +108,34 @@ if args.action == "probe":
     print("the freeze will use: " + ("hard link (atomic)" if res.get("method") == "link" else
                                      "claim file + rename (hard links unavailable here)"))
     sys.exit(0 if res["ok"] else 1)
+
+if args.action in ("single-verify", "single-holdout", "single-report"):
+    from adgraph.a3 import freeze, single
+
+    sel = single.selection()
+    u = sel["unit"]
+    try:
+        if args.action == "single-verify":
+            ver = single.verify_light(P, sel)
+            rank = single.gnn_ranking(P, sel)
+            print(f"selected: {u['experiment']} / {u['variant']} / {u['inverse']} / mode {u['mode']} / {u['atlas']} / "
+                  f"{u['graph']}\nfrozen A3 inventory: member of the A2 record ({ver['n_frozen_units']} frozen units); "
+                  f"development AUC {ver['entry']['auc']:.4f} (reported {sel['development_auc_reported']}); rank "
+                  f"{rank['rank_by_development_auc']} of {rank['n_frozen_gnn_units']} frozen GNN units"
+                  + ("" if rank["is_highest"] else f"  !! NOT the highest: {rank['highest']}"))
+            print(f"development result verified (marker, checksums, A2 pin); development environment: "
+                  f"{ver['dev_libraries']}\nholdout state: {single.holdout_state(P, sel)}\n"
+                  f"the other {ver['n_frozen_units'] - 1} frozen units would NOT be evaluated")
+        elif args.action == "single-holdout":
+            man = single.run_single(P, args.repo, Path(args.paths).resolve(), args.python, args.base)
+            print(f"holdout {man['state_before']} -> {man['state_after']} (exit {man['exit_code']}) at pin "
+                  f"{man['pin'][:10]}; environment {man['environment']['level']}; descriptive only")
+            sys.exit(man["exit_code"] or (0 if man["state_after"] == "completed" else 1))
+        else:
+            print(single.report(P, sel))
+    except (single.SingleRefused, freeze.FreezeInvalid) as exc:
+        sys.exit(f"REFUSED: {exc}")
+    sys.exit(0)
 
 if args.action == "audit":
     from adgraph.a3 import audit

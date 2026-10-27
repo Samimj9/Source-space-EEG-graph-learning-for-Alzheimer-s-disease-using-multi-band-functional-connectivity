@@ -1,0 +1,21 @@
+# A3 single-model holdout (methodology log entry 62; docs/final/a3_single_model.md).
+# A SEPARATE, explicitly development-CV-selected evaluation of ONE unit of the frozen A3 inventory, chosen by the author
+# after development CV to save computation. It is not completion of the full A3 holdout protocol: the other 115 frozen
+# units are not evaluated by this path. The frozen records, the 116-unit plan and every result are unchanged.
+selection_id: a3_single_exp8a_wmne_abl_anatomical_both
+authorized_by: "author (written request of 2026-10-27)"
+part: A2
+pin: a2_pin                          # configs/final/amendments.yaml: A3 -> 7fa470c668b8cce64ca152372422638be3ee8203
+unit:
+  exp: exp8a
+  experiment: exp8a_xu_dual_gcn_surface
+  variant: plv__psd_de_strength__abl_anatomical_both
+  inverse: wmne
+  mode: B
+  atlas: lobes12
+  graph: dense
+development_auc_reported: 0.873      # the author's figure; checked against the frozen record (rounded to 3 decimals)
+basis: >-
+  Chosen by the author after development CV as the highest-performing source-space GNN by development participant AUC.
+  The selection manifest records this model's rank among the frozen GNN units computed from the frozen records; it does
+  not assert "highest" unless that holds.

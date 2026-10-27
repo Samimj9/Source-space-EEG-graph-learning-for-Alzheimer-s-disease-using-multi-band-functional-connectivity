@@ -5,6 +5,7 @@
     A3_03_holdout_exp0_6.ipynb       descriptive holdout of the frozen Exp 0-6 units at the RELEASE pin (GPU)
     A3_04_holdout_exp8a.ipynb        descriptive holdout of the frozen Exp 8a units at the A2 pin (GPU)
     A3_05_final_report.ipynb         combined final report: development, holdout (separate), comparisons (CPU)
+    A3_06_single_model_holdout.ipynb separate single-model holdout (Exp 8a, wMNE, abl_anatomical_both) (GPU)
 
 They live apart from ``notebooks/`` (the release notebooks, whose tests and pins are untouched). Notebook 99 of the
 release can no longer complete a freeze (exp8 has no result on lobes12); these notebooks are its companion.
@@ -178,6 +179,54 @@ if ERRORS:
     ], gpu=True)
 
 
+ENV_SINGLE = '''ACCEPT_ENVIRONMENT_DIFFERENCE = False   # leave False: a difference that cannot be removed must stop here
+from adgraph import numerical_env
+from adgraph.a3 import single
+# The environment recorded by THIS unit's development result (one small file; the ~320 other results are not scanned).
+REFERENCE = single.dev_libraries(OUT)
+PY = numerical_env.ensure_interpreter(REFERENCE, repo='/content/repo', base='/content',
+                                      accept_difference=ACCEPT_ENVIRONMENT_DIFFERENCE, run=sh)
+NOW = numerical_env.interpreter_versions(PY, REFERENCE)
+DIFF = numerical_env.differences(REFERENCE, NOW)
+assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from the development environment of this unit: {DIFF}'
+print('the holdout runs with', PY, NOW)'''
+
+
+def single_nb() -> dict:
+    return notebook([
+        md("""# A3-06 · Single-model D3 holdout (selected after development CV)
+
+**A separate, lightweight evaluation of ONE frozen configuration, not completion of the full A3 holdout protocol.**
+Model: `exp8a_xu_dual_gcn_surface` / `plv__psd_de_strength__abl_anatomical_both`, wMNE, mode B, lobes12, dense
+(`configs/final/amendments/a3_single_model.yaml`). It was chosen by the author after development CV to save computation;
+the other 115 frozen configurations are **not** evaluated here, and the 13-participant holdout was inspected earlier, so the
+result is descriptive only. The A3 master freeze, both frozen records, the 116-unit inventory and all development results
+are only read.
+
+It verifies that the exact unit is in the frozen A2 record and that its development result is intact (the other results
+are not rescanned), restores the numerical environment of the A2 results and checks it against this unit's development
+environment, then fits the unit once on the 52 development participants and evaluates the 13 holdout participants **at the
+A2 pin** (`7fa470c`, unchanged model and protocol). Resumable: a completed unit is not recomputed. GPU runtime (T4).
+""" + HOWTO),
+        code(SETUP),
+        md("## 1. Numerical environment (restored to the one recorded by this unit's development result)"),
+        code(ENV_SINGLE),
+        md("## 2. Membership in the frozen inventory and integrity checks (read only)"),
+        code('sh("python scripts/a3.py single-verify")'),
+        md("## 3. Holdout of this one unit (writes the selection manifest once; resumable)"),
+        code('sh(f"python scripts/a3.py single-holdout --python {PY} --repo /content/repo --base /content")'),
+        md("## 4. Report of this one model (does not need the other frozen units)"),
+        code('sh("python scripts/a3.py single-report")'),
+        code(LATEST + '''
+d = latest(A3 + '/single_model/report_*')
+print(d)
+print(open(d + '/single_model_holdout_report.md').read())
+display(pd.read_csv(d + '/predictions_participants.csv'))
+for png in sorted(glob.glob(d + '/*.png')):
+    display(Image(filename=png))'''),
+    ], gpu=True)
+
+
 def final_nb() -> dict:
     return notebook([
         md("""# A3-05 · Combined final report (development and holdout, kept apart)
@@ -237,7 +286,9 @@ def main() -> None:
                                                     "amendments/A2_exp8_surface/CODE_COMMIT.txt`, `7fa470c`), "
                                                     "`scripts/final.py holdout --amendment A2 --exp exp8a`.", "A3-04"),
                                          "descriptive holdout, Exp 8a, at the A2 pin", "GPU"),
-           "A3_05_final_report.ipynb": (final_nb(), "combined final report: development and holdout (separate)", "CPU")}
+           "A3_05_final_report.ipynb": (final_nb(), "combined final report: development and holdout (separate)", "CPU"),
+           "A3_06_single_model_holdout.ipynb": (single_nb(), "SEPARATE: holdout of ONE selected frozen model "
+                                                "(Exp 8a, wMNE); not the full protocol", "GPU")}
     for name, (nb, _, _) in nbs.items():
         (out / name).write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")
     (out / "README.md").write_text(readme([(n, d, rt) for n, (_, d, rt) in nbs.items()]))

@@ -33,6 +33,21 @@ recomputed). If the A3 code changes before the freeze exists, the A3 pin moves a
    `environment_summary_*.csv`, and the report folder `A3_final/reports/development_*/` with the environment provenance
    section in `development_results.md`.
 
+## Single-model holdout (separate; not the full protocol)
+
+`notebooks_a3/A3_06_single_model_holdout.ipynb` evaluates ONLY `exp8a_xu_dual_gcn_surface` /
+`plv__psd_de_strength__abl_anatomical_both`, wMNE, mode B, lobes12, dense (see `docs/final/a3_single_model.md`). Requires the
+verified A3 freeze. Colab link:
+https://colab.research.google.com/github/Samimj9/Source-space-EEG-graph-learning-for-Alzheimer-s-disease-using-multi-band-functional-connectivity/blob/claude/a3-final-analysis/notebooks_a3/A3_06_single_model_holdout.ipynb
+
+1. Open the link, choose a **GPU** runtime (T4), *Runtime → Run all*, allow Drive access. Edit nothing.
+2. The cells: setup; restore the numerical environment of the unit's development result; `single-verify` (read only: membership in
+   the frozen A2 record, development AUC, integrity; stops if anything is off); `single-holdout` (writes the selection manifest once,
+   fits once on the 52 development participants at the A2 pin, evaluates the 13 holdout participants); `single-report`.
+3. Disconnected? Open it and *Run all* again: a completed unit is not recomputed, an interrupted one resumes.
+4. Outputs in `A3_final/single_model/`: `selection_*.json`, `runs/run_*.json`, `report_*/` (report, predictions, results CSV, ROC,
+   manifest); the holdout result folder of this one unit is in the A2 namespace.
+
 ## Command line (same logic; from a checkout of the A3 branch with `configs/paths.yaml`)
 
 ```

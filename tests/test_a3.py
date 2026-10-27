@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from adgraph import release
-from adgraph.a3 import audit, d2, environment, freeze, holdout, inventory, report, smoke, stats
+from adgraph.a3 import audit, d2, environment, freeze, holdout, inventory, report, single, smoke, stats
 from adgraph.a3 import namespace as ns
 from adgraph.experiments import amendment, decisions
 from adgraph.experiments.config import experiment_configs
@@ -921,3 +921,300 @@ def test_the_development_report_carries_the_environment_provenance(env):
     assert len(man["environments"]["results"]) == 2 and man["environments"]["checks"]
     for name, sha in man["outputs_sha256"].items():
         assert ns.sha256_file(out / name) == sha                                # the appended section is checksummed
+
+
+# ------------------------------------------------------------------------------------------------ single-model holdout
+SINGLE_UNIT = {"exp": "exp8a", "experiment": "exp8a_xu_dual_gcn_surface",
+               "variant": "plv__psd_de_strength__abl_anatomical_both", "inverse": "wmne", "mode": "B",
+               "atlas": "lobes12", "graph": "dense"}
+ARGS = ["--variant", SINGLE_UNIT["variant"], "--inverse", "wmne", "--mode", "B", "--atlas", "lobes12", "--graph",
+        "dense"]
+
+
+def driver_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("a3_single_holdout", REPO / "scripts/a3_single_holdout.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def single_sel(env):
+    """The real selection, with the reported AUC set to the synthetic frozen record's (the real one is 0.873)."""
+    rec = ns.read_json(ns.record_path(env.root, "A2"))
+    e = next(x for x in rec["development_cv"] if x["variant"] == SINGLE_UNIT["variant"] and x["inverse"] == "wmne")
+    return {**single.selection(), "development_auc_reported": round(e["auc"], 3)}
+
+
+def run_driver(env, args=None, commit=AP):
+    with smoke.at_commit(env.box, commit):
+        return driver_module().main((args or ARGS) + ["--processed", str(env.root), "--skip-environment-check"])
+
+
+def run_single_with_driver(env, sel, **kw):
+    """`single.run_single` whose runner executes the pinned-code driver in process (no worktree, no subprocess)."""
+    def runner(cmd, cwd, e):
+        return run_driver(env, cmd[cmd.index("--exp") + 2:cmd.index("--graph") + 2])
+    with mock.patch.object(holdout, "ensure_worktree", lambda *a: Path(env.root) / "wt"), mock.patch.object(
+            holdout, "imports_worktree", lambda *a: True):
+        return single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, runner=runner,
+                                 env_probe=same_environment, sel=sel, **kw)
+
+
+def holdout_dirs(root):
+    return sorted(Path(root).glob("FINAL_v1/**/xu_holdout"))
+
+
+def frozen_files(root):
+    return {k: v for k, v in snapshot(root).items() if k.endswith("final_analysis.json") or k.endswith("freeze.json")}
+
+
+def test_the_single_model_selection_is_the_one_requested_and_is_in_the_frozen_plan():
+    sel = single.selection()
+    assert sel["unit"] == SINGLE_UNIT and sel["part"] == "A2" and sel["development_auc_reported"] == 0.873
+    assert ns.record()[sel["pin"]] == AP and "author" in sel["authorized_by"]
+    assert single.key_of(sel["unit"]) in {freeze._key(u) for u in freeze.planned_units_for("lobes12", "dense")["A2"]}
+    assert len(freeze.planned_units_for("lobes12", "dense")["A2"]) + len(
+        freeze.planned_units_for("lobes12", "dense")["release"]) == 116                # the plan is unchanged
+
+
+def test_membership_and_integrity_are_checked_without_scanning_the_other_results(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    with mock.patch.object(inventory, "discover", side_effect=AssertionError("no scan of all results")):
+        v = single.verify_light(env.root, sel, smoke.restrict)                         # passes without a Drive-wide scan
+    assert v["n_frozen_units"] == 19 and v["entry"]["variant"] == SINGLE_UNIT["variant"]
+    for bad in ({"variant": "plv__psd_de_strength__no_such_variant"}, {"mode": "A"}, {"inverse": "lcmv", "mode": "A"}):
+        with pytest.raises(single.SingleRefused, match="not in the frozen"):
+            single.verify_light(env.root, {**sel, "unit": {**sel["unit"], **bad}}, smoke.restrict)
+    with pytest.raises(single.SingleRefused, match="Exp 8a"):
+        single.verify_light(env.root, {**sel, "unit": {**sel["unit"], "exp": "exp1"}}, smoke.restrict)
+    with pytest.raises(single.SingleRefused, match="not the model that was meant"):
+        single.verify_light(env.root, {**sel, "development_auc_reported": 0.5}, smoke.restrict)
+    with pytest.raises(single.SingleRefused, match="pin"):
+        single.verify_light(env.root, {**sel, "pin": "release_pin"}, smoke.restrict)
+
+
+def test_light_verification_still_catches_what_this_evaluation_depends_on(env):
+    with pytest.raises(freeze.FreezeInvalid, match="no A3 master"):
+        single.verify_light(env.root, single.selection(), smoke.restrict)
+    write_freeze(env)
+    sel = single_sel(env)
+    t, _ = inventory.discover(env.root)
+    other = t[(t["exp"] == "exp1") & (t["mode"] == "B")].iloc[0]
+    (env.root / other["rel_dir"] / "metrics.json").write_text("{}")                  # a DIFFERENT unit's result changed
+    single.verify_light(env.root, sel, smoke.restrict)                                # not needed for this evaluation
+    with pytest.raises(freeze.FreezeInvalid):                                         # the full verification still sees it
+        freeze.verify(env.root, restrict=smoke.restrict)
+    mine = Path(single.unit_dir(env.root, sel, "xu_dev_cv"))
+    (mine / "predictions_participants.csv").write_text("tampered\n")                  # the selected unit's own result
+    with pytest.raises(single.SingleRefused, match="not complete"):
+        single.verify_light(env.root, sel, smoke.restrict)
+
+
+def test_light_verification_catches_a_changed_record_pin_or_store_lock(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    f = ns.record_path(env.root, "A2")
+    f.write_text(f.read_text().replace("exp8a", "exp8b", 1))
+    with pytest.raises(freeze.FreezeInvalid):
+        single.verify_light(env.root, sel, smoke.restrict)
+
+
+def test_the_selection_manifest_is_separate_written_once_and_truthful(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    before = frozen_files(env.root)
+    dev_before = {k: v for k, v in snapshot(env.root).items() if "xu_dev_cv" in k}
+    calls = []
+    with mock.patch.object(holdout, "ensure_worktree", lambda *a: Path(env.root) / "wt"), mock.patch.object(
+            holdout, "imports_worktree", lambda *a: True):
+        man = single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict,
+                                runner=lambda c, cwd, e: calls.append((c, cwd, e["PYTHONPATH"])) or 0,
+                                env_probe=same_environment, sel=sel)
+    cmd, cwd, pypath = calls[0]
+    assert cmd[0] == "py" and cmd[1].endswith("scripts/a3_single_holdout.py") and cwd.endswith("wt")
+    assert pypath.endswith("wt/src") and cmd[cmd.index("--variant") + 1] == SINGLE_UNIT["variant"]
+    assert cmd[cmd.index("--inverse") + 1] == "wmne" and "--exp" in cmd and len(calls) == 1
+    m = ns.read_json(single.manifest_path(env.root, sel))
+    assert m["unit"] == SINGLE_UNIT and m["chosen_after_development_cv"] and m["pin"] == AP
+    assert m["n_frozen_units_total"] == 19 and m["n_other_frozen_units_not_evaluated"] == 18
+    assert m["other_holdout_results_present_at_selection"] == []
+    for phrase in ("chosen by the author AFTER development cross-validation", "18 other frozen configurations are not",
+                   "descriptive only", "not external validation", "not completion of the full A3 holdout protocol"):
+        assert phrase in m["statement"], phrase
+    assert m["gnn_ranking"]["rank_by_development_auc"] >= 1 and man["environment"]["level"] == "identical"
+    assert frozen_files(env.root) == before                                           # the freeze is untouched
+    assert {k: v for k, v in snapshot(env.root).items() if "xu_dev_cv" in k} == dev_before
+    sel_path = single.manifest_path(env.root, sel)
+    keep = sel_path.read_bytes()
+    with mock.patch.object(holdout, "ensure_worktree", lambda *a: Path(env.root) / "wt"), mock.patch.object(
+            holdout, "imports_worktree", lambda *a: True):
+        again = single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict,
+                                  runner=lambda *a: 0, env_probe=same_environment, sel=sel)
+    assert sel_path.read_bytes() == keep and not again["selection_manifest_created_now"]
+    assert len(list((ns.root(env.root) / "single_model" / "runs").glob("run_*.json"))) == 2   # a run log per call
+    with pytest.raises(single.SingleRefused, match="never overwritten"):
+        single.selection_manifest(env.root, {**sel, "unit": {**sel["unit"], "variant": "plv__psd"}},
+                                  {**single.verify_light(env.root, sel, smoke.restrict)})
+
+
+def test_run_single_refuses_before_writing_anything_when_it_should(env):
+    sel = single.selection()
+    with pytest.raises(freeze.FreezeInvalid):                                          # no freeze
+        single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, sel=sel,
+                          runner=lambda *a: pytest.fail("must not run"), env_probe=same_environment)
+    write_freeze(env)
+    sel = single_sel(env)
+    here = same_environment("py", ("numpy", "scipy", "pandas", "sklearn", "torch"))
+    with mock.patch.object(holdout, "ensure_worktree", side_effect=AssertionError("no worktree")):
+        with pytest.raises(single.SingleRefused, match="incompatible"):                # genuine environment mismatch
+            single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, sel=sel,
+                              runner=lambda *a: pytest.fail("must not run"),
+                              env_probe=lambda p, k: {**here, "numpy": "9.9.9"})
+        with pytest.raises(single.SingleRefused, match="incompatible"):                # interpreter cannot be read
+            single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, sel=sel,
+                              runner=lambda *a: pytest.fail("must not run"), env_probe=lambda p, k: None)
+    assert not single.manifest_path(env.root, sel).exists()                            # nothing was written
+
+
+def test_a_documented_compatible_environment_is_accepted_and_recorded(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    here = same_environment("py", ("numpy", "scipy", "pandas", "sklearn", "torch"))
+    with mock.patch.object(holdout, "ensure_worktree", lambda *a: Path(env.root) / "wt"), mock.patch.object(
+            holdout, "imports_worktree", lambda *a: True):
+        man = single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, sel=sel,
+                                runner=lambda *a: 0, env_probe=lambda p, k: other_build(here))
+    assert man["environment"]["level"] == "compatible" and man["environment"]["differences"]
+
+
+def test_the_pinned_code_driver_runs_exactly_one_unit_participant_disjoint_and_resumes(env):
+    from adgraph.evaluation.splits import subject_table, xu_partition
+
+    write_freeze(env)
+    assert run_driver(env) == 0
+    dirs = holdout_dirs(env.root)
+    assert len(dirs) == 1 and "wmne/mode_B/lobes12/dense/exp8a_xu_dual_gcn_surface/" + SINGLE_UNIT["variant"] in str(dirs[0])
+    store, _ = open_store(env.root, "wmne", "B", "lobes12", lock=False)
+    dev, hold = xu_partition(subject_table(store.windows))
+    d = dirs[0]
+    pred = pd.read_csv(d / "predictions_participants.csv")
+    assert set(pred["key"]) == set(hold) and len(pred) == 13 and not set(pred["key"]) & set(dev)
+    folds = pd.read_csv(d / "folds.csv")
+    assert set(folds[folds.side == "train"]["key"]) == set(dev) and set(folds[folds.side == "test"]["key"]) == set(hold)
+    tr = pd.read_csv(d / "training.csv")
+    assert (tr["n_train_participants"] == 52).all() and (tr["n_test_participants"] == 13).all() and len(tr) == 1
+    ident = json.loads((d / "_identity.json").read_text())["identity"]
+    assert ident["code"]["git_commit"] == AP and ident["setting"] == "xu_holdout"
+    assert json.loads((d / "metrics.json").read_text())["threshold"] == 0.5
+    assert single.holdout_state(env.root, single_sel(env)) == "completed"
+    before = snapshot(env.root, skip=RUN_STATUS)
+    assert run_driver(env) == 0 and snapshot(env.root, skip=RUN_STATUS) == before     # resume: nothing recomputed
+    for f in ("final.done.json", "metrics.json", "predictions_participants.csv"):      # interrupted before the marker
+        (d / f).unlink()
+    assert single.holdout_state(env.root, single_sel(env)) == "partial"
+    assert run_driver(env) == 0 and len(holdout_dirs(env.root)) == 1
+    assert single.holdout_state(env.root, single_sel(env)) == "completed"
+
+
+def test_the_driver_applies_the_pinned_gates(env):
+    with pytest.raises(SystemExit, match="nothing is frozen"):
+        run_driver(env)
+    write_freeze(env)
+    with pytest.raises(SystemExit, match="frozen at commit"):
+        run_driver(env, commit="9" * 40)
+    with pytest.raises((SystemExit, amendment.AmendmentError)):
+        run_driver(env, commit=RP)                                                     # not the A2 pin
+    bad = list(ARGS)
+    bad[bad.index("B")] = "A"                                                          # window mode A: not frozen
+    with pytest.raises(SystemExit, match="not a frozen unit"):
+        run_driver(env, bad)
+    ambiguous = list(ARGS)
+    ambiguous[1] = "plv__psd_de_strength"                                              # frozen, but matches 5 variants
+    with pytest.raises(SystemExit, match="not exactly one unit"):
+        run_driver(env, ambiguous)
+    assert holdout_dirs(env.root) == []                                                # none of the refusals ran anything
+
+
+def test_a_completed_unit_is_not_launched_again(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    run_driver(env)
+    with mock.patch.object(holdout, "ensure_worktree", side_effect=AssertionError("no worktree")):
+        man = single.run_single(env.root, REPO, "p.yaml", "py", env.root, restrict=smoke.restrict, sel=sel,
+                                runner=lambda *a: pytest.fail("must not run"), env_probe=same_environment)
+    assert man["state_before"] == man["state_after"] == "completed" and man["command"] is None
+
+
+def test_the_single_model_report_needs_only_this_unit_and_states_its_limits(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    with pytest.raises(single.SingleRefused, match="not completed"):
+        single.report(env.root, sel, restrict=smoke.restrict)
+    run_driver(env)
+    with pytest.raises(single.SingleRefused, match="selection manifest"):               # not run through single-holdout
+        single.report(env.root, sel, restrict=smoke.restrict)
+    run_single_with_driver(env, sel)
+    assert len(holdout_dirs(env.root)) == 1                                            # 1 of 19 frozen units evaluated
+    with mock.patch.object(inventory, "discover", side_effect=AssertionError("no scan of all results")):
+        r = single.report(env.root, sel, restrict=smoke.restrict)
+    out = Path(r["dir"])
+    row = pd.read_csv(out / "single_model_holdout_results.csv").iloc[0]
+    for col in ("auc", "auc_delong_low", "auc_delong_high", "auc_boot_low", "auc_boot_high", "balanced_accuracy",
+                "ba_boot_low", "sensitivity", "sensitivity_wilson_low", "specificity", "specificity_wilson_high", "f1",
+                "mcc", "tn", "fp", "fn", "tp", "development_auc_frozen_record"):
+        assert pd.notna(row[col]), col
+    assert row["tn"] + row["fp"] + row["fn"] + row["tp"] == 13 and row["n_participants"] == 13
+    pred = pd.read_csv(out / "predictions_participants.csv")
+    assert len(pred) == 13 and {"key", "label", "y", "score", "predicted", "correct"} <= set(pred.columns)
+    md = (out / "single_model_holdout_report.md").read_text()
+    for phrase in ("descriptive", "18 other frozen configurations are not", "chosen by the author AFTER development",
+                   "not external validation", "optimistic", "does not require"):
+        assert phrase in md, phrase
+    assert (out / "roc_holdout.png").exists()
+    man = json.loads((out / "manifest.json").read_text())
+    assert man["other_units_required"] is False
+    for name, sha in man["outputs_sha256"].items():
+        assert ns.sha256_file(out / name) == sha
+    with pytest.raises(FileExistsError):
+        single.report(env.root, sel, out_dir=out, restrict=smoke.restrict)
+
+
+def test_the_environment_check_of_the_single_unit_levels():
+    dev = {"python": "3.13.15", **{k: "1" for k in ("numpy", "scipy", "pandas", "sklearn")}, "torch": "2.11.0+cu130"}
+    ok = single.check_environment(dev, "py", lambda p, k: dict(dev))
+    assert ok["level"] == "identical"
+    assert single.check_environment(dev, "py", lambda p, k: other_build(dev))["level"] == "compatible"
+    for bad in ({"numpy": "2"}, {"torch": "2.12.0+cu130"}, {"python": "3.14.0"}):
+        with pytest.raises(single.SingleRefused, match="incompatible"):
+            single.check_environment(dev, "py", lambda p, k, b=bad: {**dev, **b})
+    with pytest.raises(single.SingleRefused):
+        single.check_environment(dev, "py", lambda p, k: None)
+
+
+def test_the_selected_models_rank_comes_from_the_frozen_records_only(env):
+    write_freeze(env)
+    sel = single_sel(env)
+    r = single.gnn_ranking(env.root, sel)
+    recs = [ns.read_json(ns.record_path(env.root, p))["development_cv"] for p in ns.PARTS]
+    aucs = sorted((float(e["auc"]) for rr in recs for e in rr if e["experiment"].split("_")[0]
+                   in ("exp2", "exp3", "exp4", "exp5", "exp6", "exp8a")), reverse=True)
+    assert r["n_frozen_gnn_units"] == len(aucs) and r["highest"]["auc"] == aucs[0]
+    assert r["is_highest"] == (r["rank_by_development_auc"] == 1)
+
+
+def test_the_single_model_notebook_is_separate_and_only_runs_this_model():
+    nb = json.loads((REPO / "notebooks_a3/A3_06_single_model_holdout.ipynb").read_text())
+    src = "".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+    text = "".join("".join(c["source"]) for c in nb["cells"])
+    for c in nb["cells"]:
+        if c["cell_type"] == "code":
+            compile("".join(c["source"]), "A3_06", "exec")
+    assert "a3.py single-verify" in src and "a3.py single-holdout" in src and "a3.py single-report" in src
+    assert "single.dev_libraries(OUT)" in src and "holdout_reference" not in src   # no scan of all 320 results
+    assert "holdout --part" not in src and "xu_holdout" not in src and "freeze --write" not in src
+    for phrase in ("not completion of the full A3 holdout protocol", "115", "descriptive only", "A2 pin"):
+        assert phrase in text, phrase
+    assert nb["metadata"].get("accelerator") == "GPU"
