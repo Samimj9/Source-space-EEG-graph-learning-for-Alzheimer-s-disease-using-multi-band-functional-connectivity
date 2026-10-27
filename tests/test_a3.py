@@ -1125,10 +1125,10 @@ def test_the_driver_applies_the_pinned_gates(env):
     with pytest.raises(SystemExit, match="nothing is frozen"):
         run_driver(env)
     write_freeze(env)
-    with pytest.raises(SystemExit, match="frozen at commit"):
-        run_driver(env, commit="9" * 40)
-    with pytest.raises((SystemExit, amendment.AmendmentError)):
-        run_driver(env, commit=RP)                                                     # not the A2 pin
+    for wrong in ("9" * 40, RP):                    # another commit, in particular the release pin: refused by the pinned
+        with pytest.raises((SystemExit, amendment.AmendmentError)):               # initialization gate or the record's commit
+            run_driver(env, commit=wrong)
+    assert holdout_dirs(env.root) == []
     bad = list(ARGS)
     bad[bad.index("B")] = "A"                                                          # window mode A: not frozen
     with pytest.raises(SystemExit, match="not a frozen unit"):
