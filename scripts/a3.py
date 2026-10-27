@@ -110,7 +110,14 @@ if args.action == "audit":
 
     res = audit.audit(P)
     for c in res["checks"]:
-        print(f"[{'PASS' if c['ok'] else 'FAIL'}] {c['check']}" + (f": {c['detail']}" if c["detail"] else ""))
+        tag = "WARN" if c.get("warning") else "PASS" if c["ok"] else "FAIL"
+        print(f"[{tag}] {c['check']}" + (f": {c['detail']}" if c["detail"] else ""))
+    env = res["environments"]
+    print(f"numerical environments: {env['results']}; {env['n_in_final_plan']} of {res['n_completed']} results belong "
+          "to the final plan")
+    for r in env["summary"]:
+        print(f"  {r['namespace']:8s} {r['family']:6s} {r['env_id']:40s} {r['device_kind']:7s} results {r['n_results']:3d} "
+              f"(in final plan {r['n_in_final_plan']:3d}) contexts {r['contexts']} modes {r['modes']}")
     print(f"{res['n_completed']} completed development results, {res['n_not_completed']} not completed -> "
           f"{res.get('file')}")
     sys.exit(0 if res["ok"] else 1)

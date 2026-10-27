@@ -3654,6 +3654,16 @@ Limit of the fallback: it cannot stop a writer that ignores the claim in the ins
 rename (single-user use). `scripts/a3.py probe` (notebook A3_02, section 0) reports on the real mount which method will
 be used; `scripts/a3.py smoke --no-link` exercises the fallback end to end.
 
+**Numerical-environment policy (correction after the first real-data audit, 2026-10-27).** The audit of the 320 completed
+development results found two environments in the release (Python 3.13.15 + torch 2.11.0+cu130; Python 3.13.16 + torch
+2.11.0+cpu; same NumPy / SciPy / pandas / scikit-learn) and one, the first, in Exp 8a. The initial audit required a single
+identical environment and failed on that alone. It now applies the per-unit policy of `a3/environment.py`
+(`docs/final/a3_design.md` §3a): identical or compatible (Python patch version and PyTorch cpu / CUDA build may differ) passes,
+compatible with a warning and an inventory, anything else fails; mixed folds within a result and an Exp 8a environment absent
+from the release also fail. Bit-identical reproducibility across builds is not claimed. The holdout is restored to the
+environment of the Exp 8a results and compared with every unit's development environment. No result, checkpoint, pin or the
+116-unit plan was changed.
+
 **Tests:** `tests/test_a3.py` (plan composition and counts; Exp 0 sensor handling; discovery across both namespaces and
 the A2 commit; failed Exp 8 never a result; corrupt results; every freeze gate; write-once, checksums, tamper detection
 of records, results, pins, store lock and QC decisions; interrupted freeze; holdout gates under a missing record, a wrong

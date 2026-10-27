@@ -11,7 +11,7 @@ from .. import provenance
 from ..checkpoint import CODE_SCOPES
 from ..experiments import amendment
 from ..experiments.config import expand_variants, load_experiment
-from . import freeze, inventory
+from . import environment, freeze, inventory
 from . import namespace as ns
 
 
@@ -26,7 +26,7 @@ def audit(processed, write: bool = True) -> dict:
     checks = []
 
     def chk(name, ok, detail=""):
-        checks.append({"check": name, "ok": bool(ok), "detail": str(detail)})
+        checks.append({"check": name, "ok": bool(ok), "warning": False, "detail": str(detail)})
 
     rp, ap = ns.read_pin(ns.pin_file(processed, "release")), ns.read_pin(ns.pin_file(processed, "A2"))
     chk("release pin unchanged", rp == rec["release_pin"], rp)
@@ -47,9 +47,15 @@ def audit(processed, write: bool = True) -> dict:
     done8 = t[t["exp"] == "exp8"] if len(t) else t
     chk("original Exp 8 has no completed result (its failures are provenance only)", len(done8) == 0,
         f"{len(exp8)} non-completed exp8 directories: {exp8['state'].value_counts().to_dict() if len(exp8) else {}}")
-    libs = {p: sorted(set(t[t['namespace'] == p]["libraries"])) if len(t) else [] for p in ns.PARTS}
-    chk("one numerical environment per namespace", all(len(v) == 1 for v in libs.values()), libs)
-    chk("both namespaces share one numerical environment", len({x for v in libs.values() for x in v}) == 1)
+    plan_keys = None
+    try:                                         # the 116 units of the final plan, for the 320-vs-116 distinction
+        atlas, graph = freeze.recorded_decisions(processed)
+        plan_keys = {(p,) + freeze._key(u) for p, us in freeze.planned_units_for(atlas, graph).items() for u in us}
+    except Exception:                            # decisions not recorded: the flag is simply unknown
+        pass
+    inv = environment.inventory(processed, t, plan_keys)
+    checks.extend(environment.checks(inv))
+    env_summary = environment.summary(inv)
     src_now = provenance.source_fingerprint(CODE_SCOPES["experiment"])
     srcs = sorted(set(a2["source_sha256"])) if len(a2) else []
     chk("A3 code leaves the experiment source fingerprint equal to the A2 pin's", srcs == [src_now],
@@ -59,9 +65,19 @@ def audit(processed, write: bool = True) -> dict:
             "*/mode_*/*/*/*/*/xu_holdout"))))
     out = {"amendment": ns.AID, "checks": checks, "ok": all(c["ok"] for c in checks), "protected": freeze.protected_state(
         processed), "n_completed": int(len(t)), "n_not_completed": int(len(other)),
+        "environments": {"results": {k: int(v) for k, v in inv.groupby("env_id").size().items()} if len(inv) else {},
+                         "summary": env_summary.to_dict("records"), "n_in_final_plan": (
+                             int(inv["in_final_plan"].fillna(False).sum()) if len(inv) else 0),
+                         "policy": "docs/final/a3_design.md, environment policy"},
         "by_family": (t.groupby(["namespace", "family"]).size().reset_index(name="n").to_dict("records") if len(t) else []),
         "a3_commit": provenance.git_commit(), "git_dirty": provenance.git_dirty()}
     if write:
-        out["file"] = str(ns.new_file(ns.root(processed) / "audit" / f"audit_{ns.stamp()}.json",
+        stamp = ns.stamp()
+        if len(inv):
+            ns.new_file(ns.root(processed) / "audit" / f"environment_inventory_{stamp}.csv",
+                        inv.drop(columns=["libraries"]).to_csv(index=False))
+            ns.new_file(ns.root(processed) / "audit" / f"environment_summary_{stamp}.csv",
+                        env_summary.to_csv(index=False))
+        out["file"] = str(ns.new_file(ns.root(processed) / "audit" / f"audit_{stamp}.json",
                                       json.dumps(out, indent=2, default=str)))
     return out

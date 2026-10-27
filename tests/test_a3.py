@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from adgraph import release
-from adgraph.a3 import audit, d2, freeze, holdout, inventory, report, smoke, stats
+from adgraph.a3 import audit, d2, environment, freeze, holdout, inventory, report, smoke, stats
 from adgraph.a3 import namespace as ns
 from adgraph.experiments import amendment, decisions
 from adgraph.experiments.config import experiment_configs
@@ -57,6 +57,13 @@ def env(base, tmp_path):
     s.__dict__.update(base.__dict__)
     s.root = dst
     return s
+
+
+def same_environment(python, keys):
+    """The interpreter probe of tests: the environment the synthetic development results were produced in."""
+    from adgraph.provenance import versions
+
+    return versions(tuple(keys))
 
 
 def approved():
@@ -398,9 +405,10 @@ def test_the_holdout_orchestrator_is_refused_without_the_master_and_uses_the_pin
     with mock.patch.object(holdout, "ensure_worktree", lambda *a: wt), mock.patch.object(
             holdout, "imports_worktree", lambda *a: True):
         man = holdout.run_part(env.root, "A2", "exp8a", REPO, "p.yaml", "py", tmp_path, restrict=smoke.restrict,
-                               runner=lambda c, cwd, e: calls.append((c, cwd, e["PYTHONPATH"])) or 0)
+                               runner=lambda c, cwd, e: calls.append((c, cwd, e["PYTHONPATH"])) or 0,
+                               env_probe=same_environment)
     assert calls[0][0][:2] == ["py", "scripts/final.py"] and calls[0][1] == str(wt) and calls[0][2] == str(wt / "src")
-    assert man["pin"] == AP and man["exit_code"] == 0
+    assert man["pin"] == AP and man["exit_code"] == 0 and man["environment"]["level"] == "identical"
     assert list((ns.root(env.root) / "manifests").glob("holdout_A2_exp8a_*.json"))
 
 
@@ -718,6 +726,7 @@ def test_a3_notebooks_are_up_to_date_thin_and_safe(tmp_path, monkeypatch):
     assert "WRITE_FREEZE = False" in code["A3_02_freeze.ipynb"]
     for n in ("A3_03_holdout_exp0_6.ipynb", "A3_04_holdout_exp8a.ipynb"):
         assert "numerical_env.ensure_interpreter" in code[n] and "a3.py verify" in code[n]
+        assert "environment.holdout_reference(FOUND)" in code[n] and "reference_libraries" not in code[n]
     assert "--part release" in code["A3_03_holdout_exp0_6.ipynb"] and "--part A2" in code["A3_04_holdout_exp8a.ipynb"]
     assert '"exp8a"' in code["A3_04_holdout_exp8a.ipynb"] and '"exp7"' not in code["A3_03_holdout_exp0_6.ipynb"]
     for n in ("A3_01_development_report.ipynb", "A3_02_freeze.ipynb", "A3_05_final_report.ipynb"):
@@ -731,3 +740,184 @@ def test_the_methodology_log_records_amendment_a3():
     log = (REPO / "docs/methodology_architecture_log.md").read_text()
     assert "## 61." in log and "Amendment A3" in log.split("## 61.")[1][:300]
     assert "exp8a" in log.split("## 61.")[1] and "never" in log.split("## 61.")[1]
+
+
+# ------------------------------------------------------------------------------------------------ numerical environments
+def other_build(libs: dict) -> dict:
+    """The recorded libraries as if run on the other Colab runtime: another Python patch and the other torch build."""
+    pub = libs["torch"].split("+")[0]
+    build = "cu130" if libs["torch"].endswith("+cpu") else "cpu"
+    major_minor = ".".join(libs["python"].split(".")[:2])
+    return {**libs, "python": major_minor + ".99", "torch": f"{pub}+{build}"}
+
+
+def set_env(root, rel_dir, new=None, folds=True, **changes):
+    """Rewrite the recorded libraries of one result (identity file, final marker, fold markers) -- test tampering only."""
+    d = Path(root) / rel_dir
+    files = [d / "_identity.json", d / "final.done.json"] + (sorted((d / "units").glob("fold_*.done.json")) if folds
+                                                           else [])
+    for f in files:
+        j = json.loads(f.read_text())
+        libs = j["identity"]["code"]["libraries"]
+        j["identity"]["code"]["libraries"] = new(libs) if new else {**libs, **changes}
+        f.write_text(json.dumps(j))
+
+
+def dev_rows(root, **where):
+    t, _ = inventory.discover(root)
+    for k, v in where.items():
+        t = t[t[k] == v]
+    return t
+
+
+def env_checks(res):
+    return {c["check"].split(" (")[0]: c for c in res["checks"]}
+
+
+KEY_LIBS = "recorded numerical libraries identical across all results"
+KEY_SOFT = "documented compatible differences only"
+KEY_FOLDS = "no result mixes environments across its outer folds"
+KEY_A2 = "Exp 8a"
+
+
+def test_audit_accepts_the_two_real_environments_with_a_warning_and_an_inventory(env):
+    for rel in dev_rows(env.root, exp="exp1")["rel_dir"].tolist() + dev_rows(env.root, exp="exp0")["rel_dir"].tolist():
+        set_env(env.root, rel, new=other_build)                              # classical results from the CPU runtime
+    res = audit.audit(env.root, write=False)
+    c = env_checks(res)
+    assert c[KEY_LIBS]["ok"] and c[KEY_SOFT]["ok"] and c[KEY_SOFT]["warning"] and c[KEY_FOLDS]["ok"] and c[KEY_A2]["ok"]
+    assert "GNN results from a CPU torch build: 0" in c[KEY_SOFT]["detail"] or "build: 0" in c[KEY_SOFT]["detail"]
+    e = res["environments"]
+    assert len(e["results"]) == 2 and sum(e["results"].values()) == res["n_completed"]
+    assert {r["device_kind"] for r in e["summary"]} >= {"cpu"} and e["n_in_final_plan"] > 0
+    failed = [x for x in res["checks"] if not x["ok"]]
+    assert not [x for x in failed if "numerical" in x["check"] or "environment" in x["check"].lower()]
+
+
+def test_audit_reports_gnn_results_from_the_cpu_build(env):
+    set_env(env.root, dev_rows(env.root, exp="exp2", mode="B", inverse="lcmv")["rel_dir"].iloc[0], new=other_build)
+    d = env_checks(audit.audit(env.root, write=False))[KEY_SOFT]
+    assert d["ok"] and d["warning"] and "GNN results from a CPU torch build: 1" in d["detail"]
+
+
+@pytest.mark.parametrize("change", [{"numpy": "9.9.9"}, {"scipy": "9.9.9"}, {"pandas": "9.9.9"}, {"sklearn": "9.9.9"},
+                                    {"python": "3.99.0"}])
+def test_audit_fails_on_a_genuine_library_mismatch(env, change):
+    set_env(env.root, dev_rows(env.root, exp="exp1", mode="B")["rel_dir"].iloc[0], **change)
+    res = audit.audit(env.root, write=False)
+    c = env_checks(res)[KEY_LIBS]
+    assert not c["ok"] and not res["ok"] and next(iter(change)) in c["detail"]
+
+
+def test_audit_fails_on_another_torch_release(env):
+    set_env(env.root, dev_rows(env.root, exp="exp2", mode="B")["rel_dir"].iloc[0],
+            new=lambda l: {**l, "torch": "0.0.1+" + (l["torch"].split("+")[1] if "+" in l["torch"] else "cpu")})
+    assert not env_checks(audit.audit(env.root, write=False))[KEY_LIBS]["ok"]
+
+
+def test_audit_fails_when_the_folds_of_a_result_disagree_with_it(env):
+    rel = dev_rows(env.root, exp="exp1", mode="B", inverse="lcmv")["rel_dir"].iloc[0]
+    fold = sorted((Path(env.root) / rel / "units").glob("fold_*.done.json"))[0]
+    j = json.loads(fold.read_text())
+    j["identity"]["code"]["libraries"] = other_build(j["identity"]["code"]["libraries"])   # a COMPATIBLE environment...
+    fold.write_text(json.dumps(j))                                                          # ...but not the result's own
+    c = env_checks(audit.audit(env.root, write=False))
+    assert not c[KEY_FOLDS]["ok"] and c[KEY_LIBS]["ok"]
+
+
+def test_audit_fails_when_exp8a_ran_in_an_environment_absent_from_the_release(env):
+    for rel in dev_rows(env.root, exp="exp8a")["rel_dir"]:
+        set_env(env.root, rel, new=other_build)                              # release stays in its own environment
+    assert not env_checks(audit.audit(env.root, write=False))[KEY_A2]["ok"]
+
+
+def test_audit_writes_the_inventory_next_to_the_report(env):
+    set_env(env.root, dev_rows(env.root, exp="exp1", mode="B", inverse="lcmv")["rel_dir"].iloc[0], new=other_build)
+    res = audit.audit(env.root, write=True)
+    d = Path(res["file"]).parent
+    inv = pd.read_csv(next(d.glob("environment_inventory_*.csv")))
+    assert {"env_id", "device_kind", "folds_match_result", "in_final_plan", "git_commit", "variant"} <= set(inv.columns)
+    assert len(inv) == res["n_completed"] and inv["env_id"].nunique() == 2 and "libraries" not in inv
+    assert next(d.glob("environment_summary_*.csv")).exists()
+
+
+def test_freeze_accepts_mixed_documented_environments_and_refuses_a_genuine_mismatch(env):
+    for rel in dev_rows(env.root, exp="exp1", mode="B")["rel_dir"]:
+        set_env(env.root, rel, new=other_build)
+    res = env.freeze(write=False)
+    assert res["ok"], [c for c in res["checks"] if not c["ok"]]
+    soft = [c for c in res["checks"] if "documented compatible" in c["check"]]
+    assert soft and soft[0]["warning"] and "dev_env" in res["inventory"] and res["inventory"]["dev_env"].nunique() == 2
+    m = write_freeze(env)["master"]
+    assert sum(m["development_environments"].values()) == 19 and len(m["development_environments"]) == 2
+    freeze.verify(env.root, restrict=smoke.restrict)
+
+
+def test_freeze_refuses_a_genuine_environment_mismatch(env):
+    set_env(env.root, dev_rows(env.root, exp="exp2", mode="B")["rel_dir"].iloc[0], numpy="9.9.9")
+    res = env.freeze(write=False)
+    assert not res["ok"] and any("identical across all results" in c["check"] and not c["ok"] for c in res["checks"])
+    before = snapshot(env.root)
+    with approved(), pytest.raises(freeze.FreezeRefused, match="numerical libraries"):
+        freeze.freeze(env.root, write=True, restrict=smoke.restrict, require_clean=False)
+    assert snapshot(env.root) == before
+
+
+def test_holdout_environment_check_levels(env):
+    write_freeze(env)
+    here = same_environment("py", ("numpy", "scipy", "pandas", "sklearn", "torch"))
+    r = holdout.check_environment(env.root, "release", "exp1", "py", smoke.restrict, lambda p, k: here)
+    assert r["level"] == "identical" and r["counts"]["incompatible"] == 0
+    r = holdout.check_environment(env.root, "release", "exp1", "py", smoke.restrict, lambda p, k: other_build(here))
+    assert r["level"] == "compatible" and any("torch_build" in d for d in r["differences"])   # documented, recorded
+    with pytest.raises(holdout.HoldoutRefused, match="incompatible"):
+        holdout.check_environment(env.root, "release", "exp1", "py", smoke.restrict,
+                                  lambda p, k: {**here, "numpy": "9.9.9"})
+    with pytest.raises(holdout.HoldoutRefused, match="incompatible"):
+        holdout.check_environment(env.root, "A2", "exp8a", "py", smoke.restrict,
+                                  lambda p, k: {**here, "torch": "0.0.1+cpu"})
+    with pytest.raises(holdout.HoldoutRefused, match="incompatible"):
+        holdout.check_environment(env.root, "A2", "exp8a", "py", smoke.restrict, lambda p, k: None)
+
+
+def test_run_part_refuses_an_incompatible_interpreter_before_creating_a_worktree(env, tmp_path):
+    write_freeze(env)
+    here = same_environment("py", ("numpy", "scipy", "pandas", "sklearn", "torch"))
+    with mock.patch.object(holdout, "ensure_worktree", side_effect=AssertionError("no worktree")):
+        with pytest.raises(holdout.HoldoutRefused, match="incompatible"):
+            holdout.run_part(env.root, "A2", "exp8a", REPO, "p.yaml", "py", tmp_path, restrict=smoke.restrict,
+                             runner=lambda *a: pytest.fail("must not run"),
+                             env_probe=lambda p, k: {**here, "scipy": "9.9.9"})
+    wt = tmp_path / "wt"
+    with mock.patch.object(holdout, "ensure_worktree", lambda *a: wt), mock.patch.object(
+            holdout, "imports_worktree", lambda *a: True):
+        man = holdout.run_part(env.root, "release", "exp1", REPO, "p.yaml", "py", tmp_path, restrict=smoke.restrict,
+                               runner=lambda *a: 0, env_probe=lambda p, k: other_build(here))
+    assert man["environment"]["level"] == "compatible" and man["environment"]["differences"]
+
+
+def test_holdout_reference_is_the_exp8a_environment_of_the_real_results(env):
+    t, _ = inventory.discover(env.root)
+    ref = environment.holdout_reference(t)
+    assert ref == json.loads(t[t["namespace"] == "A2"].iloc[0]["libraries"]) and "python" in ref and "torch" in ref
+    from adgraph import numerical_env
+    assert numerical_env.differences(ref, same_environment("py", ref.keys())) == {}    # ensure_interpreter's comparison
+    for rel in dev_rows(env.root, exp="exp8a")["rel_dir"].iloc[:1]:
+        set_env(env.root, rel, new=other_build)
+    t2, _ = inventory.discover(env.root)
+    with pytest.raises(ValueError, match="exactly one"):
+        environment.holdout_reference(t2)
+
+
+def test_the_development_report_carries_the_environment_provenance(env):
+    set_env(env.root, dev_rows(env.root, exp="exp1", mode="B", inverse="lcmv")["rel_dir"].iloc[0], new=other_build)
+    r = report.development_report(env.root, cfg={**ns.stats_config(), "n_bootstrap": 20, "n_permutation": 20},
+                                  make_figures=False)
+    out = Path(r["dir"])
+    assert (out / "environment_inventory.csv").exists() and (out / "environment_summary.csv").exists()
+    md = (out / "development_results.md").read_text()
+    assert "Numerical-environment provenance" in md and "Limitation" in md and "WARN" in md and "116-unit" in md
+    man = json.loads((out / "manifest.json").read_text())
+    assert len(man["environments"]["results"]) == 2 and man["environments"]["checks"]
+    for name, sha in man["outputs_sha256"].items():
+        assert ns.sha256_file(out / name) == sha                                # the appended section is checksummed

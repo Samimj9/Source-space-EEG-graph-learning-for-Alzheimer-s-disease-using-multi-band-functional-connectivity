@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import freeze, inventory
+from . import environment, freeze, inventory
 from . import namespace as ns
 
 
@@ -64,11 +64,12 @@ def imports_worktree(python: str, wt: Path) -> bool:
 
 
 def run_part(processed, part: str, exp: str, repo, paths_file, python: str, base="/content", restrict=None,
-             runner=None, a3_commit: str | None = None) -> dict:
+             runner=None, a3_commit: str | None = None, env_probe=None) -> dict:
     """Evaluate the holdout units of ``exp`` of ``part`` (resumable). Refused unless the A3 freeze verifies."""
     from .. import provenance
 
     freeze.verify(processed, restrict=restrict)                        # raises FreezeInvalid / refuses
+    env_check = check_environment(processed, part, exp, python, restrict, env_probe)
     pin = ns.part_pin(part)
     wt = ensure_worktree(repo, base, part, pin)
     if not imports_worktree(python, wt):
@@ -81,10 +82,32 @@ def run_part(processed, part: str, exp: str, repo, paths_file, python: str, base
     man = {"amendment": ns.AID, "part": part, "exp": exp, "pin": pin, "worktree": str(wt), "command": cmd,
            "exit_code": code, "started": started, "finished": datetime.now(timezone.utc).isoformat(),
            "a3_commit": a3_commit or provenance.git_commit(), "interpreter": python,
-           "master_sha256": ns.sha256_file(ns.master_path(processed))}
+           "master_sha256": ns.sha256_file(ns.master_path(processed)), "environment": env_check}
     ns.new_file(ns.root(processed) / "manifests" / f"holdout_{part}_{exp}_{ns.stamp()}.json",
                 json.dumps(man, indent=2))
     return man
+
+
+def check_environment(processed, part: str, exp: str, python: str, restrict=None, env_probe=None) -> dict:
+    """The interpreter that will refit the units must be identical or documented-compatible (a3/environment.py) with the
+    environment each unit's development result was produced in; otherwise the holdout is refused. The comparison is
+    recorded in the manifest (a refit in another PyTorch build is not bit-identical)."""
+    from .. import numerical_env
+
+    units = [u for u in freeze.planned_units(processed, restrict)[part] if u["exp"] == exp]
+    found, _ = inventory.discover(processed, settings=("xu_dev_cv",))
+    rows, problems = freeze.dev_results(processed, {part: units}, found)
+    if problems:
+        raise HoldoutRefused("development results missing for the units to refit: " + "; ".join(problems[:3]))
+    probe = env_probe or numerical_env.interpreter_versions
+    libs = probe(python, ("numpy", "scipy", "pandas", "sklearn", "torch"))
+    res = environment.interpreter_check(libs, [r["libraries"] for r in rows])
+    res["interpreter"] = libs
+    if res["level"] == "incompatible":
+        raise HoldoutRefused(f"the holdout interpreter's numerical environment is incompatible with the development "
+                             f"environment of {res['counts']['incompatible']} of {res['n_units']} {exp} units: "
+                             f"{res['differences']}")
+    return res
 
 
 def holdout_dir(processed, part: str, u: dict) -> Path:

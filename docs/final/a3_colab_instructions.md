@@ -20,6 +20,19 @@ If Colab disconnects: open the notebook and *Run all* again (completed units are
 recomputed). If the A3 code changes before the freeze exists, the A3 pin moves automatically; after it exists use
 `UPDATE_CODE = True` deliberately (this never touches the release or A2 pins). `ACCEPT_ENVIRONMENT_DIFFERENCE` stays `False`.
 
+## Rerunning A3_01 after the numerical-environment correction
+
+1. Open `notebooks_a3/A3_01_development_report.ipynb` from branch `claude/a3-final-analysis` (Colab: *File → Open
+   notebook → GitHub*, or the link in `notebooks_a3/README.md`). A CPU runtime is enough.
+2. *Runtime → Run all*. The setup cell clones the branch head; the A3 code pin is not frozen yet, so it moves to the new
+   commit automatically. If it reports an older pin, set `UPDATE_CODE = True` in the first cell and run again.
+3. Expected audit output: all `[PASS]`, and one `[WARN] documented compatible differences only (Python patch version,
+   PyTorch cpu / CUDA build)` naming the two environments, followed by the table of results per namespace, experiment and
+   environment. Any `[FAIL]` stops the notebook and is a genuine mismatch to investigate.
+4. Outputs (new files, nothing overwritten): `A3_final/audit/audit_*.json`, `environment_inventory_*.csv`,
+   `environment_summary_*.csv`, and the report folder `A3_final/reports/development_*/` with the environment provenance
+   section in `development_results.md`.
+
 ## Command line (same logic; from a checkout of the A3 branch with `configs/paths.yaml`)
 
 ```

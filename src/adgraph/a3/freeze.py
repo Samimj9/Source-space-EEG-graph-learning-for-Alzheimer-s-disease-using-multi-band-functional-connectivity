@@ -24,7 +24,7 @@ import pandas as pd
 from .. import release
 from ..experiments import amendment, decisions
 from ..experiments.config import expand_variants, load_experiment
-from . import inventory
+from . import environment, inventory
 from . import namespace as ns
 
 
@@ -144,6 +144,10 @@ def preconditions(processed, restrict=None, found: pd.DataFrame | None = None, s
     checks.append(_chk("every planned unit has a complete, verified development-CV result at its pin",
                        not problems, f"{len(rows)} of {sum(map(len, units.values()))} units; "
                        + "; ".join(problems[:3]) + (f" (+{len(problems) - 3} more)" if len(problems) > 3 else "")))
+    if rows:                                   # per-unit numerical-environment policy (a3/environment.py)
+        env_inv = environment.inventory(processed, pd.DataFrame(rows))
+        for c in environment.checks(env_inv):
+            checks.append({**c, "check": "planned units: " + c["check"]})
     existing = [p for p in ns.PARTS if ns.record_path(processed, p).exists()]
     checks.append(_chk("no conflicting frozen record exists",
                        all(_matches(processed, p, units[p], raise_=False) for p in existing),
@@ -254,6 +258,9 @@ def freeze(processed, write: bool = False, restrict=None, a3_commit: str | None 
          "n_units": sum(map(len, units.values())),
          "development_results_sha256": dev_signature(dev),
          "protected": protected_state(processed), "amendment_record": rec,
+         "development_environments": {k: int(v) for k, v in pd.Series(
+             [environment.env_id(r["libraries"]) for r in dev]).value_counts().items()},
+         "environment_policy": "a3/environment.py: identical or compatible (Python patch, torch cpu/CUDA build) only",
          "plan_sha256": ns.sha256_file(Path(decisions.CONFIG_ROOT) / "amendments" / "holdout_A3.yaml"),
          "original_holdout_sha256": rec["original_holdout_plan_sha256"], "synthetic": synthetic,
          "substitution": {"exp8": "exp8a", "reason": rec["reason"].strip()}, "holdout_policy": release.HOLDOUT_POLICY}

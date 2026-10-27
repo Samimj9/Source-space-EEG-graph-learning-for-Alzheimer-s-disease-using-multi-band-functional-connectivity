@@ -65,12 +65,18 @@ print('A3 outputs on Drive:', A3)
 
 ENV = '''ACCEPT_ENVIRONMENT_DIFFERENCE = False   # leave False: a difference that cannot be removed must stop here
 from adgraph import numerical_env
-REFERENCE = numerical_env.reference_libraries(OUT, 'exp7_earm_gnn')   # recorded by a completed Exp 7 unit
+from adgraph.a3 import environment, inventory as a3_inventory
+# The holdout fits are restored to the single environment of the Exp 8a (A2) results (A2 chose it to equal the Exp 7
+# units'). Release units developed in a documented-compatible environment (Python patch version, torch cpu / CUDA build)
+# are refit in it; `a3.py holdout` compares it with every unit's development environment, records the comparison and
+# refuses an incompatible one.
+FOUND, _ = a3_inventory.discover(OUT, settings=('xu_dev_cv',))
+REFERENCE = environment.holdout_reference(FOUND)
 PY = numerical_env.ensure_interpreter(REFERENCE, repo='/content/repo', base='/content',
                                       accept_difference=ACCEPT_ENVIRONMENT_DIFFERENCE, run=sh)
 NOW = numerical_env.interpreter_versions(PY, REFERENCE)
 DIFF = numerical_env.differences(REFERENCE, NOW)
-assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from the completed units: {DIFF}'
+assert ACCEPT_ENVIRONMENT_DIFFERENCE or not DIFF, f'numerical environment differs from the Exp 8a (A2) environment: {DIFF}'
 print('holdout scripts run with', PY, NOW)'''
 
 HOWTO = f"""

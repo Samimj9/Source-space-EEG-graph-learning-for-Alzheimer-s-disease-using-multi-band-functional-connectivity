@@ -42,6 +42,33 @@ FINAL_v1/amendments/A3_final/{reports,audit,d2_manifest,manifests}/    A3 output
 | holdout of a unit outside the record, under another commit, mode A, Exp 7 | pinned code: `decisions.require_frozen`, `amendment.holdout` |
 | A3 code outside the experiment code identity scope (no completed checkpoint invalidated) | `tests/test_a3.py` (git diff vs the A2 pin) |
 
+## 3a. Numerical-environment policy (`src/adgraph/a3/environment.py`)
+
+The completed results come from more than one Colab environment (found by the first real-data audit): Python 3.13.15 +
+torch 2.11.0+cu130 (GPU runtime; also all Exp 8a results) and Python 3.13.16 + torch 2.11.0+cpu (CPU runtime); NumPy 2.1.3,
+SciPy 1.16.3, pandas 2.2.3 and scikit-learn 1.6.1 are the same in both. A3 therefore does not demand one identical
+environment; every result is classified against the others:
+
+| Level | Condition | Audit / freeze / holdout |
+|---|---|---|
+| identical | every recorded version equal | pass |
+| compatible | NumPy, SciPy, pandas, scikit-learn, mne, torch release and Python minor equal; only the **Python patch** and/or the **PyTorch build tag (cpu / cuNNN)** differ | pass **with a warning** that names the environments and the number of GNN results from a CPU build |
+| incompatible | anything else (another library release, another torch release, another Python minor) | **fail**: the audit fails, the freeze and the holdout are refused |
+
+Further fail-fast conditions: a result whose fold checkpoints carry another environment than the result; Exp 8a results in
+an environment that does not occur among the release results. **Limitation:** compatible is not bit-identical. CPU and CUDA
+builds use different kernels, so a GNN refit in another build can differ in the last digits and, over 60 epochs, in its
+predictions; the size of that effect has not been quantified and is stated in the audit and the development report.
+Classical models (logistic regression, SVM) do not use PyTorch.
+
+Holdout restoration: A3_03 / A3_04 restore **the single environment of the Exp 8a (A2) results** (Python 3.13.15, torch
+2.11.0+cu130; it equals the Exp 7 environment by A2's design) with `numerical_env.ensure_interpreter`, and `a3.py holdout`
+compares that interpreter with the development environment of every unit it will refit: identical or compatible units are
+refit and the comparison is stored in the holdout manifest; an incompatible one refuses the call. Release units developed
+in the CPU environment are therefore refit in the CUDA-build environment (compatible, recorded). The audit writes
+`environment_inventory_*.csv` (one row per result: environment, device kind, fold consistency, membership in the 116-unit
+final plan) and `environment_summary_*.csv`; the development report carries the same provenance section.
+
 ## 4. Statistics and reading rules
 
 Unit = participant; matched participants only; paired DeLong + stratified participant bootstrap CI of the AUC difference;

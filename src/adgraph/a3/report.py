@@ -16,7 +16,7 @@ import pandas as pd
 
 from .. import release
 from ..experiments import decisions
-from . import inventory, stats
+from . import environment, inventory, stats
 from . import namespace as ns
 
 COLUMNS = ["family", "family_title", "experiment", "variant", "inverse", "mode", "atlas", "graph", "namespace", "role",
@@ -256,6 +256,35 @@ def figures(primary: pd.DataFrame, allr: pd.DataFrame, cmp: pd.DataFrame, sel: d
     return made
 
 
+def plan_units(atlas: str, graph: str) -> dict:
+    from .freeze import planned_units_for
+
+    return planned_units_for(atlas, graph)
+
+
+def freeze_key(u: dict) -> tuple:
+    return tuple(str(u[k]) for k in inventory.UNIT_KEY)
+
+
+def environment_markdown(inv: pd.DataFrame, summ: pd.DataFrame, checks: list[dict]) -> str:
+    """Concise environment provenance for the development report (policy: a3/environment.py)."""
+    n_plan = int(inv["in_final_plan"].fillna(False).sum()) if len(inv) else 0
+    L = ["\n## Numerical-environment provenance\n",
+         f"{len(inv)} completed development results, of which {n_plan} belong to the 116-unit final plan. Each result "
+         "is listed with its environment in `environment_inventory.csv`; the fold checkpoints of every result were "
+         "compared with the result's environment.\n",
+         md_table(summ, ["namespace", "family", "env_id", "device_kind", "n_results", "n_in_final_plan", "contexts",
+                         "modes"]) if len(summ) else "", "\nChecks:\n"]
+    for c in checks:
+        L.append(f"- **{'WARN' if c.get('warning') else 'PASS' if c['ok'] else 'FAIL'}** {c['check']}: {c['detail']}")
+    L.append("\n**Limitation.** Environments that differ only in the Python patch version or the PyTorch cpu / CUDA build "
+             "are treated as compatible, not identical: the same library releases, but different binaries, so GNN results "
+             "are not guaranteed to be bit-reproducible across them, and the size of that effect has not been quantified. "
+             "Classical models do not use PyTorch. Any other difference (another NumPy / SciPy / pandas / scikit-learn "
+             "release, another torch release, another Python minor version) fails the audit.\n")
+    return "\n".join(L)
+
+
 # ------------------------------------------------------------------------------------------------ development report
 def decisions_of(processed) -> tuple[str, str]:
     from .freeze import recorded_decisions
@@ -319,6 +348,15 @@ def development_report(processed, out_dir=None, atlas: str | None = None, graph:
     (out / "interpretation.md").write_text(interpretation(primary, cmp, sel))
     for n in ("development_results.md", "interpretation.md"):
         files[n] = ns.sha256_file(out / n)
+    plan_keys = {(p,) + freeze_key(u) for p, us in plan_units(atlas, graph).items() for u in us}
+    env_inv = environment.inventory(processed, t, plan_keys)
+    env_sum = environment.summary(env_inv)
+    csv("environment_inventory.csv", env_inv.drop(columns=["libraries"]) if len(env_inv) else env_inv)
+    csv("environment_summary.csv", env_sum)
+    env_checks = environment.checks(env_inv)
+    with open(out / "development_results.md", "a") as f:
+        f.write(environment_markdown(env_inv, env_sum, env_checks))
+    files["development_results.md"] = ns.sha256_file(out / "development_results.md")
     figs = figures(primary, t, cmp, sel, out / "figures") if make_figures and len(t) else []
     man = {"amendment": ns.AID, "kind": "development report", "atlas": atlas, "graph": graph, "n_completed": int(len(t)),
            "n_not_completed": int(len(other)), "n_holdout_rows_read": 0, "settings_read": ["xu_dev_cv"],
@@ -326,7 +364,9 @@ def development_report(processed, out_dir=None, atlas: str | None = None, graph:
            "namespaces": sorted(t["namespace"].unique()) if len(t) else [], "a3_commit": provenance.git_commit(),
            "git_dirty": provenance.git_dirty(), "versions": provenance.versions(), "statistics_config": cfg,
            "input_results_sha256": ns.sha256_json(sorted(t["metrics_sha256"].tolist())) if len(t) else None,
-           "outputs_sha256": files, "figures": figs, "release": release.release_manifest()}
+           "outputs_sha256": files, "figures": figs,
+           "environments": {"results": {k: int(v) for k, v in env_inv.groupby("env_id").size().items()}
+                            if len(env_inv) else {}, "checks": env_checks}, "release": release.release_manifest()}
     (out / "manifest.json").write_text(json.dumps(man, indent=2, default=str))
     return {"dir": str(out), "n_completed": len(t), "n_not_completed": len(other), "comparisons": len(cmp),
             "supported": int(cmp["supported"].sum()) if len(cmp) else 0, "figures": figs}
