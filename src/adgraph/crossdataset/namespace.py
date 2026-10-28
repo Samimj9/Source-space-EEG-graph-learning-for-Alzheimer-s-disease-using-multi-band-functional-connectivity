@@ -95,5 +95,5 @@ def require_authorized(processed, stage: str) -> dict:
     a = authorizations(processed).get(stage)
     if not a:
         raise NotAuthorized(f"stage {stage!r} ({STAGES[stage]}) has not been authorized by the author; nothing was "
-                            f"run (scripts/cross_dataset.py authorize --stage {stage} --by '<name>')")
+                            f"run (scripts/cross_dataset.py authorize --authorization-stage {stage} --by '<name>')")
     return a

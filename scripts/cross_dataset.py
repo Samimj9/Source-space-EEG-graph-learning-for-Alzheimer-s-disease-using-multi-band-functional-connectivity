@@ -6,13 +6,13 @@
                                                                 # + line noise and what a notch would change
     python scripts/cross_dataset.py inspect-d3-line             # the same line-noise audit of the D3 recordings
     python scripts/cross_dataset.py inspect-d2-units            # every EDF channel's unit and band-passed amplitude
-    python scripts/cross_dataset.py authorize --stage build_d2 --by "<name>" [--note ...]   # the AUTHOR, once
+    python scripts/cross_dataset.py authorize --authorization-stage build_d2 --by "<name>" [--note ...]   # the AUTHOR, once
     python scripts/cross_dataset.py build-d2 --inverse lcmv [--limit 2]   # matched-channel D2 stores (authorized)
     python scripts/cross_dataset.py validate-d2 --inverse lcmv
     python scripts/cross_dataset.py compat --inverse lcmv --mode B        # compatibility report, shift diagnostics,
                                                                           # harmonization manifest, D2 QC (blind)
     python scripts/cross_dataset.py freeze                      # decision audit + frozen campaign (before training)
-    python scripts/cross_dataset.py authorize --stage train --by "<name>"
+    python scripts/cross_dataset.py authorize --authorization-stage train --by "<name>"
     python scripts/cross_dataset.py status
     python scripts/cross_dataset.py run --direction D3_to_D2 --inverse lcmv --mode B [--experiments exp3 ...]
     python scripts/cross_dataset.py evaluate                    # target labels are read here only (frozen units)
@@ -44,7 +44,10 @@ parser.add_argument("--inverses", nargs="*", default=None, choices=["lcmv", "wmn
 parser.add_argument("--modes", nargs="*", default=None, choices=["B", "A"])
 parser.add_argument("--experiments", nargs="*", default=None)
 parser.add_argument("--variants", nargs="*", default=None)
-parser.add_argument("--stage", default="primary", choices=["primary", "stability"])
+parser.add_argument("--stage", default="primary", choices=["primary", "stability"],
+                    help="analysis stage of run / status / evaluate / report (never an authorization)")
+parser.add_argument("--authorization-stage", default=None, choices=["build_d2", "train", "stability"],
+                    help="authorize: the stage the author authorizes (namespace.STAGES); required there")
 parser.add_argument("--limit", type=int, default=None)
 parser.add_argument("--by", default="")
 parser.add_argument("--note", default="")
@@ -52,6 +55,8 @@ parser.add_argument("--quick", action="store_true", help="smoke: 2 epochs, one v
 parser.add_argument("--force", action="store_true")
 parser.add_argument("--allow-ephemeral-storage", action="store_true")
 args = parser.parse_args()
+if args.authorization_stage is not None and args.action != "authorize":
+    parser.error("--authorization-stage belongs to the authorize command only")
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 pd.set_option("display.width", 250, "display.max_rows", 500, "display.max_columns", 40)
 
@@ -322,7 +327,10 @@ if args.action == "inspect-d3-line":
     sys.exit(0)
 
 if args.action == "authorize":
-    rec = namespace.authorize(processed, args.stage, args.by, args.note)
+    if args.authorization_stage is None:
+        parser.error("authorize needs --authorization-stage {build_d2,train,stability} (--stage is the analysis stage "
+                     "of run / status / evaluate / report)")
+    rec = namespace.authorize(processed, args.authorization_stage, args.by, args.note)
     print(f"authorized: {rec}")
     sys.exit(0)
 

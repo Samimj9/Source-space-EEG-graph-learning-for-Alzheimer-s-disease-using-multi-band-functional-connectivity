@@ -418,10 +418,12 @@ def test_cross_notebooks_use_their_own_branch_pin_and_gates():
         assert "!" not in [ln.strip()[:1] for ln in src.splitlines()]
     gate = "\n".join("".join(c["source"]) for c in json.loads(nbs[0].read_text())["cells"])
     assert "AUTHORIZED_BY = ''" in gate and "FREEZE_CAMPAIGN = False" in gate
+    assert "authorize --authorization-stage build_d2" in gate
     for nb in nbs[1:3]:
         src = "".join("".join(c["source"]) for c in json.loads(nb.read_text())["cells"])
         assert "AUTHORIZED_BY = ''" in src and "evaluate" not in src        # no target labels before notebook 03
-        assert "STABILITY_AUTHORIZED_BY = ''" in src and "--stage stability" in src
+        assert "STABILITY_AUTHORIZED_BY = ''" in src and "run --stage stability" in src
+        assert "authorize --authorization-stage train" in src and "authorize --authorization-stage stability" in src
     for nb in nbs:                                                          # outputs stay in the cross namespace
         text = "".join("".join(c["source"]) for c in json.loads(nb.read_text())["cells"])
         assert "Everything is written to `<outputs>/FINAL_v1/`" not in text

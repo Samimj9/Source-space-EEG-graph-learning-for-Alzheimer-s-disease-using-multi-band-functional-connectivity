@@ -55,14 +55,16 @@ python scripts/cross_dataset.py audit
 python scripts/cross_dataset.py inspect-d2-units
 python scripts/cross_dataset.py inspect-d2
 python scripts/cross_dataset.py inspect-d3-line
-python scripts/cross_dataset.py authorize --stage build_d2 --by "<name>"
+python scripts/cross_dataset.py authorize --authorization-stage build_d2 --by "<name>"
 python scripts/cross_dataset.py build-d2 --inverse lcmv --limit 2 && python scripts/cross_dataset.py validate-d2 --inverse lcmv --limit 2
 python scripts/cross_dataset.py build-d2 --inverse lcmv && python scripts/cross_dataset.py validate-d2 --inverse lcmv
 python scripts/cross_dataset.py build-d2 --inverse wmne && python scripts/cross_dataset.py validate-d2 --inverse wmne
 python scripts/cross_dataset.py compat --inverse lcmv --mode B          # and the other three contexts
 python scripts/cross_dataset.py freeze
-python scripts/cross_dataset.py authorize --stage train --by "<name>"
+python scripts/cross_dataset.py authorize --authorization-stage train --by "<name>"
 python scripts/cross_dataset.py run --direction D3_to_D2 --inverses lcmv --modes B
+python scripts/cross_dataset.py authorize --authorization-stage stability --by "<name>"   # only if authorized
+python scripts/cross_dataset.py run --stage stability --direction D3_to_D2 --inverses lcmv --modes B
 python scripts/cross_dataset.py status
 python scripts/cross_dataset.py evaluate && python scripts/cross_dataset.py report
 python scripts/cross_dataset.py smoke --quick                           # synthetic, temp dir, any time

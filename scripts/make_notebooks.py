@@ -822,7 +822,7 @@ Set `AUTHORIZED_BY` to the author's name only after the written authorization; i
 if not AUTHORIZED_BY:
     print('Not authorized: the D2 stores are not built. Review Part A and docs/cross_dataset/design.md first.')
 else:
-    cross(f'authorize --stage build_d2 --by "{AUTHORIZED_BY}"')
+    cross(f'authorize --authorization-stage build_d2 --by "{AUTHORIZED_BY}"')
     cross('build-d2 --inverse lcmv --limit 2')
     cross('validate-d2 --inverse lcmv --limit 2')
     for inverse in ('lcmv', 'wmne'):
@@ -861,7 +861,7 @@ metric is computed here (notebook 03).
         md("## Training authorization (author) and status"),
         code("""AUTHORIZED_BY = ''          # the author's name after the written authorization of real-data training
 if AUTHORIZED_BY:
-    cross(f'authorize --stage train --by "{AUTHORIZED_BY}"')
+    cross(f'authorize --authorization-stage train --by "{AUTHORIZED_BY}"')
 cross('status')"""),
         md("## Run (resumable; this direction only). `CONTEXTS` is the only cell meant to be edited."),
         code(f"""CONTEXTS = [('lcmv', 'B'), ('wmne', 'B'), ('sensor', 'B'), ('lcmv', 'A'), ('wmne', 'A'), ('sensor', 'A')]
@@ -881,7 +881,7 @@ Training seeds 1-4 for every unit and, for D2 -> D3, the repeated D2 source CV (
 unless the author has authorized it in writing."""),
         code(f"""STABILITY_AUTHORIZED_BY = ''
 if STABILITY_AUTHORIZED_BY:
-    cross(f'authorize --stage stability --by "{{STABILITY_AUTHORIZED_BY}}"')
+    cross(f'authorize --authorization-stage stability --by "{{STABILITY_AUTHORIZED_BY}}"')
     for inverse, mode in CONTEXTS:
         cross(f'run --stage stability --direction {direction} --inverses {{inverse}} --modes {{mode}}')"""),
     ], gpu=True)
