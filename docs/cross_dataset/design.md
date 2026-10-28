@@ -1,24 +1,25 @@
 # Cross-dataset generalization D3 <-> D2 on a matched 19-electrode representation: experimental design
 
-Version 1.2 (2026-10-26), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-63. **Status: designed,
-synthetically validated, author decisions D1-D10 recorded (section 12); only the audit-only Part A of notebook 00 is
-authorized. No real-data graph has been built, the campaign is not frozen, no model has been trained and no target
+Version 1.3 (2026-10-28), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-65. **Status: designed,
+synthetically validated, author decisions D1-D10 recorded (section 12), protocol amendment X1 recorded (D2-19
+excluded, section 12.8; post-audit, pre-build); only the audit-only Part A of notebook 00 is authorized. No real-data graph has been built, the campaign is not frozen, no model has been trained and no target
 label has been evaluated.** The stages that touch real data beyond the audit (the D2 stores, the training, the
 stability analysis) need the author's recorded authorization (section 10). No result exists yet, and nothing in this
 document reports or anticipates one.
 
 Code: `src/adgraph/crossdataset/` (`channels`, `d2store`, `namespace`, `compat`, `plan`, `transfer`, `evaluate`,
 `report`, `synthetic`), `scripts/cross_dataset.py`. Configs: `configs/cross_dataset/` (`channel_map_19.yaml`,
-`d2_store.yaml`, `campaign.yaml`). Notebooks: `notebooks/cross_dataset/` (00-03). Tests: `tests/test_cross_channels.py`,
-`tests/test_cross_dataset.py`. Run guide: `docs/cross_dataset/run_guide.md`.
+`d2_store.yaml`, `campaign.yaml`, `amendments.yaml`). Notebooks: `notebooks/cross_dataset/` (00-03). Tests:
+`tests/test_cross_channels.py`, `tests/test_cross_dataset.py`, `tests/test_cross_exclusion.py`. Run guide: `docs/cross_dataset/run_guide.md`.
 
 ## 1. Objective
 
 How well do the EEG graph neural networks of Exp 3-8a, trained on one independent AD dataset, classify AD vs HC in
 another dataset **without any target-domain training** (zero-shot)?
 
-* **Direction A, D3 -> D2:** train on D3 only (the 52 frozen development participants), test on all 23 D2 participants.
-* **Direction B, D2 -> D3:** train on D2 only (all 23), test on all 65 D3 participants, reported for all 65 and
+* **Direction A, D3 -> D2:** train on D3 only (the 52 frozen development participants), test on the 22 participants of
+  the D2 analysis cohort (9 AD / 13 HC; the 23 recordings as provided minus D2-19, amendment X1, section 12.8).
+* **Direction B, D2 -> D3:** train on D2 only (the same 22), test on all 65 D3 participants, reported for all 65 and
   separately for the 52 development and the 13 holdout participants (the 13 were inspected in earlier work:
   not an untouched holdout).
 
@@ -157,8 +158,10 @@ stored separately; flat-channel and amplitude-plausibility checks. The D2 config
 
 ## 5. Stores and compatibility
 
-New: `<processed>/CROSS_D3_D2_19CH_v1/stores/graphsXD2{L,W}{,10}_v1_<hash>` (LCMV / wMNE, mode B / A), all 23 D2
-resting-state participants, built resumably (one checkpoint per participant), validated (`validation.json`), no
+New: `<processed>/CROSS_D3_D2_19CH_v1/stores/graphsXD2{L,W}{,10}_v1_<hash>` (LCMV / wMNE, mode B / A), the 22 D2
+participants of the analysis cohort (D2-19 excluded by amendment X1 and never built; the store configuration carries
+the amendment's hash, `cohort.json` and the manifest record the excluded participant, and validation refuses a store
+that contains it), built resumably (one checkpoint per participant), validated (`validation.json`), no
 ds004504 split. D3: the validated lobes12 stores (Exp 1, 3-8a) and the LCMV dk68 store (Exp 0 sensor features, as in
 the release), read only; no new D3 representation is created because every property is already identical (4.1) and
 the D2 representation was built to match them.
@@ -193,7 +196,8 @@ the source training participants only.
 ## 7. Training and zero-shot evaluation protocol
 
 * **Source participants.** D3 -> D2: the 52 development participants of the frozen split (= `xu_partition`, checked
-  against the store's `xu_split.json`); the 13 holdout participants never enter. D2 -> D3: all 23.
+  against the store's `xu_split.json`); the 13 holdout participants never enter. D2 -> D3: the 22 participants of
+  the D2 analysis cohort (D2-19 never enters a fit, a fold or a score; checked at every stage).
 * **Fit.** A fresh model per unit (direction x inverse x mode x experiment x variant x seed), seed 0 = the protocol
   seed (for D3 -> D2 this is exactly the release's holdout-fit configuration). Every fitted transform (node-feature
   scaler, graph construction, subject- and class-balanced weights, classical inner CV) sees only the source view.
@@ -201,7 +205,7 @@ the source training participants only.
   built; tensor shapes, feature names, band and ROI order and adjacency kind are checked equal; the fitted model scores
   every target window; one mean P(AD) per participant (SVM: mean margin) is saved without labels.
 * **Threshold.** 0.5 (SVM margin 0); never tuned.
-* **Source-only estimates.** D2 -> D3: participant-stratified 5-fold CV of D2, **one repeat**, the primary D3
+* **Source-only estimates.** D2 -> D3: participant-stratified 5-fold CV of the 22 D2 participants, **one repeat**, the primary D3
   protocol (decision D7). D3 -> D2: the completed release / A2 development CV of the same variant, used only if its
   training-config hash, D3 store graph_run_id, setting, experiment, variant and run context all equal this campaign's
   (decision D9; else reported as missing or mismatched; optional recomputation is not part of the primary plan).
@@ -226,7 +230,7 @@ Per direction (never pooled), per inverse and window mode (never pooled), per un
   untouched holdout);
 * paired comparisons only on identical target participants: each GNN variant vs the reference baseline (Exp 1 LR on
   source PSD, same direction / inverse / mode), paired DeLong, Holm within each direction x inverse x mode family;
-  labelled exploratory; small ranking differences are not interpreted (D2 has 23 participants);
+  labelled exploratory; small ranking differences are not interpreted (D2 has 22 participants);
 * per-participant predictions with provenance: key, subject id, true label, mean P(AD), number of windows, source and
   target dataset, inverse, mode, experiment, variant, seed, threshold, D3 partition, git commit, source fingerprint
   (on Drive only).
@@ -353,14 +357,17 @@ result carries this limitation and the condition is reported as unknown.
 
 | D2 | n | Age mean (range) | Female / male |
 |---|---|---|---|
-| AD | 10 | 80.3 (66-92) | 7 / 3 |
-| HC | 13 | 61.9 (55-71) | 4 / 9 |
+| AD, inventory (23 recordings) | 10 | 80.3 (66-92) | 7 / 3 |
+| AD, analysis cohort (amendment X1) | 9 | 79.7 (66-92) | 6 / 3 |
+| HC (both) | 13 | 61.9 (55-71) | 4 / 9 |
 
-The pre-specified age-overlap interval is [66, 71] years and holds 1 AD and 4 HC participants: the age-overlap AUC is
-**not estimable** (at least 3 per class required) and will be reported as such. The analyses that remain informative
+The analysis uses the 22-participant cohort; the audit reports both (`audit/demographics.csv`: analysis cohort,
+`audit/demographics_d2_inventory.csv`: the 23 recordings). The pre-specified age-overlap interval is [66, 71] years
+(unchanged by the exclusion: the AD age range is still 66-92) and held 1 AD and 4 HC participants in the inventory,
+at most 1 AD in the analysis cohort: the age-overlap AUC is **not estimable** (at least 3 per class required) and will be reported as such. The analyses that remain informative
 are the age-only baseline (transfer and within-source), the within-diagnosis score-age association and the test of
 whether a model's score adds to age (section 9). In addition, the sheet's quality comments (bad channels, movement)
-concern 7 of 10 AD and 3 of 13 HC recordings: recording quality is also associated with diagnosis in D2, so
+concern 7 of 10 AD and 3 of 13 HC recordings (6 of 9 AD in the analysis cohort): recording quality is also associated with diagnosis in D2, so
 artifact-related signal differences are a second non-disease route to separation. D3's groups have similar ages
 (66.4 and 67.9 years). These are descriptive facts about the cohorts; no EEG quantity was combined with a label to
 obtain them.
@@ -411,7 +418,53 @@ carry nothing. Options:
    and source connectivity (PLV / |ciPLV|), and D3 is not interpolated (a new asymmetry).
 3. Use other D2 channels for these positions: excluded by design (the matched 19-electrode representation).
 Recommendation: option 1, decided and recorded before the first build; the D2 cohort, the age summaries and every
-report then state 22 / 23 with the reason.
+report then state 22 / 23 with the reason. **Decided: option 1 (author, 2026-10-28), amendment X1, section 12.8.**
+
+### 12.8 Protocol amendment X1: D2-19 excluded (author, 2026-10-28; post-audit, pre-build)
+
+**Decision.** The author approved a documented technical quality-control amendment excluding D2-19 from both
+directions and the D2 source-only CV, because four of its 19 matched electrodes (T4 = T8 `Misc ExG18`, T5 = P7
+`ExG24`, T6 = P8 `ExG28`, O1 `ExG30`) contain constant stored samples and no usable EEG (section 12.7: stored in V
+with a +-1 V range, one 16-bit quantization step 30.5 uV, band-passed robust std 2.8e-27 V).
+
+**This exceeds the pre-specified exclusion rule.** The only pre-specified participant exclusion is fewer than 5 clean
+windows (CLAUDE.md rule 4, DESIGN.md). X1 is therefore a protocol amendment, recorded in
+`configs/cross_dataset/amendments.yaml`, this section, methodology log entry 65 and docs/methods_decisions.md row 67.
+
+**Timing and independence of results.** Decided after the label-blind Part A2 unit audit of the real recordings
+(2026-10-27) and before any D2 source graph was built, before the campaign freeze, before any model was trained and
+before any target label was evaluated. No cross-dataset classification result exists, so none could inform it.
+The excluded participant's diagnosis is stated: AD.
+
+**Scope.**
+* *Kept:* the 23-recording input inventory (`registry(..., cohort="inventory")`), the EDF header audit, the unit audit
+  (`d2_units.csv`, every channel of all 23 recordings) and `d2_cohort.csv` (key, cohort). `inspect-d2` lists D2-19 as
+  "not processed: excluded (X1)". The raw EDF is never modified or deleted (read and hashed only).
+* *Excluded:* the analysis cohort (22: 9 AD / 13 HC, checked against the participant sheet every time the registry is
+  read: D2-19 must be in the inventory with diagnosis AD and the counts must match), and therefore the D2 stores,
+  D3 -> D2 scoring, D2 -> D3 training, the D2 source CV (primary and stability), the evaluation denominators, the
+  confidence intervals, the age analyses and every report.
+* *Evidence re-checked.* `inspect-d2-units` passes only if the analysis cohort has no implausible selected channel and
+  the unit audit still shows, for D2-19, exactly the recorded electrodes without EEG (`flat` or
+  `no_eeg_below_quantization`); otherwise it fails and the author decides again.
+
+**Enforcement in code (`d2store.cohort_spec`, `split_cohort`, `assert_no_excluded`).** The amendment is hashed into
+the D2 store configuration (`cohort`, so a different cohort is a different store), into `cohort.json` and the
+manifest (with the excluded recording's file name and content SHA-256), into every transfer and source-CV unit
+identity, the frozen campaign (`campaign.yaml: d2_cohort`, checked against the amendment; `frozen.json: d2_cohort`,
+checked by `require_frozen`) and the evaluation summary. `validate` and `open_d2` refuse a D2 store containing an
+excluded participant; `check_stores`, `run_unit` (source participants, source windows, target windows),
+`d2_source_cv` (dataset and every fold) and `evaluate` (labels, target scores, source-CV predictions, the 22 / 9 / 13
+denominators) check again. Tested in `tests/test_cross_exclusion.py` and `tests/test_cross_dataset.py`.
+
+**Unchanged.** Every other participant passes through every gate unchanged (unit / amplitude, artifact rejection,
+window quality, minimum windows, preprocessing); no QC criterion was weakened, no channel interpolated, no signal
+rescaled. The model configurations, Exp 0-8a, the D3 code and store identities, the release lock, amendment A2, its
+checkpoints and every development prediction are unchanged.
+
+**Consequences for interpretation.** The D2 cohort is 22 (9 AD / 13 HC); D2 -> D3 trains on 9 AD participants and
+D3 -> D2 AUC / sensitivity rest on 9 AD participants (wider CIs). The exclusion removes one AD participant with poor
+recording quality; quality notes still concern 6 of 9 AD vs 3 of 13 HC (section 12.4).
 
 ### 12.6 Part A (audit only; authorized 2026-10-26)
 

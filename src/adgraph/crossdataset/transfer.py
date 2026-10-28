@@ -3,8 +3,8 @@
 One transfer unit = (direction, inverse, mode, experiment, variant, seed):
 
 1. a FRESH model (``experiments.runner.make_model``: the unchanged definition and fixed protocol) is fitted on the
-   SOURCE training participants only (D3 -> D2: the 52 frozen D3 development participants; D2 -> D3: all 23 D2
-   participants). Every fitted transform (node-feature scaler, graph construction, class / participant weights,
+   SOURCE training participants only (D3 -> D2: the 52 frozen D3 development participants; D2 -> D3: the 22 D2
+   participants of the analysis cohort, amendment X1). Every fitted transform (node-feature scaler, graph construction, class / participant weights,
    classical inner CV for C) lives inside the model and sees only the source training view;
 2. the target store is BLINDED (``blind``: every label replaced by -1 / "masked", participant metadata removed) and
    its windows are scored by the fitted model; the unit saves window scores and one mean score per participant,
@@ -17,7 +17,11 @@ seed_<s>/`` with a validated marker; identity = frozen campaign + training-confi
 graph_run_ids + source participants + seed + code identity. A completed unit is never recomputed; a unit of another
 identity raises ``IncompatibleCheckpoint`` (``force`` moves it to ``_superseded/``).
 
-Source-only development estimates: D2 -> D3: participant-stratified 5-fold CV of D2 (``source_cv``, 5 repeats); D3 ->
+Participants excluded by an amendment (``d2store.cohort_spec``: D2-19) never enter a store, a fit, a fold or a score:
+the D2 store is refused if it holds one (``d2store.open_d2``, ``check_stores``), and every source / target / fold
+participant set is checked again (``d2store.assert_no_excluded``); the cohort hash is part of every unit identity.
+
+Source-only development estimates: D2 -> D3: participant-stratified 5-fold CV of D2 (``source_cv``, 1 repeat); D3 ->
 D2: the completed release / A2 development CV of the same variant (``release_source_cv``; read only, used only if its
 training-config hash and store graph_run_id equal this unit's).
 """
@@ -125,6 +129,7 @@ def check_stores(d3: GraphStore, d2: GraphStore, sensor: bool) -> None:
         raise InputMismatch(f"ROIs {d3.roi_names} vs {d2.roi_names}")
     if set(d3.windows["key"]) & set(d2.windows["key"]):
         raise InputMismatch("participant keys shared between the datasets")
+    d2store.assert_no_excluded(set(d2.windows["key"]) | set(d2.subjects["key"]), "D2 store")
 
 
 def stores_record(processed, c: dict) -> dict:
@@ -160,7 +165,7 @@ def transfer_identity(frozen: dict, v: dict, u: dict, src: GraphStore, tgt: Grap
             "training_config_hash": training_hash(v), "context": v["context"],
             "source_graph_run_id": graph_run_id(src), "target_graph_run_id": graph_run_id(tgt),
             "source_participants": stable_hash(sorted(keys)), "seed": int(u["seed"]),
-            "code": code_identity("cross_experiment")}
+            "d2_cohort": d2store.cohort_spec()["hash"], "code": code_identity("cross_experiment")}
 
 
 def _datasets(v, src_store, tgt_store):
@@ -199,6 +204,9 @@ def run_unit(processed, u: dict, c: dict, frozen: dict, d3: GraphStore, d2: Grap
         raise RuntimeError("source participants without windows")
     if set(src.meta["key"]) & set(tgt.meta["key"]):
         raise RuntimeError("participants on both sides of the transfer")
+    d2store.assert_no_excluded(keys, "source training participants")
+    d2store.assert_no_excluded(src.meta["key"].iloc[idx], "source training windows")
+    d2store.assert_no_excluded(tgt.meta["key"], "target windows")
     seed = int(u["seed"])
     t0 = time.perf_counter()
     params, inner = select_hparams(src, idx, v, seed)            # classical: inner CV inside the source only
@@ -225,6 +233,7 @@ def run_unit(processed, u: dict, c: dict, frozen: dict, d3: GraphStore, d2: Grap
                 "n_parameters": model.n_parameters(), "score_type": model_score_type(v),
                 "threshold": score_threshold(v), "device": run_device(v), "inputs": shapes,
                 "variant_config": v, "source_participants": keys,
+                "d2_cohort": {k: d2store.cohort_spec()[k] for k in ("amendments", "hash", "analysis")},
                 "finished_at": datetime.now(timezone.utc).isoformat()}
     if hasattr(model, "training_summary"):
         training["training"] = model.training_summary()
@@ -253,8 +262,9 @@ def d2_source_cv(processed, u: dict, c: dict, frozen: dict, d2: GraphStore, forc
     out = unit_dir(processed, {**u, "direction": "D2_to_D3"}, c) / subdir
     base = {"kind": "cross_source_cv", "campaign_hash": frozen["campaign_hash"], "training_config_hash":
             training_hash(v), "context": v["context"], "graph_run_id": graph_run_id(d2), "cv": sc,
-            "code": code_identity("cross_experiment")}
+            "d2_cohort": d2store.cohort_spec()["hash"], "code": code_identity("cross_experiment")}
     data = build_dataset(d2, v)
+    d2store.assert_no_excluded(data.meta["key"], "D2 source CV")
     subj = subject_table(data.meta)
     thr = score_threshold(v)
     preds = []
@@ -271,6 +281,7 @@ def d2_source_cv(processed, u: dict, c: dict, frozen: dict, d2: GraphStore, forc
             keys = data.meta["key"].to_numpy()
             tr_i, te_i = np.flatnonzero(np.isin(keys, tr)), np.flatnonzero(np.isin(keys, te))
             assert_disjoint(data.meta.iloc[tr_i], data.meta.iloc[te_i])
+            d2store.assert_no_excluded(list(tr) + list(te), f"D2 source CV {name}")
             seed = int(v["evaluation"]["seed"]) + 1000 * r + f
             params, _ = select_hparams(data, tr_i, v, seed)
             model = make_model(apply_hparams(v, params), seed, data.info.get("roi_names")).fit(data.view(tr_i, "train"))
@@ -290,7 +301,9 @@ def d2_source_cv(processed, u: dict, c: dict, frozen: dict, d2: GraphStore, forc
          else float("nan"), "balanced_accuracy_mean": float(per["balanced_accuracy"].mean()),
          "balanced_accuracy_sd": float(per["balanced_accuracy"].std(ddof=1)) if len(per) > 1 else float("nan"),
          "auc_repeat_averaged_scores": auc_delong(mean_part["y"], mean_part["score"]),
-         "per_repeat": per.to_dict("records"), "n_participants": int(len(mean_part))}
+         "per_repeat": per.to_dict("records"), "n_participants": int(len(mean_part)),
+         "n_ad": int((mean_part["y"] == 1).sum()), "n_hc": int((mean_part["y"] == 0).sum()),
+         "d2_cohort": {k: d2store.cohort_spec()[k] for k in ("amendments", "hash", "analysis")}}
     atomic_write_csv(out / "predictions_participants.csv", part)
     atomic_write_json(out / "metrics.json", m)
     return m

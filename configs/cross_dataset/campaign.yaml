@@ -12,13 +12,21 @@ directions:
     target: D2
     source_participants: d3_development   # the frozen 52 development participants (xu_partition, xu_split.json);
                                           # the 13 D3 holdout participants are never used
-    target_participants: all              # all 23 D2 participants
+    target_participants: all              # the 22 D2 participants of the analysis cohort (d2_cohort)
   D2_to_D3:
     source: D2
     target: D3
-    source_participants: all              # all 23 D2 participants
+    source_participants: all              # the 22 D2 participants of the analysis cohort (d2_cohort)
     target_participants: all              # all 65 D3 participants; reported for all 65 and separately for the
                                           # 52 development / 13 holdout participants (holdout: descriptive only)
+d2_cohort:                     # protocol amendment X1 (configs/cross_dataset/amendments.yaml; author 2026-10-28;
+                               # post-audit, pre-build; exceeds the pre-specified < 5 clean windows rule): D2-19 (AD)
+                               # excluded from both directions and the D2 source CV (four matched electrodes, T4 T5
+                               # T6 O1, without recorded EEG); kept in the input inventory and the audits
+  amendments: [X1]
+  inventory: {n: 23, AD: 10, HC: 13}
+  analysis: {n: 22, AD: 9, HC: 13}
+  excluded: [D2-19]
 experiments:                   # the existing definitions, unchanged (configs/final/experiments/, amendment A2)
   gnn: [exp3, exp4, exp5, exp6, exp7, exp8a]   # every pre-specified variant (48); exp8a = amendment A2, NOT exp8
   reference: [exp0, exp1]      # classical PSD / DE baselines (8 variants); reference only, never "the model"
@@ -31,7 +39,7 @@ training:
 source_cv:                     # source-only development estimate (never uses the target dataset)
   D3: {from: release, setting: xu_dev_cv}      # the completed release / A2 development-CV results (read only;
                                                # training-config hash and store graph_run_id must match)
-  D2: {folds: 5, repeats: 1, seed: 0}          # participant-stratified 5-fold CV of the 23 D2 participants, ONE
+  D2: {folds: 5, repeats: 1, seed: 0}          # participant-stratified 5-fold CV of the 22 D2 participants, ONE
                                                # repeat = the primary D3 protocol (decision D7, author 2026-10-26)
 stability:                     # separately authorized source-only stability analysis (decisions D7, D10); its results
                                # never select anything and are reported apart from the primary analysis

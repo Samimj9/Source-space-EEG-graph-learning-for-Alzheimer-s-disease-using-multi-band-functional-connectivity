@@ -3677,6 +3677,31 @@ no longer hides the others).
 interpolate 4 of 19 electrodes (not recommended: edge extrapolation, connectivity inflation, asymmetry with D3).
 Docs: docs/cross_dataset/design.md 12.7. Nothing was changed in the protocol; no graph was built.
 
+## 65. Cross-dataset D2: protocol amendment X1 excludes D2-19 (author, 2026-10-28; post-audit, pre-build)
+
+**Decision (author).** D2-19 (AD) is excluded from both directions and the D2 source-only CV as a documented technical
+quality-control amendment: four of its 19 matched electrodes (T4 = T8, T5 = P7, T6 = P8, O1; EDF `Misc ExG18 / 24 / 28
+/ 30`) hold constant stored samples (V, +-1 V range, quantization step 30.5 uV, robust std 2.8e-27 V): no usable EEG
+(entry 64). **It exceeds the pre-specified exclusion rule** (fewer than 5 clean windows) and is recorded as a protocol
+amendment (`configs/cross_dataset/amendments.yaml`, design 12.8, methods_decisions row 67).
+
+**Timing.** After the label-blind Part A2 audit, before any D2 graph, freeze, training or target evaluation; no
+cross-dataset result exists, so the exclusion is independent of classification results.
+
+**Implementation.** The input inventory stays 23 (10 AD / 13 HC; header and unit audits cover every recording; the raw
+file is only read). The analysis cohort is 22 (9 AD / 13 HC), verified against the participant sheet whenever the
+registry is read. The amendment's hash is part of the D2 store configuration, the store manifest and `cohort.json`
+(with the recording's SHA-256, electrodes, reason, decision date), every transfer / source-CV identity, the campaign
+(`d2_cohort`), the frozen record and the evaluation summary and README. D2-19 is refused in stores (`validate`,
+`open_d2`), source fits, D2 CV folds, target scores and evaluation; the D3 -> D2 and D2 source-CV denominators are
+checked as 22 / 9 / 13. `inspect-d2-units` re-checks the recorded evidence; `inspect-d2` lists D2-19 as not processed.
+
+**Unchanged.** Every gate for the other 22 (units, amplitude, rejection, window quality, preprocessing); no
+interpolation or rescaling; model configurations, Exp 0-8a, D3 code and stores, the release lock, A2 and all
+checkpoints. Tests: `tests/test_cross_exclusion.py`, `tests/test_cross_dataset.py` (exclusion consistency, no D2-19 in
+any graph / fit / fold / score, reproducible hashes and manifests, preserved 23-recording inventory, unchanged gates).
+No D2 graph was built.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

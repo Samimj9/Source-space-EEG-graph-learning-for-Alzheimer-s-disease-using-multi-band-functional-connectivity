@@ -27,7 +27,7 @@ from . import channels
 EXPECTED_CONFIG_DIFFERENCES = {
     "channels.channel_map_hash", "channels.coordinates.accepted_lookups", "channels.coordinates.compare_template",
     "channels.coordinates.head_radius_m", "channels.coordinates.source", "channels.coordinates.units",
-    "channels.montage", "channels.selection", "channels.verify_layout", "cross_dataset", "datasets",
+    "channels.montage", "channels.selection", "channels.verify_layout", "cohort", "cross_dataset", "datasets",
     "preprocessing.line_noise", "units.channel_robust_std_v", "units.physical_dimensions",
     "discontinuities.source", "input.format", "input.recordings", "output_subdir", "preprocessing.bandpass",
     "preprocessing.edge_crop_s", "preprocessing.settle_s", "split", "store_names", "units.scale.D2", "units.scale.D3"}
@@ -40,8 +40,12 @@ KNOWN = [  # (property, status, D3, D2, note)
     ("recording condition", "different", "eyes closed, sitting", "resting state; eyes condition UNKNOWN (decision D6)",
      "posterior alpha and theta / alpha differ with the condition; every result carries this limitation"),
     ("data quality vs diagnosis", "different", "provider-cleaned; quality notes not released",
-     "sheet quality notes (bad channels, movement) in 7 / 10 AD vs 3 / 13 HC", "artifacts are a non-disease route to "
-     "separation in D2"),
+     "sheet quality notes (bad channels, movement) in 6 / 9 AD vs 3 / 13 HC of the analysis cohort (7 / 10 AD of the "
+     "23-recording inventory)", "artifacts are a non-disease route to separation in D2"),
+    ("participant exclusions", "different", "pre-specified rule only (fewer than 5 clean windows)",
+     "amendment X1: D2-19 (AD) excluded, four matched electrodes (T4, T5, T6, O1) without recorded EEG; 22 of 23 "
+     "(9 AD / 13 HC)", "post-audit, pre-build, label-blind; exceeds the pre-specified rule; kept in the inventory and "
+     "the audits"),
     ("population", "different", "AD 66.4 +/- 7.9 y, HC 67.9 +/- 5.4 y (similar ages)",
      "AD about 80 y, HC about 62 y (strong age imbalance)", "age analyses, design section 9"),
     ("recording continuity", "different", "provider removed data (EEGLAB boundaries in 56 / 65 recordings)",
@@ -61,7 +65,7 @@ KNOWN = [  # (property, status, D3, D2, note)
      "the common average of the same electrodes removes any common reference signal exactly"),
     ("original sampling rate", "approximate", "500 Hz", "1024 Hz", "each continuous segment resampled to 250 Hz"),
     ("edge handling", "approximate", "none added (provider filtered the whole recording)",
-     "10 s crop before and 5 s after the band-pass at each end", "D2 band-pass transients removed"),
+     "10 s crop before and 8 s after the band-pass + notch at each end", "D2 filter transients removed"),
     ("electrode positions (model)", "identical", "colin27 10-05 template (provider lookup), MRI frame",
      "the same positions (D3 geometry), verified against the D2 .loc layout",
      "identical template coordinates do NOT establish identical physical placement; neither dataset is digitized"),
@@ -175,6 +179,12 @@ def harmonization_manifest(d3: GraphStore, d2: GraphStore, d3_cfg: dict, d2_cfg:
                               "config_hash": config_hash(d2_cfg),
                               "base_d3_config_hash": d2_cfg.get("cross_dataset", {}).get("base_d3_config_hash")}},
             "d2_preprocessing": d2_cfg["preprocessing"],
+            "participant_exclusions": {
+                "D2": {**d2_cfg.get("cohort", {}),
+                       "in_store": sorted(set(d2.subjects["key"]) & set(d2_cfg.get("cohort", {}).get("excluded", []))),
+                       "rule_exceeded": "the pre-specified exclusion is fewer than 5 clean windows; amendment X1 "
+                                        "exceeds it (post-audit, pre-build)"},
+                "D3": "none beyond the pre-specified rule (the validated D3 stores are unchanged)"},
             "line_noise_correction": {
                 "D2": {"applied": d2_cfg["preprocessing"].get("line_noise"),
                        "stage": "after the 0.5-45 Hz band-pass, before the settle crop, resampling, the common "

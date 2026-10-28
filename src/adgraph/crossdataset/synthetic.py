@@ -2,8 +2,9 @@
 
 * the D3 stores: ``adgraph.synthetic.write_release_stores`` at the release paths (dk68 for Exp 0, lobes12), with
   synthetic ages / sex / MMSE in the participant tables (similar ages for AD and HC, as in ds004504);
-* the D2 stores: 23 participants (10 AD, 13 HC) in the cross-dataset namespace (``d2store.store_dir``), the same
-  schema, a planted dataset shift (gain of all band powers) and an AD-older age structure, as in D2.
+* the D2 stores: the 22 participants of the analysis cohort (9 AD, 13 HC; ids 1-23 without the participant excluded
+  by amendment X1, D2-19) in the cross-dataset namespace (``d2store.store_dir``), the same schema, a planted dataset
+  shift (gain of all band powers) and an AD-older age structure, as in D2.
 """
 
 from __future__ import annotations
@@ -43,14 +44,21 @@ def write_d3(processed, n_windows: int = 6, seed: int = 0, **effects) -> dict:
 
 
 def d2_store(n_windows: int, inverse: str, mode: str, seed: int = 100, shift: float = 0.3, **effects) -> GraphStore:
-    st = make_store(n_windows, atlas="lobes12", seed=seed, n_ad=10, n_hc=13, mode=mode, inverse=inverse, **effects)
-    rename = {k: k.replace("D3-", "D2-") for k in st.subjects["key"]}
+    co = d2store.cohort_spec()
+    st = make_store(n_windows, atlas="lobes12", seed=seed, n_ad=co["analysis"]["AD"], n_hc=co["analysis"]["HC"],
+                    mode=mode, inverse=inverse, **effects)
+    excluded = d2store.excluded_keys(co)
+    ids = [i for i in range(1, co["inventory"]["n"] + 1) if f"D2-{i}" not in excluded]
+    old = list(st.subjects["key"])
+    rename = {k: f"D2-{i}" for k, i in zip(old, ids)}
+    sid = {f"D2-{i}": i for i in ids}
     w = st.windows.copy()
     w["key"] = w["key"].map(rename)
-    w["dataset"] = "D2"
+    w["dataset"], w["subject_id"] = "D2", w["key"].map(sid)
     w["window_id"] = [window_id(k, i) for k, i in zip(w["key"], w["window_index"])]
     s = st.subjects.copy()
     s["key"], s["dataset"] = s["key"].map(rename), "D2"
+    s["subject_id"] = s["key"].map(sid)
     s["path"] = [f"/synthetic/{k}.edf" for k in s["key"]]
     s = _demographics(s, (80.0, 6.0), (62.0, 4.0), seed)
     a = dict(st.arrays)

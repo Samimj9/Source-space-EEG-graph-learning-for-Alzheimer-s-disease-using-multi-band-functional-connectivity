@@ -133,7 +133,9 @@ e.g. `D1-3`, `D2-3`.
   `adgraph.crossdataset`, `scripts/cross_dataset.py`, namespace `CROSS_D3_D2_19CH_v1/` with its own pin. 19 matched
   electrodes by EDF number (`configs/cross_dataset/channel_map_19.yaml`, hash-pinned); source-only fits, blinded target,
   frozen campaign; D2 stores and real-data training only after the author's recorded authorization. Never write
-  outside that namespace.
+  outside that namespace. D2 cohort: 23-recording inventory, analysis cohort 22 (9 AD / 13 HC): D2-19 excluded by
+  protocol amendment X1 (`configs/cross_dataset/amendments.yaml`; four matched electrodes without EEG; exceeds the
+  pre-specified rule; methodology log entry 65). Never let an excluded participant into a store, fit, fold or score.
 - **QC before classification:** `adgraph.qc`; category A blocks the experiments until the author records a decision in
   `FINAL_v1/qc/decisions.yaml`; nobody is excluded or reweighted by code (docs/final/qc.md).
 - **Graph construction / atlas:** `configs/final/graphs.yaml`, `configs/final/selection.yaml`; the atlas is recorded by

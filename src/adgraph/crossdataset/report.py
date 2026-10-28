@@ -128,7 +128,18 @@ def readme(summary: dict, figs: list[str], synthetic: bool, ref: dict) -> str:
               "Participant-level metrics only (one mean P(AD) per participant, threshold 0.5; SVM margin 0). CIs: "
               "DeLong for AUC, participant bootstrap stratified by diagnosis, Wilson for sensitivity / specificity. "
               f"Paired comparisons: vs {ref['experiment']} / {ref['variant']} on the same target participants, Holm "
-              "within direction x inverse x mode; exploratory.", "", "## Disclosures", ""]
+              "within direction x inverse x mode; exploratory.", ""]
+    co = summary.get("d2_cohort")
+    if co:
+        ex = "; ".join(f"{e['key']} ({e['diagnosis']}, amendment {e['amendment']}, decided {co['decided_on'][e['amendment']]}): "
+                       f"{e['reason']}" for e in co["excluded"])
+        lines += ["## D2 cohort", "",
+                  f"Input inventory {co['inventory']['n']} recordings ({co['inventory']['AD']} AD / "
+                  f"{co['inventory']['HC']} HC); analysis cohort {co['analysis']['n']} participants "
+                  f"({co['analysis']['AD']} AD / {co['analysis']['HC']} HC), used in both directions and the D2 "
+                  f"source CV. Excluded: {ex} This exclusion exceeds the pre-specified rule (fewer than 5 clean "
+                  "windows) and was decided before any D2 graph, fit or result existed.", ""]
+    lines += ["## Disclosures", ""]
     lines += [f"- {d}" for d in summary["disclosures"]]
     lines += ["", "## Files", "", "- table1_transfer.csv, table2_d3_strata.csv, table3_paired.csv, table4_age.csv"]
     lines += [f"- {f}" for f in figs]

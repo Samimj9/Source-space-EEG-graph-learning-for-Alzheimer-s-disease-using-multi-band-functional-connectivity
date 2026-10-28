@@ -38,7 +38,21 @@ def load_campaign(path: str | Path | None = None) -> dict:
         raise ValueError("the original exp8 is undefined on lobes12; the campaign uses amendment A2's exp8a")
     if set(c["training"]["seeds"]) & set(c["stability"]["seeds"]):
         raise ValueError("stability seeds must differ from the primary seed")
+    check_d2_cohort(c)
     return c
+
+
+def check_d2_cohort(c: dict) -> dict:
+    """The campaign's D2 cohort is exactly that of the approved exclusion amendments (``d2store.cohort_spec``)."""
+    from .d2store import cohort_spec, excluded_keys
+
+    co = cohort_spec()
+    want = {"amendments": co["amendments"], "inventory": co["inventory"], "analysis": co["analysis"],
+            "excluded": sorted(excluded_keys(co))}
+    got = {k: (sorted(v) if k == "excluded" else v) for k, v in (c.get("d2_cohort") or {}).items()}
+    if got != want:
+        raise ValueError(f"campaign d2_cohort {got} differs from configs/cross_dataset/amendments.yaml {want}")
+    return co
 
 
 def recording_condition_check(c: dict) -> dict:
@@ -139,6 +153,11 @@ DISCLOSURES = [
     "has digitized positions, and the D2 cap may sit differently on each head.",
     "The D2 recording condition (eyes closed / open) is unknown unless stated otherwise in the frozen campaign; D3 is "
     "eyes closed.",
+    "Protocol amendment X1 (author, 2026-10-28; post-audit, pre-build): D2-19 (AD) is excluded from both directions "
+    "and the D2 source CV because four of its 19 matched electrodes (T4, T5, T6, O1) contain constant stored samples "
+    "(no recorded EEG). The exclusion exceeds the pre-specified rule (fewer than 5 clean windows), was decided from a "
+    "label-blind technical audit before any D2 graph, fit or result existed, and leaves D2 with 22 participants (9 AD "
+    "/ 13 HC); the recording stays in the 23-recording input inventory and audits.",
 ]
 
 
@@ -168,6 +187,12 @@ def decision_audit(processed, c: dict) -> dict:
     check("recording condition of both datasets stated (unknown allowed, with its implication)", rc["passed"],
           {k: rc[k] for k in ("D3", "D2")})
     out["recording_condition"] = rc
+    try:
+        co = check_d2_cohort(c)
+        check("D2 analysis cohort = the approved exclusion amendments (inventory minus excluded)", True,
+              {k: co[k] for k in ("amendments", "inventory", "analysis", "hash")})
+    except (ValueError, RuntimeError) as exc:
+        check("D2 analysis cohort = the approved exclusion amendments (inventory minus excluded)", False, str(exc))
     out["atlas_decision"] = {k: (a or {}).get(k) for k in ("atlas", "reason", "decided_at")}
     out["graph_decision"] = {k: (g or {}).get(k) for k in ("selected", "atlas", "reason")}
     out["passed"] = all(x["passed"] for x in out["checks"].values())
@@ -190,6 +215,7 @@ def freeze(processed, c: dict, stores: dict, audit: dict, synthetic: bool = Fals
     rec = {"campaign": c, "campaign_hash": campaign_hash(c), "units_hash": stable_hash([unit_key(u) for u in us]),
            "n_units_primary": len(units(c, "primary")), "n_units_stability": len(units(c, "stability")),
            "stores": stores, "git_commit": git_commit(), "code": code_identity("cross_experiment"),
+           "d2_cohort": check_d2_cohort(c),
            "decision_audit": audit, "synthetic": synthetic, "frozen_at": datetime.now(timezone.utc).isoformat(),
            "rule": "target labels are read only by the evaluation of units of this record, at this commit"}
     f = frozen_path(processed)
@@ -213,6 +239,10 @@ def require_frozen(processed, c: dict | None = None) -> dict:
     rec = json.loads(f.read_text())
     if c is not None and rec["campaign_hash"] != campaign_hash(c):
         raise NotFrozen("configs/cross_dataset/campaign.yaml differs from the frozen campaign")
+    from .d2store import cohort_spec
+
+    if (rec.get("d2_cohort") or {}).get("hash") != cohort_spec()["hash"]:
+        raise NotFrozen("the D2 cohort (configs/cross_dataset/amendments.yaml) differs from the frozen campaign's")
     if rec["git_commit"] != git_commit():
         raise NotFrozen(f"the campaign was frozen at commit {rec['git_commit']}, this code is {git_commit()} (use the "
                         "namespace's code pin)")

@@ -132,8 +132,11 @@ if args.action == "audit":
     table = channels.load_table()
     layout = Path(P["electrode_layout"]) if Path(P.get("electrode_layout", "")).is_file() else find_layout_file(
         P["drive_root"])
-    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")))
-    headers = d2store.header_audit(reg)
+    inventory = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache",       # all 23
+                                                                     "input_sha256.json")), cohort="inventory")
+    cohort = d2store.exclusion_record(inventory)
+    reg = inventory[inventory["cohort"] == "analysis"].reset_index(drop=True)  # the analysis cohort (amendment X1): 22
+    headers = d2store.header_audit(inventory)
     ref = d3_reference_geometry(P)
     d2_geom = channels.harmonized_geometry(ref, table)
     df, summary = channels.audit(table, layout, headers, ref)
@@ -156,7 +159,9 @@ if args.action == "audit":
     d3_meta, _ = bids.load_participants_tsv(bids.participants_path(P["dataset3"]["root"]))
     tables = {"D3": d3_meta.assign(sex=d3_meta["sex"].astype(str).str.upper().str[:1]),
               "D2": reg.assign(sex=reg["sex"].astype(str).str.upper().str[:1])}
-    demo = evaluate.demographics(tables)
+    demo = evaluate.demographics(tables)                              # D2 = the analysis cohort (22)
+    demo_inv = evaluate.demographics({"D2 inventory (23, before amendment X1)":
+                                      inventory.assign(sex=inventory["sex"].astype(str).str.upper().str[:1])})
     overlap = []
     for ds, t in tables.items():
         lo, hi = evaluate.age_overlap(t)
@@ -167,15 +172,20 @@ if args.action == "audit":
                         "estimable": bool((inside["y"] == 1).sum() >= c["age"]["min_per_class"]
                                           and (inside["y"] == 0).sum() >= c["age"]["min_per_class"])})
     atomic_write_csv(out / "demographics.csv", demo)
+    atomic_write_csv(out / "demographics_d2_inventory.csv", demo_inv)
+    atomic_write_csv(out / "d2_cohort.csv", inventory[["key", "cohort"]])   # participant keys and cohort only
+    atomic_write_json(out / "d2_cohort.json", cohort)
     atomic_write_csv(out / "age_overlap_feasibility.csv", pd.DataFrame(overlap))
     fr = signal_audit.filter_response(d2store.resolve("lcmv"))
     atomic_write_json(out / "d2_filter_response.json", fr)
+    print(f"D2 inventory {cohort['inventory']}; analysis cohort {cohort['analysis']}; excluded "
+          f"{[(e['key'], e['amendment'], e['electrodes']) for e in cohort['excluded']]}")
     print(demo.round(1).to_string(index=False))
+    print(demo_inv.round(1).to_string(index=False))
     print(pd.DataFrame(overlap).to_string(index=False))
     print("D2 band-pass (zero phase) dB:", fr["magnitude_db"], "impulse", fr["impulse_length_s_1e-4"], "s")
     atomic_write_json(out / "audit.json", {"channel_map": summary, "d3_stores": stores, "decision_audit": dec,
-                                           "d2_registry": {"n": len(reg), "AD": int(reg["y"].sum()),
-                                                           "HC": int((reg["y"] == 0).sum())},
+                                           "d2_registry": cohort["inventory"], "d2_cohort": cohort,
                                            "age_overlap": overlap, "d2_filter_response": fr,
                                            "d2_edf_annotations": sorted({a for x in headers["annotations"]
                                                                          for a in str(x).split("|") if a})})
@@ -201,10 +211,15 @@ if args.action == "inspect-d2":
     cfg_off = copy.deepcopy(cfg)                                 # identical, notch disabled (same crops and pieces)
     cfg_off["preprocessing"]["line_noise"] = None
     table = channels.load_table()
-    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")))
+    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")),
+                           cohort="inventory")                    # all 23 listed; excluded ones not processed
     loader = partial(d2store.load_d2, table=table, geometry=geometry(processed))
     rows = []
     for rec in reg.itertuples():
+        if rec.cohort != "analysis":
+            rows.append({"key": rec.key, "cohort": rec.cohort, "status": f"not processed: {rec.cohort} (matched "
+                         "electrodes without EEG; configs/cross_dataset/amendments.yaml)"})
+            continue
         try:
             row, segs, pieces, _, _ = recording_qc(rec, cfg, loader)
             _, segs0, pieces0, _, _ = recording_qc(rec, cfg_off, loader)
@@ -223,6 +238,7 @@ if args.action == "inspect-d2":
             del segs, segs0, sel, sel0
             for k in ("label", "y", "age", "sex", "mmse", "acer", "comment"):     # label-blind
                 row.pop(k, None)
+            row["cohort"] = rec.cohort
         except Exception as exc:
             row = {"key": rec.key, "status": f"error: {type(exc).__name__}: {exc}"}
         rows.append(row)
@@ -236,12 +252,14 @@ if args.action == "inspect-d2":
                         "covariance_rel_change_actual_notch", "diag_covariance_rel_change",
                         "band_power_change_db_delta", "band_power_change_db_theta", "band_power_change_db_alpha",
                         "band_power_change_db_beta", "band_power_change_db_gamma", "narrowband_peaks_after",
-                        "x_mixed_units", "status") if x in df]
+                        "x_mixed_units", "cohort", "status") if x in df]
     print(df[cols].round(4).to_string(index=False))
     print("notch:", {k: nr[k] for k in ("notch_max_abs_db_0.5_45", "combined_support_s", "settle_crop_s",
                                         "settle_covers_cascade")}, nr["cascade_db"])
     ok = not df.get("status", pd.Series(dtype=str)).astype(str).str.startswith("error").any() and nr[
         "settle_covers_cascade"]
+    print(f"processed: {int((df['cohort'] == 'analysis').sum())} analysis-cohort recordings; not processed (amendment):"
+          f" {df.loc[df['cohort'] != 'analysis', 'key'].tolist()}")
     print("D2 INSPECTION PASSED" if ok else "D2 INSPECTION FAILED (see status / notch)")
     sys.exit(0 if ok else 1)
 
@@ -249,8 +267,10 @@ if args.action == "inspect-d2-units":
     from adgraph.io.fingerprint import InputHashes
 
     cfg = d2store.resolve(args.inverse)
-    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")))
+    reg = d2store.registry(P, hashes=InputHashes(namespace.sub(processed, "stores", "cache", "input_sha256.json")),
+                           cohort="inventory")                    # every one of the 23 recordings is audited
     u = d2store.unit_audit(reg, cfg, channels.load_table())
+    u = u.merge(reg[["key", "cohort"]], on="key", how="left")
     atomic_write_csv(namespace.sub(processed, "audit", "d2_units.csv"), u)
     per = u.groupby("key")["physical_dimension"].agg(lambda x: ";".join(sorted(set(x))))
     mixed = per[per.str.contains(";")]
@@ -269,9 +289,16 @@ if args.action == "inspect-d2-units":
     no_eeg = bad[bad["finding"].isin(["no_eeg_below_quantization", "flat", "too_small"])]
     print(f"unit / scaling errors in selected channels: {len(unit_errors)}; selected channels without EEG: "
           f"{len(no_eeg)} in {sorted(set(no_eeg['key']))}")
-    print("UNIT AUDIT PASSED" if bad.empty else "UNIT AUDIT FAILED: the build would stop at these recordings "
-          "(nothing is rescaled, interpolated or excluded automatically; the author decides)")
-    sys.exit(0 if bad.empty else 1)
+    ev = d2store.exclusion_evidence(u)                            # the amendment's recorded evidence, re-checked
+    print(ev.to_string(index=False))
+    analysis_bad = bad[bad["cohort"] == "analysis"]
+    ok = analysis_bad.empty and bool(ev["evidence_confirmed"].all())
+    print(f"analysis cohort: {sel.loc[sel['cohort'] == 'analysis', 'key'].nunique()} recordings, selected channels "
+          f"not ok: {len(analysis_bad)}")
+    print("UNIT AUDIT PASSED (analysis cohort; excluded recordings confirmed)" if ok else
+          "UNIT AUDIT FAILED: the build would stop at these recordings, or an excluded recording no longer shows its "
+          "recorded evidence (nothing is rescaled, interpolated or excluded automatically; the author decides)")
+    sys.exit(0 if ok else 1)
 
 if args.action == "inspect-d3-line":
     from adgraph.crossdataset import signal_audit

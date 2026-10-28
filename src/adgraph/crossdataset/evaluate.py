@@ -2,7 +2,7 @@
 and only for units of the frozen record at its commit.
 
 Per transfer unit and target stratum (D3 targets: all 65, the 52 development and the 13 holdout participants; D2
-targets: all 23):
+targets: the 22 participants of the D2 analysis cohort, amendment X1; D2-19 excluded):
 * ROC-AUC (DeLong 95 % CI and participant bootstrap stratified by diagnosis), balanced accuracy, sensitivity (AD),
   specificity (HC) (Wilson and bootstrap CIs), F1, MCC, confusion matrix, n AD / n HC, at the frozen threshold;
 * the source-only development estimate (D2: repeated D2 CV; D3: the release / A2 development CV when it matches) and
@@ -28,7 +28,7 @@ from scipy import stats
 
 from ..checkpoint import atomic_write_csv, atomic_write_json, code_identity
 from ..evaluation.metrics import auc_delong, binary_metrics, delong_paired, wilson_ci
-from . import namespace, plan, transfer
+from . import d2store, namespace, plan, transfer
 
 BOOT_METRICS = ("roc_auc", "balanced_accuracy", "sensitivity", "specificity", "f1", "mcc")
 
@@ -234,14 +234,22 @@ def evaluate(processed, c: dict, stage: str = "primary") -> dict:
             transfer.check_frozen_stores(frozen, u["inverse"], u["mode"], d3, d2)
             stores[sk] = (d3, d2, label_table(d3, True), label_table(d2, False))
         d3, d2, l3, l2 = stores[sk]
+        d2store.assert_no_excluded(l2["key"], "D2 labels")
         tgt_labels = l2 if u["direction"] == "D3_to_D2" else l3
         p = _scored(processed, u, c, tgt_labels.drop(columns=["d3_partition"], errors="ignore"))
         if p is None:
             continue
+        d2store.assert_no_excluded(p["key"], f"{u['direction']} target scores")
+        if u["direction"] == "D3_to_D2" and not frozen.get("synthetic"):
+            d2store.check_counts(p, d2store.EXPECTED_D2, "D3 -> D2 evaluation denominator")
         if "d3_partition" in tgt_labels:
             p = p.merge(tgt_labels[["key", "d3_partition"]], on="key", how="left")
         thr = float(p["threshold"].iloc[0])
         src_rec, src_part = _source(processed, u, c, frozen, d3) if stage == "primary" else ({}, None)
+        if u["direction"] == "D2_to_D3" and src_part is not None:
+            d2store.assert_no_excluded(src_part["key"], "D2 source-CV predictions")
+            if not frozen.get("synthetic"):
+                d2store.check_counts(src_part, d2store.EXPECTED_D2, "D2 source-CV denominator")
         strata = {"all": p}
         if u["direction"] == "D2_to_D3":
             strata.update({"d3_development": p[p["d3_partition"] == "development"],
@@ -316,7 +324,8 @@ def evaluate(processed, c: dict, stage: str = "primary") -> dict:
                                                              "seed"]].drop_duplicates().shape[0]) if len(long) else 0,
                "n_units_planned": len(units), "frozen_campaign_hash": frozen["campaign_hash"],
                "code": code, "evaluated_at": datetime.now(timezone.utc).isoformat(),
-               "disclosures": plan.DISCLOSURES, "synthetic": bool(frozen.get("synthetic"))}
+               "disclosures": plan.DISCLOSURES, "synthetic": bool(frozen.get("synthetic")),
+               "d2_cohort": d2store.cohort_spec()}
     atomic_write_json(out_dir / "summary.json", summary)
     return {"summary": summary, **files}
 

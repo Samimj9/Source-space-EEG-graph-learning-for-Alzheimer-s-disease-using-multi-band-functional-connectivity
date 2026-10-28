@@ -98,24 +98,34 @@ def campaign(tmp_path_factory):
 
 
 # ------------------------------------------------------------------------------------------- the D2 store builder
-def _d2_inputs(tmp_path, n=3, seconds=70):
+FLAT_EDF = (18, 24, 28, 30)          # D2-19's matched electrodes without EEG (T4, T5, T6, O1; amendment X1)
+
+
+def _d2_inputs(tmp_path, n=3, seconds=70, with_excluded=False):
+    """``n`` D2-like recordings (ids 2, 17, 3); ``with_excluded`` adds D2-19 (AD) whose EDF channels 18, 24, 28, 30
+    are constant (as the real recording)."""
     import edfio
 
     rs = tmp_path / "EEGs" / "RestingState"
     rs.mkdir(parents=True)
     rng = np.random.default_rng(0)
     ids, groups = [2, 17, 3][:n], ["HC", "AD", "HC"][:n]
+    ages, sex, mmse = [60, 81, 63][:n], ["F", "M", "F"][:n], [30, 18, 29][:n]
+    if with_excluded:
+        ids, groups, ages, sex, mmse = ids + [19], groups + ["AD"], ages + [84], sex + ["F"], mmse + [20]
     for sid in ids:
         common = rng.standard_normal(1024 * seconds)
         data = (0.8 * common + 0.6 * rng.standard_normal((32, 1024 * seconds))) * 10.0
+        if sid == 19:
+            data[[k - 1 for k in FLAT_EDF]] = 0.0
         edfio.Edf([edfio.EdfSignal(x, sampling_frequency=1024, label=f"Misc ExG{k + 1}", physical_dimension="uV",
                                    physical_range=(-20000, 20000)) for k, x in enumerate(data)]
                   ).write(rs / f"{sid}_842019_1.edf")
     (tmp_path / "EEGs" / "PictureNaming").mkdir()
     (tmp_path / "EEGs" / "PictureNaming" / "2_842019_2.edf").write_bytes(b"never read")
     sheet = tmp_path / "info.xlsx"
-    pd.DataFrame({"Id": [f"{i}_842019" for i in ids], "Age": [60, 81, 63][:n], "Gender": ["F", "M", "F"][:n],
-                  "Group": groups, "MMSE": [30, 18, 29][:n]}).to_excel(sheet, index=False)
+    pd.DataFrame({"Id": [f"{i}_842019" for i in ids], "Age": ages, "Gender": sex,
+                  "Group": groups, "MMSE": mmse}).to_excel(sheet, index=False)
     return {"dataset2": {"eeg_dir": str(rs), "participants": str(sheet)}, "cache_dir": str(tmp_path / "cache")}
 
 
@@ -124,7 +134,7 @@ def test_d2_store_build_validate_and_resume(tmp_path, monkeypatch):
     from adgraph.sourcegraphs import wmne
     from adgraph.sourcegraphs.lcmv import sensor_info
 
-    paths = _d2_inputs(tmp_path)
+    paths = _d2_inputs(tmp_path, with_excluded=True)
     table = channels.load_table()
     g = channels.template_geometry(table)
     cfg = d2store.resolve("wmne", table)
@@ -134,12 +144,27 @@ def test_d2_store_build_validate_and_resume(tmp_path, monkeypatch):
     monkeypatch.setattr(wmne, "verify", lambda *a, **k: 0.0)
     with pytest.raises(namespace.NotAuthorized):                            # never without the author's record
         d2store.run(paths, tmp_path, "wmne", g, tmp_path / "fs", limit=3, ctxs=ctxs)
+    raw19 = Path(paths["dataset2"]["eeg_dir"]) / "19_842019_1.edf"
+    raw_before = (hashlib.sha256(raw19.read_bytes()).hexdigest(), raw19.stat().st_mtime_ns)
     b, a = d2store.run(paths, tmp_path, "wmne", g, tmp_path / "fs", limit=3, ctxs=ctxs, authorized=True)
     assert namespace.root(tmp_path) in b.parents and b.name.startswith("graphsXD2W_v1_")
+    # amendment X1: D2-19 is in the inventory, never built, recorded (identity, electrodes, reason, date); raw intact
+    assert (hashlib.sha256(raw19.read_bytes()).hexdigest(), raw19.stat().st_mtime_ns) == raw_before
+    assert not (b / "subjects" / "D2-19").exists() and "D2-19" not in pd.read_csv(b / "status.csv")["unit"].tolist()
+    co = json.loads((b / "cohort.json").read_text())
+    assert co["inventory"]["n"] == 4 and co["analysis"]["n"] == 3 and co["complete_inventory"] is False
+    (ex,) = co["excluded"]
+    assert (ex["key"], ex["diagnosis"], ex["amendment"], ex["electrodes"], ex["recording"]) == (
+        "D2-19", "AD", "X1", "T4,T5,T6,O1", "19_842019_1.edf")
+    assert ex["sha256"] == raw_before[0] and ex["decided_on"] == "2026-10-28" and "no EEG" in ex["reason"]
+    man = json.loads((b / "manifest.json").read_text())
+    assert man["cross_dataset"]["cohort"]["excluded"][0]["key"] == "D2-19"
+    assert man["config"]["cohort"]["hash"] == d2store.cohort_spec()["hash"]
     assert not (b / "xu_split.json").exists()                               # no ds004504 partition in D2
     for d, mode in ((b, "B"), (a, "A")):
         r = d2store.validate(d, expected=None)
         assert r["passed"], {k: v for k, v in r["checks"].items() if not v["passed"]}
+        assert r["checks"]["no participant excluded by amendment ['X1'] in the store"]["passed"]
     st = d2store.open_d2(b)
     assert st.channels == D3_ORDER and st.roi_names == region_names("lobes12") and st.bands == [
         "delta", "theta", "alpha", "beta", "gamma"]
@@ -261,10 +286,11 @@ def test_participant_isolation_and_the_unchanged_d3_split(campaign):
     for d in (namespace.root(tmp) / "results" / "D3_to_D2").rglob("training.json"):
         tr = json.loads(d.read_text())
         assert tr["source_participants"] == dev and not set(tr["source_participants"]) & set(test)
-        assert tr["n_target_participants"] == 23
+        assert tr["n_target_participants"] == 22 and tr["d2_cohort"]["analysis"] == {"n": 22, "AD": 9, "HC": 13}
     for d in (namespace.root(tmp) / "results" / "D2_to_D3").rglob("training.json"):
         tr = json.loads(d.read_text())
         assert all(k.startswith("D2-") for k in tr["source_participants"]) and tr["n_target_participants"] == 65
+        assert len(tr["source_participants"]) == 22 and "D2-19" not in tr["source_participants"]
     for d in (namespace.root(tmp) / "results" / "D2_to_D3").rglob("source_cv/units"):
         for f in d.glob("*.pred.csv"):
             p = pd.read_csv(f)
@@ -354,7 +380,8 @@ def test_end_to_end_both_directions(campaign):
     long = ev["metrics_long.csv"]
     assert set(long["direction"]) == {"D3_to_D2", "D2_to_D3"}
     a = long[long["stratum"] == "all"]
-    assert set(a.loc[a["direction"] == "D3_to_D2", "n"]) == {23} and set(a.loc[a["direction"] == "D2_to_D3", "n"]) == {65}
+    assert set(a.loc[a["direction"] == "D3_to_D2", "n"]) == {22} and set(a.loc[a["direction"] == "D2_to_D3", "n"]) == {65}
+    assert set(a.loc[a["direction"] == "D3_to_D2", "n_ad"]) == {9} and set(a.loc[a["direction"] == "D3_to_D2", "n_hc"]) == {13}
     strata = long[long["direction"] == "D2_to_D3"].groupby("stratum")["n"].first().to_dict()
     assert strata == {"all": 65, "d3_development": 52, "d3_holdout": 13}
     assert (long.loc[long["direction"] == "D2_to_D3", "source_cv_status"] == "computed").all()
@@ -436,3 +463,90 @@ def test_d9_release_cv_is_reused_only_with_identical_identities(campaign, monkey
     monkeypatch.setattr(transfer, "training_hash", lambda v: "another-training")
     assert transfer.release_source_cv(tmp, u, c, d3)["status"] == "mismatch: training_config_hash"
     assert transfer.release_source_cv(tmp, {**u, "mode": "A"}, c, d3)["status"] == "missing"
+
+
+# ------------------------------------------------------------------------------------------- amendment X1 (D2-19)
+def test_d2_19_never_enters_a_graph_fit_fold_score_or_evaluation(campaign):
+    """Amendment X1: D2-19 is absent from every D2 store, source fit, D2 CV fold, target score and evaluation row,
+    in both directions; denominators are the 22-participant analysis cohort (9 AD / 13 HC)."""
+    tmp, c, ev = campaign["tmp"], campaign["c"], campaign["ev"]
+    for inv in ("lcmv", "wmne", "sensor"):
+        for mode in ("B", "A"):
+            d2 = transfer.open_d2(tmp, inv, mode, c)
+            assert "D2-19" not in set(d2.windows["key"]) | set(d2.subjects["key"])
+            assert d2store.counts(d2.subjects) == {"n": 22, "AD": 9, "HC": 13}
+    for f in campaign["calls"]["fit"] + campaign["calls"]["predict"] + campaign["calls"]["scaler"]:
+        assert "D2-19" not in f["keys"]
+    res = namespace.root(tmp) / "results"
+    for f in res.rglob("*.csv"):
+        t = pd.read_csv(f)
+        if "key" in t:
+            assert "D2-19" not in set(t["key"]), f
+    for f in res.rglob("training.json"):
+        assert "D2-19" not in json.loads(f.read_text())["source_participants"]
+    for f in res.rglob("source_cv/metrics.json"):
+        m = json.loads(f.read_text())
+        assert (m["n_participants"], m["n_ad"], m["n_hc"]) == (22, 9, 13)
+    for d in res.rglob("source_cv/units"):
+        folds = pd.concat(pd.read_csv(f) for f in d.glob("fold_r000_*.pred.csv"))
+        assert folds["key"].nunique() == 22 and "D2-19" not in set(folds["key"])
+    pred = ev["predictions_participants.csv"]
+    assert "D2-19" not in set(pred["key"])
+    d2_pred = pred[pred["target_dataset"] == "D2"].groupby(["inverse", "mode", "experiment", "variant"])
+    assert set(d2_pred["key"].nunique()) == {22}
+    demo = ev["demographics.csv"]
+    assert demo.loc[demo["dataset"] == "D2", "n"].sum() == 22
+    assert set(ev["age_overlap.csv"].query("direction == 'D3_to_D2'").eval("n_ad + n_hc")) <= set(range(23))
+    assert ev["summary"]["d2_cohort"]["hash"] == d2store.cohort_spec()["hash"]
+
+
+def test_amendment_is_bound_to_units_freeze_and_report(campaign):
+    tmp, c = campaign["tmp"], campaign["c"]
+    spec = d2store.cohort_spec()
+    assert campaign["frozen"]["d2_cohort"]["hash"] == spec["hash"]
+    assert campaign["frozen"]["decision_audit"]["checks"][
+        "D2 analysis cohort = the approved exclusion amendments (inventory minus excluded)"]["passed"]
+    for f in (namespace.root(tmp) / "results").rglob("transfer.done.json"):
+        assert json.loads(f.read_text())["identity"]["d2_cohort"] == spec["hash"]
+    from adgraph.crossdataset import report
+
+    r = report.report(tmp, c)
+    text = (Path(r["dir"]) / "README.md").read_text()
+    assert "D2 cohort" in text and "22 participants (9 AD / 13 HC)" in text and "D2-19" in text
+    assert "exceeds the pre-specified rule" in text and any("X1" in d for d in plan.DISCLOSURES)
+
+
+def test_a_store_holding_an_excluded_participant_is_refused(campaign, tmp_path):
+    from adgraph.crossdataset.synthetic import d2_store
+
+    tmp, c = campaign["tmp"], campaign["c"]
+    st = d2_store(4, "lcmv", "B")
+    leak = st.subjects["key"].iloc[0]
+    st.windows["key"] = st.windows["key"].replace({leak: "D2-19"})
+    st.subjects["key"] = st.subjects["key"].replace({leak: "D2-19"})
+    d = tmp_path / "leaky"
+    st.save(d)
+    (d / "validation.json").write_text(json.dumps({"passed": True, "graph_run_id": st.manifest["graph_run_id"]}))
+    with pytest.raises(d2store.D2StoreError, match="D2-19"):
+        d2store.open_d2(d)
+    d3 = transfer.open_d3(tmp, "lcmv", "B", c)
+    with pytest.raises(d2store.D2StoreError, match="D2-19"):
+        transfer.check_stores(d3, st, False)
+    u = next(x for x in plan.units(c) if x["variant"] == "logreg__psd" and x["direction"] == "D2_to_D3"
+             and x["inverse"] == "lcmv" and x["mode"] == "B")
+    with pytest.raises(d2store.D2StoreError, match="D2-19"):
+        transfer.d2_source_cv(tmp_path, u, c, campaign["frozen"], st)
+    with pytest.raises(d2store.D2StoreError, match="D2-19"):
+        transfer.run_unit(tmp_path, u, c, campaign["frozen"], d3, st)
+
+
+def test_campaign_and_freeze_refuse_another_d2_cohort(campaign, monkeypatch):
+    tmp, c = campaign["tmp"], campaign["c"]
+    with pytest.raises(ValueError, match="d2_cohort"):
+        plan.check_d2_cohort({**c, "d2_cohort": {**c["d2_cohort"], "excluded": []}})
+    with pytest.raises(ValueError, match="d2_cohort"):
+        plan.check_d2_cohort({**c, "d2_cohort": {**c["d2_cohort"], "analysis": {"n": 23, "AD": 10, "HC": 13}}})
+    spec = d2store.cohort_spec()
+    monkeypatch.setattr(d2store, "cohort_spec", lambda *a, **k: {**spec, "hash": "another-cohort"})
+    with pytest.raises(plan.NotFrozen, match="D2 cohort"):
+        plan.require_frozen(tmp, c)

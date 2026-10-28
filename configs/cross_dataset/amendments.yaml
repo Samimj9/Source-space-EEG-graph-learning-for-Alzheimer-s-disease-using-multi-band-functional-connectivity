@@ -1,0 +1,53 @@
+# Protocol amendments of the cross-dataset campaign D3 <-> D2 (docs/cross_dataset/design.md section 12.8; methodology
+# log entry 65; docs/methods_decisions.md row 67). Read by adgraph.crossdataset.d2store (cohort), hashed into the D2
+# store configuration, the store manifests, every transfer / source-CV unit identity and the frozen campaign.
+version: 1
+amendments:
+  X1:
+    kind: participant_exclusion
+    title: Exclude D2-19 (four of the 19 matched electrodes contain no recorded EEG)
+    status: approved
+    decided_by: author
+    decided_on: "2026-10-28"
+    timing: >-
+      post-audit, pre-build: decided after the label-blind notebook 00 Part A2 unit audit on real data (2026-10-27)
+      and before any D2 source graph was built, before the campaign freeze, before any model was trained and before
+      any target label was evaluated
+    basis: >-
+      technical, label-blind quality control of the stored EDF samples; independent of every classification result
+      (none exists for the cross-dataset campaign)
+    exceeds_preregistered_rule: >-
+      YES. The only pre-specified participant exclusion is fewer than 5 clean windows (CLAUDE.md rule 4, DESIGN.md);
+      this exclusion exceeds that rule and is recorded as a protocol amendment.
+    dataset: D2
+    applies_to: [d2_stores, D3_to_D2, D2_to_D3, d2_source_cv, d2_stability_cv, evaluation, reports]
+    not_applied_to: [d2_input_inventory, d2_edf_header_audit, d2_unit_audit]   # D2-19 stays listed and audited
+    inventory: {n: 23, AD: 10, HC: 13}           # all D2 resting-state recordings as provided (unchanged)
+    analysis_cohort: {n: 22, AD: 9, HC: 13}      # inventory minus the excluded participants
+    excluded:
+      - key: D2-19
+        subject_id: 19
+        diagnosis: AD                            # stated (the exclusion removes one AD participant)
+        electrodes:                              # the matched electrodes without recorded EEG (D3 label, D2 label, EDF)
+          - {d3: T4, d2: T8, edf_index: 18, edf_label: "Misc ExG18"}
+          - {d3: T5, d2: P7, edf_index: 24, edf_label: "Misc ExG24"}
+          - {d3: T6, d2: P8, edf_index: 28, edf_label: "Misc ExG28"}
+          - {d3: O1, d2: O1, edf_index: 30, edf_label: "Misc ExG30"}
+        evidence: >-
+          unit audit (inspect-d2-units, 2026-10-27): the four channels are stored in V with a +-1 V physical range
+          (one 16-bit quantization step = 30.5 uV); their stored samples are constant (band-passed robust std
+          2.8e-27 V, i.e. numerical zero): no recorded signal. Not a unit error (MNE scales every channel by its own
+          header unit). The unselected CP1 (ExG20) is constant as well; M1 (ExG13) and T3 = T7 (ExG14), also stored
+          in V (+-0.14 V range), are plausible. Participant sheet note for this recording: "8-10 bad channels".
+        accepted_findings: [flat, no_eeg_below_quantization]   # what the unit audit must still report for them
+        reason: >-
+          4 of the 19 matched electrodes (21 %), at the right temporal and left occipital edge of the montage, contain
+          no EEG; the participant cannot be represented by the matched 19-electrode montage without synthesizing
+          signals. Interpolation was rejected (edge extrapolation, inflated sensor / source connectivity, an
+          asymmetry with D3, which is not interpolated).
+    raw_data: the recording is neither deleted nor modified; it is read (hashed, header and unit audits) only
+    not_changed: >-
+      every other participant keeps every gate (unit / amplitude, artifact rejection, window quality, minimum windows,
+      preprocessing); no QC threshold is changed, no channel is interpolated, no signal is rescaled; the model
+      configurations, the frozen D3 experiments, the D3 code and stores, the release lock, amendment A2 and every
+      checkpoint are unchanged

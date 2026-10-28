@@ -16,6 +16,13 @@ FIR features, PLV / |ciPLV| / PSD / DE) with the D2 loader ``load_d2``:
 5. head geometry = the D3 positions (``channels.harmonized_geometry``): one forward model shared with D3;
 6. then exactly the D3 path: per-segment resampling to 250 Hz, common average of the SAME 19 electrodes, ...
 
+Cohort: the input inventory is every D2 resting-state recording as provided (23: 10 AD / 13 HC; ``registry(...,
+cohort="inventory")``, used by the header and unit audits); the ANALYSIS cohort is the inventory minus the
+participants of the approved exclusion amendment X1 (``configs/cross_dataset/amendments.yaml``: D2-19, four matched
+electrodes without recorded EEG) = 22: 9 AD / 13 HC (``split_cohort``). Only the analysis cohort is ever built; the
+amendment is hashed into the store configuration (``cohort``) and recorded in the manifest, and ``validate`` /
+``open_d2`` refuse a store that contains an excluded participant.
+
 Stores: ``<processed>/CROSS_D3_D2_19CH_v1/stores/graphsXD2{L,W}{,10}_v1_<hash>`` (mode B / A), validated by
 ``validate`` (``validation.json``). The original EDFs are only read.
 """
@@ -44,9 +51,10 @@ from . import channels, namespace
 
 log = logging.getLogger(__name__)
 SPEC = Path(__file__).resolve().parents[3] / "configs" / "cross_dataset" / "d2_store.yaml"
+AMENDMENTS = SPEC.with_name("amendments.yaml")
 VERSION = 1
-EXPECTED_D2 = {"n": 23, "AD": 10, "HC": 13}
 MODES = {"B": 0, "A": 1}
+EXCLUSION_AMENDMENTS = ("X1",)                      # the approved participant-exclusion amendments, in force
 
 
 class D2StoreError(RuntimeError):
@@ -55,6 +63,47 @@ class D2StoreError(RuntimeError):
 
 class UnitError(D2StoreError):
     """A selected channel's unit or amplitude is not that of an EEG signal in volts (fail fast; nothing rescaled)."""
+
+
+def cohort_spec(path: str | Path | None = None) -> dict:
+    """The D2 cohort definition: inventory counts, analysis-cohort counts and the excluded participants of the
+    approved exclusion amendments (checked for internal consistency); ``hash`` identifies it."""
+    doc = yaml.safe_load(Path(path or AMENDMENTS).read_text())
+    recs = {a: doc["amendments"][a] for a in EXCLUSION_AMENDMENTS}
+    inv = None
+    excluded = []
+    for a, r in recs.items():
+        if r["kind"] != "participant_exclusion" or r["status"] != "approved" or r["dataset"] != "D2":
+            raise D2StoreError(f"amendment {a} is not an approved D2 participant exclusion")
+        inv = dict(r["inventory"])
+        excluded += [{**e, "amendment": a, "reason": " ".join(str(e["reason"]).split())} for e in r["excluded"]]
+    keys = [e["key"] for e in excluded]
+    if len(set(keys)) != len(keys):
+        raise D2StoreError(f"participant excluded twice: {keys}")
+    ana = dict(recs[EXCLUSION_AMENDMENTS[-1]]["analysis_cohort"])
+    n_ad = sum(e["diagnosis"] == "AD" for e in excluded)
+    if (inv["n"] - len(excluded), inv["AD"] - n_ad, inv["HC"] - (len(excluded) - n_ad)) != (ana["n"], ana["AD"],
+                                                                                              ana["HC"]):
+        raise D2StoreError(f"analysis cohort {ana} is not the inventory {inv} minus the excluded {keys}")
+    out = {"amendments": list(recs), "inventory": inv, "analysis": ana, "excluded": excluded,
+           "decided_on": {a: r["decided_on"] for a, r in recs.items()}}
+    out["hash"] = stable_hash(out)
+    return out
+
+
+def excluded_keys(spec: dict | None = None) -> set[str]:
+    return {e["key"] for e in (spec or cohort_spec())["excluded"]}
+
+
+def assert_no_excluded(keys, where: str, spec: dict | None = None) -> None:
+    """Raise unless no participant excluded by an amendment is among ``keys`` (graphs, folds, fits, scores)."""
+    bad = sorted(excluded_keys(spec) & set(map(str, keys)))
+    if bad:
+        raise D2StoreError(f"{where}: participants excluded by amendment {cohort_spec()['amendments']} present: {bad}")
+
+
+EXPECTED_INVENTORY = cohort_spec()["inventory"]     # 23: 10 AD / 13 HC (all recordings as provided)
+EXPECTED_D2 = cohort_spec()["analysis"]             # 22: 9 AD / 13 HC (the analysis cohort; amendment X1)
 
 
 def spec(path: str | Path | None = None) -> dict:
@@ -79,6 +128,9 @@ def resolve(inverse: str, table: dict | None = None, path: str | Path | None = N
     cfg["units"]["scale"] = dict(over["units"]["scale"])          # D2 only
     cfg.pop("split", None)                                        # the ds004504 partition does not apply to D2
     cfg["output_subdir"] = f"{namespace.ROOT}/stores"
+    co = cohort_spec()
+    cfg["cohort"] = {"amendments": co["amendments"], "hash": co["hash"], "inventory": co["inventory"],
+                     "analysis": co["analysis"], "excluded": sorted(excluded_keys(co))}
     cfg["store_names"] = list(s["store_names"][inverse])
     cfg["cross_dataset"] = {"base_d3_config_hash": config_hash(base), "spec_version": s["version"],
                             "dataset": "D2", "inverse": inverse, "atlas": s["atlas"]}
@@ -96,8 +148,17 @@ def store_dir(processed, inverse: str, mode: str, limit: int | None = None) -> P
 
 
 # ---------------------------------------------------------------------------------------------- registry / headers
-def registry(paths: dict, limit: int | None = None, hashes=None) -> pd.DataFrame:
-    """The D2 resting-state recordings joined to the 2019 participant sheet (all 23 as provided)."""
+def registry(paths: dict, limit: int | None = None, hashes=None, cohort: str = "analysis",
+             strict: bool | None = None) -> pd.DataFrame:
+    """The D2 resting-state recordings joined to the 2019 participant sheet. ``cohort="inventory"``: all 23 as
+    provided (checked 23: 10 AD / 13 HC), with a column ``cohort`` (``analysis`` or ``excluded (X1)``);
+    ``"analysis"``: the analysis cohort (``split_cohort``; checked 22: 9 AD / 13 HC). ``limit`` (smoke builds) takes
+    the first participants of the selected cohort. ``strict`` (default: no ``limit``) checks the counts and that every
+    excluded participant is in the inventory; non-strict (a partial input folder, tests) still removes every excluded
+    participant that is present."""
+    strict = limit is None if strict is None else strict
+    if cohort not in ("inventory", "analysis"):
+        raise ValueError(f"cohort must be 'inventory' or 'analysis', not {cohort!r}")
     from ..io.eeg import list_recordings
     from ..io.participants import load_participants
 
@@ -113,13 +174,68 @@ def registry(paths: dict, limit: int | None = None, hashes=None) -> pd.DataFrame
     reg = reg[reg["_merge"] == "both"].drop(columns="_merge").sort_values("subject_id").reset_index(drop=True)
     if reg["key"].duplicated().any() or reg["path"].duplicated().any():
         raise D2StoreError("duplicate participant or recording")
+    if strict:
+        check_counts(reg, EXPECTED_INVENTORY, "D2 input inventory")
+    reg, _ = split_cohort(reg, strict=strict)
+    if cohort == "analysis":
+        reg = reg[reg["cohort"] == "analysis"].reset_index(drop=True)
     if limit:
         reg = reg.head(limit).reset_index(drop=True)
-    elif (len(reg), int(reg["y"].sum()), int((reg["y"] == 0).sum())) != tuple(EXPECTED_D2.values()):
-        raise D2StoreError(f"D2 cohort is {len(reg)} ({int(reg['y'].sum())} AD), expected {EXPECTED_D2}")
     if hashes is not None:
         reg["sha256"] = [hashes.sha256(p) for p in reg["path"]]
     return reg
+
+
+def counts(reg: pd.DataFrame) -> dict:
+    return {"n": int(len(reg)), "AD": int((reg["y"] == 1).sum()), "HC": int((reg["y"] == 0).sum())}
+
+
+def check_counts(reg: pd.DataFrame, expected: dict, what: str) -> None:
+    if counts(reg) != {k: int(expected[k]) for k in ("n", "AD", "HC")}:
+        raise D2StoreError(f"{what} is {counts(reg)}, expected {expected}")
+
+
+def split_cohort(inventory: pd.DataFrame, spec: dict | None = None,
+                 strict: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(inventory with a ``cohort`` column, excluded rows with amendment / reason / electrodes). Every excluded
+    participant must be in the inventory with its recorded diagnosis, and the analysis cohort must have the
+    amendment's counts (verified against the participant metadata, ``y``); nothing else is removed."""
+    spec = spec or cohort_spec()
+    inv = inventory.copy()
+    inv["cohort"] = "analysis"
+    rows = []
+    for e in spec["excluded"]:
+        hit = inv.index[inv["key"] == e["key"]]
+        if not len(hit) and not strict:
+            continue
+        if len(hit) != 1:
+            raise D2StoreError(f"excluded participant {e['key']} (amendment {e['amendment']}) is not in the inventory")
+        if int(inv.at[hit[0], "y"]) != int(e["diagnosis"] == "AD"):
+            raise D2StoreError(f"{e['key']}: participant sheet diagnosis differs from amendment {e['amendment']}")
+        inv.at[hit[0], "cohort"] = f"excluded ({e['amendment']})"
+        rows.append({"key": e["key"], "amendment": e["amendment"], "diagnosis": e["diagnosis"],
+                     "electrodes": ",".join(x["d3"] for x in e["electrodes"]),
+                     "edf_channels": ",".join(x["edf_label"] for x in e["electrodes"]), "reason": e["reason"],
+                     "decided_on": spec["decided_on"][e["amendment"]]})
+    if strict:
+        check_counts(inv[inv["cohort"] == "analysis"], spec["analysis"], "D2 analysis cohort")
+    return inv, pd.DataFrame(rows, columns=["key", "amendment", "diagnosis", "electrodes", "edf_channels", "reason",
+                                            "decided_on"])
+
+
+def exclusion_record(inventory: pd.DataFrame, spec: dict | None = None, strict: bool = True) -> dict:
+    """The cohort record of manifests: amendment(s), counts, and per excluded participant its identity (key,
+    recording file name, content SHA-256 if hashed), electrodes, reason and decision date."""
+    spec = spec or cohort_spec()
+    inv, ex = split_cohort(inventory, spec, strict)
+    by = inv.set_index("key")
+    out = []
+    for r in ex.to_dict("records"):
+        out.append({**r, "recording": Path(str(by.at[r["key"], "path"])).name,
+                    "sha256": by.at[r["key"], "sha256"] if "sha256" in by else None})
+    return {"amendments": spec["amendments"], "hash": spec["hash"], "inventory": counts(inv),
+            "analysis": counts(inv[inv["cohort"] == "analysis"]), "excluded": out, "complete_inventory": strict,
+            "raw_recordings": "unchanged (read only)"}
 
 
 TECHNICAL = ("label", "sampling_frequency", "physical_dimension", "prefiltering", "transducer_type",
@@ -298,6 +414,25 @@ def unit_audit(reg: pd.DataFrame, cfg: dict, table: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def exclusion_evidence(units: pd.DataFrame, spec: dict | None = None) -> pd.DataFrame:
+    """Re-check, from a unit audit (``unit_audit`` of the inventory), the evidence an exclusion amendment recorded:
+    the excluded recording's selected channels that are not ``ok`` are exactly the recorded electrodes, each with an
+    accepted finding (``flat`` / ``no_eeg_below_quantization``). One row per excluded participant."""
+    spec = spec or cohort_spec()
+    rows = []
+    for e in spec["excluded"]:
+        u = units[(units["key"] == e["key"]) & (units["selected_as"].fillna("") != "")]
+        bad = u[u["finding"] != "ok"]
+        want = sorted(x["d3"] for x in e["electrodes"])
+        got = sorted(bad["selected_as"])
+        findings = sorted(set(bad["finding"]))
+        rows.append({"key": e["key"], "amendment": e["amendment"], "recorded_electrodes": ",".join(want),
+                     "audited_electrodes_without_eeg": ",".join(got), "findings": ",".join(findings),
+                     "evidence_confirmed": bool(len(u) and got == want
+                                                and set(findings) <= set(e["accepted_findings"]))})
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------------------------- build
 def subject_identity(cfg: dict, rec, geometry_hash: str, table: dict) -> dict:
     from ..sourcegraphs.build import METADATA_FIELDS
@@ -354,7 +489,14 @@ def run(paths: dict, processed, inverse: str, geometry: dict, subjects_dir, limi
         atomic_write_json(run_dir / "run_identity.json", {"config_hash": config_hash(cfg), "config": cfg,
                                                          "git_commit": git_commit(),
                                                          "created_at": datetime.now(timezone.utc).isoformat()})
-    reg = registry(paths, limit, InputHashes(cache / "input_sha256.json"))
+    inventory = registry(paths, None, InputHashes(cache / "input_sha256.json"), cohort="inventory",
+                         strict=limit is None)
+    cohort = exclusion_record(inventory, strict=limit is None)
+    reg = inventory[inventory["cohort"] == "analysis"].reset_index(drop=True)
+    if limit:
+        reg = reg.head(limit).reset_index(drop=True)
+    assert_no_excluded(reg["key"], "D2 store build")
+    atomic_write_json(run_dir / "cohort.json", cohort)
     ctxs = ctxs or contexts(cfg, geometry, subjects_dir, cache)
     ctx = ctxs[geometry["hash"]]
     loader = partial(load_d2, table=table, geometry=geometry)
@@ -394,7 +536,8 @@ def run(paths: dict, processed, inverse: str, geometry: dict, subjects_dir, limi
                                "geometry": {k: geometry[k] for k in ("source", "frame", "hash")}
                                | {"reference_hash": geometry.get("reference_hash")},
                                "base_d3_config_hash": cfg["cross_dataset"]["base_d3_config_hash"],
-                               "split": "none (all D2 participants; the ds004504 partition does not apply)"}}
+                               "split": "none (all D2 analysis participants; the ds004504 partition does not "
+                                        "apply)", "cohort": cohort}}
     return build.assemble(run_dir, run10, reg, cfg, idents, {"D2": []}, limit, ctxs, split=False,
                           extra_manifest=extra, kind="xd2_assembly")
 
@@ -434,7 +577,13 @@ def validate(run_dir, expected: dict | None = EXPECTED_D2, check_arrays: bool = 
     checks["diagnosis labels consistent (AD = 1, HC = 0)"] = (labels_ok, "")
     if expected and not (man.get("registry") or {}).get("subset_limit"):
         got = (len(ok), int(ok["y"].sum()), int((ok["y"] == 0).sum()))
-        checks[f"cohort {expected}"] = (got == tuple(expected.values()), got)
+        checks[f"cohort {expected}"] = (got == tuple(expected[k] for k in ("n", "AD", "HC")), got)
+    spec = cohort_spec()
+    leaked = sorted(excluded_keys(spec) & (set(windows["key"]) | set(subjects["key"])))
+    checks[f"no participant excluded by amendment {spec['amendments']} in the store"] = (not leaked, leaked)
+    rec = cfg.get("cohort") or {}
+    checks["store built with the amendment in force (cohort hash)"] = (rec.get("hash") == spec["hash"],
+                                                                      rec.get("hash"))
     n_col = "n_tenfold" if man.get("mode") == "A_xu_tenfold" else "n_windows_kept"
     mism = [k for k, n in per.items() if k not in set(ok["key"]) or int(ok.set_index("key").loc[k, n_col]) != n]
     checks[f"windows per participant equal subjects.csv {n_col}"] = (not mism, mism[:5])
@@ -482,4 +631,6 @@ def open_d2(run_dir, keys: tuple | None = None):
     gid = json.loads((run_dir / "manifest.json").read_text()).get("graph_run_id")
     if not v or not v.get("passed") or v.get("graph_run_id") != gid:
         raise D2StoreError(f"{run_dir.name} is not validated for graph run {gid} (crossdataset.d2store.validate)")
-    return GraphStore.load(run_dir, keys=keys)
+    st = GraphStore.load(run_dir, keys=keys)
+    assert_no_excluded(set(st.windows["key"]) | set(st.subjects["key"]), f"D2 store {run_dir.name}")
+    return st

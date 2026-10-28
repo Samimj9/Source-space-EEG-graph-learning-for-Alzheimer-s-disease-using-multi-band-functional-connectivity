@@ -768,7 +768,9 @@ fields only), the D3 stores (read only), the inherited atlas / graph decisions, 
 D2 (durations, selection, candidate windows; no source model, no graph).
 
 **Part B (only with the author's written authorization):** the matched-channel D2 stores (LCMV and wMNE, modes B and
-A, lobes12) from the 23 original resting-state EDFs, their validation, the compatibility report, the label-blind
+A, lobes12) from the 22 resting-state EDFs of the D2 analysis cohort (the 23 recordings as provided minus D2-19,
+excluded by protocol amendment X1: four matched electrodes without recorded EEG; it stays in the inventory and every
+Part A audit), their validation, the compatibility report, the label-blind
 shift diagnostics and D2 QC, and the harmonization manifest.
 
 **Part C (author):** the frozen campaign (configs/cross_dataset/campaign.yaml) is recorded before any training.
@@ -783,14 +785,18 @@ display(pd.read_csv(CROSS + '/audit/channel_mapping_audit.csv'))
 display(pd.read_csv(CROSS + '/audit/d2_edf_headers.csv'))
 print('D2 EDF annotation texts (recording-condition evidence, decision D6):',
       json.load(open(CROSS + '/audit/audit.json'))['d2_edf_annotations'])
-display(pd.read_csv(CROSS + '/audit/demographics.csv').round(1))          # age / sex by diagnosis (descriptive)
+print(json.dumps({k: v for k, v in json.load(open(CROSS + '/audit/d2_cohort.json')).items() if k != 'excluded'}))
+display(pd.DataFrame(json.load(open(CROSS + '/audit/d2_cohort.json'))['excluded']).drop(columns=['sha256'], errors='ignore'))
+display(pd.read_csv(CROSS + '/audit/demographics.csv').round(1))          # analysis cohort: D2 = 22 (descriptive)
+display(pd.read_csv(CROSS + '/audit/demographics_d2_inventory.csv').round(1))   # the 23-recording inventory
 display(pd.read_csv(CROSS + '/audit/age_overlap_feasibility.csv'))
 print(json.dumps(json.load(open(CROSS + '/audit/d2_filter_response.json'))['magnitude_db'], indent=1))"""),
         md("""## Part A2 · Recording-level inspection (label-blind; no source model, no graph)
 
 `inspect-d2-units`: every EDF channel of every D2 recording (unit, physical / digital range, the amplitude MNE
 returns after the band-pass); recordings with mixed `V` / `uV` headers are listed channel by channel; an implausible
-SELECTED channel fails. `inspect-d2`: every D2 recording processed exactly as the store will be, WITHOUT and WITH the
+SELECTED channel of an analysis-cohort recording fails; for D2-19 (amendment X1) the recorded evidence (no EEG in T4,
+T5, T6, O1) is re-checked and must still hold. `inspect-d2`: every analysis-cohort D2 recording (22; D2-19 listed, not processed) processed exactly as the store will be, WITHOUT and WITH the
 acquisition-specific 50 Hz notch (same crops and pieces): 50 Hz power, the 100 Hz harmonic, residual narrowband peaks,
 covariance change (the LCMV input), accepted windows and the power change in every analysis band; `diag_*` columns
 are the first audit's diagnostic notch on resampled segments (not the preprocessing notch). `inspect-d3-line`: the
@@ -802,9 +808,9 @@ for step in ('inspect-d2-units', 'inspect-d2', 'inspect-d3-line'):   # every aud
     except RuntimeError as exc:
         FINDINGS[step] = str(exc)
 units = pd.read_csv(CROSS + '/audit/d2_units.csv')
-display(units[(units['selected_as'].notna()) & (units['finding'] != 'ok')])
+display(units[(units['selected_as'].notna()) & (units['finding'] != 'ok')])   # expected: D2-19 only (X1)
 display(pd.read_csv(CROSS + '/audit/d2_inspection.csv').filter(
-    regex='key|selected_duration|windows_accepted|flip|line_ratio|line_variance|harmonic|covariance|band_power|peaks_after|mixed|status').round(3))
+    regex='key|selected_duration|windows_accepted|flip|line_ratio|line_variance|harmonic|covariance|band_power|peaks_after|mixed|cohort|status').round(3))
 print(json.dumps(json.load(open(CROSS + '/audit/d2_notch_response.json'))['cascade_db'], indent=1))
 if FINDINGS:
     raise RuntimeError(f'Part A2 findings (send them; nothing is built): {sorted(FINDINGS)}')"""),
@@ -837,7 +843,7 @@ else:
 def cross_direction_notebook(direction: str) -> dict:
     src, tgt = direction.split("_to_")
     who = ("the 52 frozen D3 development participants (the 13 D3 holdout participants are never used)"
-           if src == "D3" else "all 23 D2 participants; plus the source-only D2 cross-validation (5 folds x 1 repeat, "
+           if src == "D3" else "the 22 D2 participants of the analysis cohort (D2-19 excluded, amendment X1); plus the source-only D2 cross-validation (5 folds x 1 repeat, "
                                   "the primary D3 protocol)")
     return notebook([
         md(f"""# Cross-dataset {'01' if src == 'D3' else '02'} · {src} -> {tgt} (zero-shot)
