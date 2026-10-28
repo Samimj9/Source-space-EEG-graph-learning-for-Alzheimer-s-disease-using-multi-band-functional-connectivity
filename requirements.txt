@@ -11,5 +11,7 @@ tqdm>=4.66       # progress bars (preinstalled in Colab)
 # umap-learn      # optional: UMAP projections in dataset-shift figures
 torch>=2.2        # preinstalled in Colab; not reinstalled there
 pytest>=8.0
+nibabel>=5.0     # reads the fsaverage .annot parcellations (mne.read_labels_from_annot); an optional mne
+                 # dependency, preinstalled in Colab but not in the restored Exp 7 environment (numerical_env)
 pymatreader>=0.0.32  # reads EEGLAB .set files saved in MATLAB v7.3 format (Dataset 3, ds004504)
 edfio==0.4.18  # writes the synthetic EDFs of the test suite; required: the suite must run with zero dependency skips

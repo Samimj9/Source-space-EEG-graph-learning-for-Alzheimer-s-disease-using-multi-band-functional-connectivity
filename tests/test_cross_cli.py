@@ -96,3 +96,17 @@ def test_the_analysis_stage_still_parses_for_status(paths):
         r = cli(f, "status", "--stage", stage)
         assert r.returncode == 0, r.stderr                         # markers only; nothing is run or written
     assert records(processed) == {}
+
+
+def test_the_restored_environment_installs_what_the_store_build_imports():
+    """The restored Exp 7 interpreter (numerical_env) installs only requirements.txt: every package the D2 store
+    build needs beyond the pinned numerics must be listed there (nibabel: mne.read_labels_from_annot)."""
+    import re
+
+    from adgraph import numerical_env
+
+    reqs = {re.split(r"[<>=\s#]", ln.strip(), maxsplit=1)[0].lower()
+            for ln in (ROOT / "requirements.txt").read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"mne", "nibabel", "edfio", "pymatreader", "openpyxl"} <= reqs
+    cmds = numerical_env.restore_commands({"python": "3.13.5", "numpy": "2.0.0"}, "/tmp/x", ROOT)
+    assert any("-r" in c and c[c.index("-r") + 1].endswith("requirements.txt") for c in cmds)
