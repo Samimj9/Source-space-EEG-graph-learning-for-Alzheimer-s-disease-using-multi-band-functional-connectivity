@@ -3702,6 +3702,19 @@ checkpoints. Tests: `tests/test_cross_exclusion.py`, `tests/test_cross_dataset.p
 any graph / fit / fold / score, reproducible hashes and manifests, preserved 23-recording inventory, unchanged gates).
 No D2 graph was built.
 
+## 66. Cross-dataset D2: real-data Part A passed, D2 stores built and validated (2026-10-28 / 29; before the freeze)
+
+Part A (pin `6549e60`): audit, unit audit (X1 evidence re-confirmed), notch audit and D3 line-noise audit passed on
+the real recordings. After the D2 notch the 50 Hz variance fraction is <= 0.55 % (before 3-61 %), analysis-band power
+is unchanged (about 0.0001 dB), and accepted windows are 154-278 per recording; D3 shows no line noise. Part B (author
+authorization `build_d2`, 2026-10-28; pin `3c94f32`, which adds `nibabel` to requirements.txt because the restored
+Exp 7 interpreter lacked it): LCMV `ee8a30d71571` and wMNE `fcf2516356de` stores, modes B and A, 22 participants,
+every validation check and all four compatibility reports passed; D2 QC (labels masked) found no category A
+participant. Descriptive shift: more delta / less gamma and beta power in D2; wMNE PLV lower in D2 (theta, beta,
+gamma; |d| up to 1.4), LCMV connectivity nearly unshifted. Residual caveats: a 1.0 Hz spectral peak in 7 D2 recordings
+(delta), eyes condition unknown, age imbalance. No configuration was changed after these results; details in
+docs/cross_dataset/design.md 12.9. The campaign is not yet frozen; no model trained; no target label read.
+
 ## Open items requiring author confirmation
 
 1. Reasons for v1 choices:

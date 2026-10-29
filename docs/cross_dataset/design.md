@@ -1,6 +1,6 @@
 # Cross-dataset generalization D3 <-> D2 on a matched 19-electrode representation: experimental design
 
-Version 1.3 (2026-10-28), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-65. **Status: designed,
+Version 1.4 (2026-10-29), branch `claude/cross-dataset-d3-d2-19ch`, methodology log entries 61-66. **Status: designed,
 synthetically validated, author decisions D1-D10 recorded (section 12), protocol amendment X1 recorded (D2-19
 excluded, section 12.8; post-audit, pre-build); only the audit-only Part A of notebook 00 is authorized. No real-data graph has been built, the campaign is not frozen, no model has been trained and no target
 label has been evaluated.** The stages that touch real data beyond the audit (the D2 stores, the training, the
@@ -465,6 +465,46 @@ checkpoints and every development prediction are unchanged.
 **Consequences for interpretation.** The D2 cohort is 22 (9 AD / 13 HC); D2 -> D3 trains on 9 AD participants and
 D3 -> D2 AUC / sensitivity rest on 9 AD participants (wider CIs). The exclusion removes one AD participant with poor
 recording quality; quality notes still concern 6 of 9 AD vs 3 of 13 HC (section 12.4).
+
+### 12.9 Real-data Part A and Part B review (2026-10-28 / 29; label-blind; before the freeze)
+
+Code pin `3c94f32` (build) / `6549e60` (Part A). Nothing below combines an EEG quantity with a diagnosis.
+
+**Part A1 (audit): passed.** Inventory 23 (10 AD / 13 HC), analysis cohort 22 (9 AD / 13 HC; X1). Mapping table
+`e0a48bf3c4052417`, layout SHA-256 verified, 19 channels present once in all 23 EDFs with identical picks, largest
+angle between the D3 template position and the D2 `.loc` position 12.4 deg (F8). The six D3 stores verified, the
+inherited decisions (lobes12, dense, A2) and the cohort check passed. EDF annotations contain only the numeric codes
+33273, 33277, 33552: the D2 eyes condition stays unknown (D6).
+
+**Part A2: passed.** Units: only D2-19 mixed; the X1 evidence re-confirmed (T4, T5, T6, O1 and the unselected CP1
+constant); every selected channel of the other 22 recordings plausible. 50 Hz in the 22 recordings, before -> after
+the notch: line ratio +13.7 to +29.1 dB -> -9.7 to -18.8 dB (vs 35-45 Hz), line variance fraction 3-61 % -> <= 0.55 %,
+100 Hz harmonic -52.8 to -57.7 dB; analysis-band power changed by about 0.0001 dB (delta-gamma); covariance changed
+by 5-99 % (the line noise dominated the LCMV input); accepted windows with the notch 154-278 per recording (without:
+166-291; D2-15 +70, D2-13 -33: the adaptive rejection follows each recording's amplitude). Residual narrowband
+peaks: alpha (8-10.5 Hz, physiological), 51.5 Hz (D2-2, mains drift just outside the stop band, above the band-pass)
+and 101 Hz (D2-9, above the band-pass), and a 1.0 Hz peak in 7 recordings (delta; most likely the spectral shape at
+the 0.5 Hz high-pass edge, possibly pulse; recorded as a delta-band caveat). D3: line ratio median -56.7 dB (max
+-29.1 dB), line variance 0 %: D3 is not notched, as designed.
+
+**Part B (authorized by the author, 2026-10-28): the four D2 stores built and validated.** LCMV
+`graphsXD2L{,10}_v1_ee8a30d71571`, wMNE `graphsXD2W{,10}_v1_fcf2516356de`; 22 participants each; every validation
+check passed (no boundary crossing, five-minute selection, 10 s / 1 s windows, cohort 22 / 9 / 13, no X1 participant,
+amendment hash, weights, 19 channels, lobes12, five bands, finite arrays, valid adjacencies). The two-participant smoke
+stores (`..._limit2`) passed first and are never used. Compatibility passed in all four contexts (only the documented
+D2 configuration keys differ). Label-blind D2 QC: no category A participant; category B 12-15 and multivariate
+outliers 4-8 of 22 depending on the context (reported, nobody excluded or reweighted; D2-3 and D2-22 are outliers in
+all four contexts).
+
+**Dataset shift (standardized difference D2 - D3 of participant medians, descriptive).** Sensor relative power: more
+delta in D2 (+0.50 mode B / +0.69 mode A), less gamma (-0.65 / -0.84) and beta (-0.29 / -0.51); consistent with the
+missing ASR / ICA (eye activity), the older D2 AD group and the band-pass difference (section 4.3). Connectivity:
+LCMV PLV and |ciPLV| shift little (|d| <= 0.61); wMNE PLV is lower in D2 in theta (-0.89 / -0.73), beta (-1.40 /
+-1.23) and gamma (-1.28 / -1.07). A larger acquisition shift is therefore expected for wMNE PLV inputs than for
+LCMV; this is reported, not corrected (nothing is fitted on the target). Windows kept: D2 median 242 vs D3 258.
+
+**Assessment.** No blocker: the representation is identical where designed, every difference is a documented one,
+and the remaining shifts are described before any model is trained. The campaign can be frozen at the build pin.
 
 ### 12.6 Part A (audit only; authorized 2026-10-26)
 
